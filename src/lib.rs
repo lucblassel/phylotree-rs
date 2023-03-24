@@ -11,10 +11,7 @@ pub struct Tree<T> {
     nodes: Vec<TreeNode<T>>,
 }
 
-impl<T> Tree<T>
-where
-    T: Debug,
-{
+impl<T> Tree<T> {
     /// Creates a Tree with a single root node
     pub fn new(val: T) -> Self {
         Self {
@@ -86,16 +83,29 @@ where
             .map(|node| node.idx)
             .collect()
     }
+}
 
+impl<T> Tree<T>
+where
+    T: Debug,
+{
     /// Recursive function that adds node representation to a printable tree builder
-    fn print_nodes(&self, root_idx: usize, output_tree: &mut TreeBuilder) {
+    fn print_nodes(&self, root_idx: usize, output_tree: &mut TreeBuilder, debug: bool) {
         let root = self.get(root_idx);
         if root.children.is_empty() {
-            output_tree.add_empty_child(root.to_string());
+            if debug {
+                output_tree.add_empty_child(format!("{root:?}"));
+            } else {
+                output_tree.add_empty_child(root.to_string());
+            }
         } else {
-            output_tree.begin_child(root.to_string());
+            if debug {
+                output_tree.begin_child(format!("{root:?}"));
+            } else {
+                output_tree.begin_child(root.to_string());
+            }
             for child_idx in root.children.iter() {
-                self.print_nodes(*child_idx, output_tree);
+                self.print_nodes(*child_idx, output_tree, debug);
             }
             output_tree.end_child();
         }
@@ -105,10 +115,50 @@ where
     pub fn print(&self) {
         let mut builder = TreeBuilder::new(self.get(0).to_string());
         for child_idx in self.get(0).children.iter() {
-            self.print_nodes(*child_idx, &mut builder);
+            self.print_nodes(*child_idx, &mut builder, false);
         }
         let tree = builder.build();
         print_tree(&tree).ok();
+    }
+
+    /// Print the tree to the cli
+    pub fn print_debug(&self) {
+        let mut builder = TreeBuilder::new(format!("{:?}", self.get(0)));
+        for child_idx in self.get(0).children.iter() {
+            self.print_nodes(*child_idx, &mut builder, true);
+        }
+        let tree = builder.build();
+        print_tree(&tree).ok();
+    }
+}
+
+impl<T> Tree<T>
+where
+    T: Display,
+{
+    // Generate newick representation of tree
+    fn to_newick_impl(&self, root: usize) -> String {
+        if self.get(root).children.is_empty() {
+            self.get(root).val.to_string()
+        } else {
+            "(".to_string()
+                + &self
+                    .get(root)
+                    .children
+                    .iter()
+                    .map(|child_idx| match self.get(*child_idx).length {
+                        Some(l) => format!("{}:{l}", self.to_newick_impl(*child_idx)),
+                        None => self.to_newick_impl(*child_idx),
+                    })
+                    .collect::<Vec<String>>()
+                    .join(",")
+                + ")"
+                + &(self.get(root).val.to_string())
+        }
+    }
+
+    pub fn to_newick(&self) -> String {
+        self.to_newick_impl(0) + ";"
     }
 }
 
@@ -140,13 +190,12 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree<String> {
     }
 
     for (i, idx) in next_deq.iter().enumerate() {
-        tree.get_mut(*idx).set_val(format!("Leaf_{i}"));
+        tree.get_mut(*idx).set_val(format!("Tip_{i}"));
     }
 
     tree
 }
 
-#[derive(Debug)]
 pub struct TreeNode<T> {
     /// Index of the node
     pub idx: usize,
@@ -160,10 +209,7 @@ pub struct TreeNode<T> {
     pub length: Option<f32>,
 }
 
-impl<T> TreeNode<T>
-where
-    T: Debug,
-{
+impl<T> TreeNode<T> {
     /// Creates a new TreeNode
     pub fn new(idx: usize, val: T, parent: Option<usize>) -> Self {
         Self {
@@ -204,6 +250,19 @@ where
     }
 }
 
+impl<T> Debug for TreeNode<T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?} <I:{}> (L: {:?})[P: {:?}]",
+            self.val, self.idx, self.length, self.parent
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +273,19 @@ mod tests {
         tree.add_child(3, 0); // root.right (2)
         tree.add_child(4, 1); // root.left.left (3)
         tree.add_child(5, 1); // root.left.right (4)
+
+        tree
+    }
+
+    /// Generates example tree from the newick format wikipedia page
+    /// https://en.wikipedia.org/wiki/Newick_format#Examples
+    fn build_tree_with_lengths() -> Tree<&'static str> {
+        let mut tree = Tree::new("F");
+        tree.add_child_with_len("A", 0, Some(0.1));
+        tree.add_child_with_len("B", 0, Some(0.2));
+        tree.add_child_with_len("E", 0, Some(0.5));
+        tree.add_child_with_len("C", 3, Some(0.3));
+        tree.add_child_with_len("D", 3, Some(0.4));
 
         tree
     }
@@ -259,5 +331,11 @@ mod tests {
             let tree = generate_tree(size, false);
             assert_eq!(tree.get_leaves().len(), size);
         }
+    }
+
+    #[test]
+    fn to_newick() {
+        let tree = build_tree_with_lengths();
+        assert_eq!("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", tree.to_newick());
     }
 }

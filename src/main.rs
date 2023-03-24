@@ -1,6 +1,7 @@
 use phylotree::*;
+
 fn main() {
-    println!("Generating random binary tree");
-    let random = generate_tree(10000, true);
-    random.print();
+    let random = generate_tree(100, true);
+    let newick = random.to_newick();
+    println!("{newick}")
 }
