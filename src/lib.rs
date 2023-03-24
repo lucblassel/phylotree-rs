@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    fmt::{Debug, Display},
+    fmt::{Debug, Display}, path::Path, fs,
 };
 
 use ptree::{print_tree, TreeBuilder};
@@ -136,7 +136,7 @@ impl<T> Tree<T>
 where
     T: Display,
 {
-    // Generate newick representation of tree
+    /// Generate newick representation of tree
     fn to_newick_impl(&self, root: usize) -> String {
         if self.get(root).children.is_empty() {
             self.get(root).val.to_string()
@@ -157,8 +157,14 @@ where
         }
     }
 
+    /// Generate newick representation of tree
     pub fn to_newick(&self) -> String {
         self.to_newick_impl(0) + ";"
+    }
+
+    /// Saves the tree to a newick file
+    pub fn to_file(&self, path: &Path) {
+        fs::write(path, self.to_newick()).unwrap()
     }
 }
 
