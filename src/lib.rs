@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    fmt::{Debug, Display}, path::Path, fs,
+    fmt::{Debug, Display},
+    fs,
+    iter::zip,
+    path::Path,
 };
 
 use ptree::{print_tree, TreeBuilder};
@@ -65,6 +68,25 @@ impl<T> Tree<T> {
         indices
     }
 
+    /// Returns the indices in the level-order traversal
+    pub fn levelorder(&self, root: usize) -> Vec<usize> {
+        if root >= self.nodes.len() {
+            panic!("Leaf number {root} does not exist in this tree")
+        }
+        let mut indices = vec![];
+        let mut queue = VecDeque::new();
+        queue.push_back(root);
+        while !queue.is_empty() {
+            let root_idx = queue.pop_front().unwrap();
+            indices.push(root_idx);
+            for child_idx in self.get(root_idx).children.iter() {
+                queue.push_back(*child_idx);
+            }
+        }
+
+        indices
+    }
+
     /// Gets reference to a specified node in the tree
     pub fn get(&self, node: usize) -> &TreeNode<T> {
         &self.nodes[node]
@@ -82,6 +104,42 @@ impl<T> Tree<T> {
             .filter(|node| node.children.is_empty())
             .map(|node| node.idx)
             .collect()
+    }
+
+    /// Returns the path from the node to the root
+    pub fn get_path_from_root(&self, node: usize) -> Vec<usize> {
+        let mut path = vec![];
+        let mut current_node = node;
+        loop {
+            path.push(current_node);
+            match self.get(current_node).parent {
+                Some(parent) => current_node = parent,
+                None => break,
+            }
+        }
+
+        path.into_iter().rev().collect()
+    }
+
+    /// Gets the most recent common ancestor between two tree nodes
+    pub fn get_common_ancestor(&self, source: usize, target: usize) -> usize {
+        if source == target {
+            return source;
+        }
+        let root_to_source = self.get_path_from_root(source);
+        let root_to_target = self.get_path_from_root(target);
+
+        let cursor = zip(root_to_source.iter(), root_to_target.iter())
+            .enumerate()
+            .filter(|(_, (s, t))| s != t)
+            .map(|(idx, _)| idx)
+            .next()
+            .unwrap_or_else(|| {
+                // One node is a child of the other
+                root_to_source.len().min(root_to_target.len())
+            });
+
+        root_to_source[cursor - 1]
     }
 }
 
@@ -273,12 +331,18 @@ where
 mod tests {
     use super::*;
 
-    fn build_simple_tree() -> Tree<i32> {
-        let mut tree = Tree::new(1);
-        tree.add_child(2, 0); // root.left (1)
-        tree.add_child(3, 0); // root.right (2)
-        tree.add_child(4, 1); // root.left.left (3)
-        tree.add_child(5, 1); // root.left.right (4)
+    /// Generates example tree from the tree traversal wikipedia page
+    /// https://en.wikipedia.org/wiki/Tree_traversal#Depth-first_search
+    fn build_simple_tree() -> Tree<&'static str> {
+        let mut tree = Tree::new("F"); // 0
+        tree.add_child("B", 0); // 1
+        tree.add_child("G", 0); // 2
+        tree.add_child("A", 1); // 3
+        tree.add_child("D", 1); // 4
+        tree.add_child("I", 2); // 5
+        tree.add_child("C", 4); // 6
+        tree.add_child("E", 4); // 7
+        tree.add_child("H", 5); // 8
 
         tree
     }
@@ -311,21 +375,66 @@ mod tests {
     fn traverse_preorder() {
         let tree = build_simple_tree();
         let values = get_values(&(tree.preorder(0)), &tree);
-        assert_eq!(values, vec![1, 2, 4, 5, 3])
+        assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
     }
 
     #[test]
     fn traverse_postorder() {
         let tree = build_simple_tree();
         let values = get_values(&(tree.postorder(0)), &tree);
-        assert_eq!(values, vec![4, 5, 2, 3, 1])
+        assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
+    }
+
+    #[test]
+    fn traverse_levelorder() {
+        let tree = build_simple_tree();
+        let values = get_values(&(tree.levelorder(0)), &tree);
+        assert_eq!(values, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
+    }
+
+    #[test]
+    fn path_from_root() {
+        let tree = build_simple_tree();
+        let values = get_values(&(tree.get_path_from_root(7)), &tree);
+        assert_eq!(values, vec!["F", "B", "D", "E"])
+    }
+
+    // let mut tree = Tree::new("F"); // 0
+    // tree.add_child("B", 0); // 1
+    // tree.add_child("G", 0); // 2
+    // tree.add_child("A", 1); // 3
+    // tree.add_child("D", 1); // 4
+    // tree.add_child("I", 2); // 5
+    // tree.add_child("C", 4); // 6
+    // tree.add_child("E", 4); // 7
+    // tree.add_child("H", 5); // 8
+
+    #[test]
+    fn last_common_ancestor() {
+        let test_cases = vec![
+            ((3, 7), 1), // (A,E) -> B
+            ((6, 8), 0), // (C,H) -> F
+            ((3, 3), 3), // (A,A) -> A
+            ((8, 5), 5), // (H,I) -> I
+            ((4, 7), 4), // (D,E) -> D
+        ];
+        let tree = build_simple_tree();
+        for ((source, target), ancestor) in test_cases {
+            println!(
+                "Testing: ({}, {}) -> {}",
+                tree.get(source).val,
+                tree.get(target).val,
+                tree.get(ancestor).val
+            );
+            assert_eq!(ancestor, tree.get_common_ancestor(source, target));
+        }
     }
 
     #[test]
     fn get_correct_leaves() {
         let tree = build_simple_tree();
         let values = get_values(&(tree.get_leaves()), &tree);
-        assert_eq!(values, vec![3, 4, 5])
+        assert_eq!(values, vec!["A", "C", "E", "H"])
     }
 
     #[test]

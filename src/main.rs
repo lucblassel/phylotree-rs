@@ -1,12 +1,12 @@
-use phylotree::*;
 use clap::Parser;
+use phylotree::*;
 use std::path::PathBuf;
 
 /// A simple command line tool to generate a random Phylogenentic tree
 #[derive(Parser, Debug)]
 struct Args {
     /// Number of leaves in the tree
-    #[arg(short, long, default_value_t=20)]
+    #[arg(short, long, default_value_t = 20)]
     size: usize,
 
     /// Generate uniform branch lengths
@@ -17,7 +17,6 @@ struct Args {
     #[arg(short, long)]
     output: PathBuf,
 }
-
 
 fn main() {
     let args = Args::parse();
