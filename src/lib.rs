@@ -1,3 +1,5 @@
+#![feature(is_some_and)]
+
 use std::{
     collections::VecDeque,
     fmt::{Debug, Display},
@@ -9,6 +11,7 @@ use std::{
 use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
 
+/// A Vector backed Tree structure
 #[derive(Debug)]
 pub struct Tree<T> {
     nodes: Vec<TreeNode<T>>,
@@ -92,6 +95,21 @@ impl<T> Tree<T> {
         &self.nodes[node]
     }
 
+    /// Prunes subtree at given node
+    pub fn prune(&mut self, node: usize) {
+        let children = self.get(node).children.clone();
+        for child in children {
+            self.prune(child)
+        }
+        if let Some(p_idx) = self.get(node).parent {
+            self.get_mut(p_idx).children.retain(|&val| val != node);
+        }
+        let n = self.get_mut(node);
+        n.length = None;
+        n.parent = None;
+        n.children = vec![];
+    }
+
     /// Gets mutable reference to a specified node in the tree
     pub fn get_mut(&mut self, node: usize) -> &mut TreeNode<T> {
         &mut self.nodes[node]
@@ -140,6 +158,46 @@ impl<T> Tree<T> {
             });
 
         root_to_source[cursor - 1]
+    }
+
+    pub fn get_distance(&self, source: usize, target: usize) -> (Option<f32>, usize) {
+        let mut dist = 0.0;
+        let mut branches = 0;
+        let mut all_dists = true;
+
+        if source == target {
+            return (None, 0);
+        }
+
+        let root_to_source = self.get_path_from_root(source);
+        let root_to_target = self.get_path_from_root(target);
+
+        let cursor = zip(root_to_source.iter(), root_to_target.iter())
+            .enumerate()
+            .filter(|(_, (s, t))| s != t)
+            .map(|(idx, _)| idx)
+            .next()
+            .unwrap_or_else(|| {
+                // One node is a child of the other
+                root_to_source.len().min(root_to_target.len())
+            });
+
+        for list in vec![root_to_source, root_to_target] {
+            for node in list.iter().skip(cursor) {
+                if let Some(d) = self.get(*node).length {
+                    dist += d;
+                } else {
+                    all_dists = false;
+                }
+                branches += 1;
+            }
+        }
+
+        if all_dists {
+            (Some(dist), branches)
+        } else {
+            (None, branches)
+        }
     }
 }
 
@@ -260,6 +318,7 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree<String> {
     tree
 }
 
+/// A node of the Tree
 pub struct TreeNode<T> {
     /// Index of the node
     pub idx: usize,
@@ -350,12 +409,12 @@ mod tests {
     /// Generates example tree from the newick format wikipedia page
     /// https://en.wikipedia.org/wiki/Newick_format#Examples
     fn build_tree_with_lengths() -> Tree<&'static str> {
-        let mut tree = Tree::new("F");
-        tree.add_child_with_len("A", 0, Some(0.1));
-        tree.add_child_with_len("B", 0, Some(0.2));
-        tree.add_child_with_len("E", 0, Some(0.5));
-        tree.add_child_with_len("C", 3, Some(0.3));
-        tree.add_child_with_len("D", 3, Some(0.4));
+        let mut tree = Tree::new("F"); // 0
+        tree.add_child_with_len("A", 0, Some(0.1)); // 1
+        tree.add_child_with_len("B", 0, Some(0.2)); // 2
+        tree.add_child_with_len("E", 0, Some(0.5)); // 3
+        tree.add_child_with_len("C", 3, Some(0.3)); // 4
+        tree.add_child_with_len("D", 3, Some(0.4)); // 5
 
         tree
     }
@@ -393,21 +452,19 @@ mod tests {
     }
 
     #[test]
+    fn prune_tree() {
+        let mut tree = build_simple_tree();
+        tree.prune(4); // prune D subtree
+        let values = get_values(&(tree.preorder(0)), &tree);
+        assert_eq!(values, vec!["F", "B", "A", "G", "I", "H"]);
+    }
+
+    #[test]
     fn path_from_root() {
         let tree = build_simple_tree();
         let values = get_values(&(tree.get_path_from_root(7)), &tree);
         assert_eq!(values, vec!["F", "B", "D", "E"])
     }
-
-    // let mut tree = Tree::new("F"); // 0
-    // tree.add_child("B", 0); // 1
-    // tree.add_child("G", 0); // 2
-    // tree.add_child("A", 1); // 3
-    // tree.add_child("D", 1); // 4
-    // tree.add_child("I", 2); // 5
-    // tree.add_child("C", 4); // 6
-    // tree.add_child("E", 4); // 7
-    // tree.add_child("H", 5); // 8
 
     #[test]
     fn last_common_ancestor() {
@@ -429,6 +486,32 @@ mod tests {
             assert_eq!(ancestor, tree.get_common_ancestor(source, target));
         }
     }
+
+    #[test]
+    fn get_distances_lengths() {
+        let test_cases = vec![
+            ((1, 3), (Some(0.6), 2)), // (A,E)
+            ((1, 4), (Some(0.9), 3)), // (A,C)
+            ((4, 5), (Some(0.7), 2)), // (C,D)
+            ((5, 2), (Some(1.1), 3)), // (D,B)
+            ((2, 5), (Some(1.1), 3)), // (B,D)
+            ((0, 2), (Some(0.2), 1)), // (F,B)
+            ((1, 1), (None, 0)),      // (A,A)
+        ];
+        let tree = build_tree_with_lengths();
+
+        for ((idx_s, idx_t), (dist, branches)) in test_cases {
+            let (d_pred, b_pred) = tree.get_distance(idx_s, idx_t);
+            assert_eq!(branches, b_pred);
+            match dist {
+                None => assert!(d_pred.is_none()),
+                Some(d) => {
+                    assert!(d_pred.is_some_and(|x| (x - d).abs() < f32::EPSILON))
+                }
+            }
+        }
+    }
+
 
     #[test]
     fn get_correct_leaves() {
