@@ -18,7 +18,6 @@ pub struct Tree {
 }
 
 impl Tree {
-
     /// Creates a Tree with a single root node
     pub fn new(name: &str) -> Self {
         Self {
@@ -29,7 +28,8 @@ impl Tree {
     /// Creates a node and appends it as a child of the specified parent
     pub fn add_child(&mut self, val: &str, parent: usize) -> usize {
         let idx = self.nodes.len();
-        self.nodes.push(TreeNode::new(idx, String::from(val), Some(parent)));
+        self.nodes
+            .push(TreeNode::new(idx, String::from(val), Some(parent)));
         self.nodes[parent].children.push(idx);
         idx
     }
@@ -37,10 +37,22 @@ impl Tree {
     /// Creates a node and appends it as a child of the specified parent
     pub fn add_child_with_len(&mut self, val: &str, parent: usize, len: Option<f32>) -> usize {
         let idx = self.nodes.len();
-        self.nodes
-            .push(TreeNode::new_with_length(idx, String::from(val), Some(parent), len));
+        self.nodes.push(TreeNode::new_with_length(
+            idx,
+            String::from(val),
+            Some(parent),
+            len,
+        ));
         self.nodes[parent].children.push(idx);
         idx
+    }
+
+    pub fn size(&self) -> Option<usize> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(self.nodes.len())
+        }
     }
 
     /// Returns indices in the pre-order traversal
@@ -96,6 +108,11 @@ impl Tree {
         &self.nodes[node]
     }
 
+    /// Gets mutable reference to a specified node in the tree
+    pub fn get_mut(&mut self, node: usize) -> &mut TreeNode {
+        &mut self.nodes[node]
+    }
+
     /// Prunes subtree at given node
     pub fn prune(&mut self, node: usize) {
         let children = self.get(node).children.clone();
@@ -109,11 +126,6 @@ impl Tree {
         n.length = None;
         n.parent = None;
         n.children = vec![];
-    }
-
-    /// Gets mutable reference to a specified node in the tree
-    pub fn get_mut(&mut self, node: usize) -> &mut TreeNode {
-        &mut self.nodes[node]
     }
 
     /// Gets the index of leaf nodes in the tree
@@ -273,6 +285,80 @@ impl Tree {
     pub fn to_file(&self, path: &Path) {
         fs::write(path, self.to_newick()).unwrap()
     }
+
+    /// returns a preorder traversal iterator
+    pub fn iter_preorder(&self) -> PreOrder<'_> {
+        PreOrder {
+            tree: self,
+            indices: vec![0],
+        }
+    }
+
+    pub fn iter_postorder(&self) -> PostOrder<'_> {
+        PostOrder::new(self)
+    }
+}
+
+/// A struct to implement the iterator trait on a pre-order  tree traversal
+pub struct PreOrder<'a> {
+    tree: &'a Tree,
+    indices: Vec<usize>,
+}
+
+impl<'a> Iterator for PreOrder<'a> {
+    type Item = &'a TreeNode;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.tree.size())
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.indices.is_empty() {
+            return None;
+        }
+
+        let node = self.indices.pop().unwrap();
+        self.tree
+            .get(node)
+            .children
+            .iter()
+            .rev()
+            .map(|idx| self.indices.push(*idx))
+            .count();
+
+        Some(self.tree.get(node))
+    }
+}
+
+/// A struct to implement the iterator trait on a pre-order  tree traversal
+pub struct PostOrder<'a> {
+    tree: &'a Tree,
+    traversal: Vec<usize>,
+}
+
+impl<'a> PostOrder<'a> {
+    fn new(tree: &'a Tree) -> Self {
+        Self {
+            tree,
+            traversal: tree.postorder(0).into_iter().rev().collect(),
+        }
+    }
+}
+
+impl<'a> Iterator for PostOrder<'a> {
+    type Item = &'a TreeNode;
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.tree.size())
+    }
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.traversal.pop();
+        match node {
+            None => None,
+            Some(i) => Some(self.tree.get(i)),
+        }
+    }
 }
 
 /// Genereates a random binary tree of a given size
@@ -409,8 +495,7 @@ mod tests {
         tree
     }
 
-    fn get_values(indices: &[usize], tree: &Tree) -> Vec<String>
-    {
+    fn get_values(indices: &[usize], tree: &Tree) -> Vec<String> {
         indices
             .iter()
             .map(|idx| tree.get(*idx).val.clone())
@@ -425,9 +510,23 @@ mod tests {
     }
 
     #[test]
+    fn iter_preorder() {
+        let tree = build_simple_tree();
+        let values: Vec<_> = tree.iter_preorder().map(|node| node.val.clone()).collect();
+        assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
+    }
+
+    #[test]
     fn traverse_postorder() {
         let tree = build_simple_tree();
         let values = get_values(&(tree.postorder(0)), &tree);
+        assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
+    }
+
+    #[test]
+    fn iter_postorder() {
+        let tree = build_simple_tree();
+        let values: Vec<_> = tree.iter_postorder().map(|node| node.val.clone()).collect();
         assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     }
 
