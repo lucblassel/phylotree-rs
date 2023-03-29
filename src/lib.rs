@@ -13,31 +13,32 @@ use rand::prelude::*;
 
 /// A Vector backed Tree structure
 #[derive(Debug)]
-pub struct Tree<T> {
-    nodes: Vec<TreeNode<T>>,
+pub struct Tree {
+    nodes: Vec<TreeNode>,
 }
 
-impl<T> Tree<T> {
+impl Tree {
+
     /// Creates a Tree with a single root node
-    pub fn new(val: T) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
-            nodes: vec![TreeNode::new(0, val, None)],
+            nodes: vec![TreeNode::new(0, String::from(name), None)],
         }
     }
 
     /// Creates a node and appends it as a child of the specified parent
-    pub fn add_child(&mut self, val: T, parent: usize) -> usize {
+    pub fn add_child(&mut self, val: &str, parent: usize) -> usize {
         let idx = self.nodes.len();
-        self.nodes.push(TreeNode::new(idx, val, Some(parent)));
+        self.nodes.push(TreeNode::new(idx, String::from(val), Some(parent)));
         self.nodes[parent].children.push(idx);
         idx
     }
 
     /// Creates a node and appends it as a child of the specified parent
-    pub fn add_child_with_len(&mut self, val: T, parent: usize, len: Option<f32>) -> usize {
+    pub fn add_child_with_len(&mut self, val: &str, parent: usize, len: Option<f32>) -> usize {
         let idx = self.nodes.len();
         self.nodes
-            .push(TreeNode::new_with_length(idx, val, Some(parent), len));
+            .push(TreeNode::new_with_length(idx, String::from(val), Some(parent), len));
         self.nodes[parent].children.push(idx);
         idx
     }
@@ -91,7 +92,7 @@ impl<T> Tree<T> {
     }
 
     /// Gets reference to a specified node in the tree
-    pub fn get(&self, node: usize) -> &TreeNode<T> {
+    pub fn get(&self, node: usize) -> &TreeNode {
         &self.nodes[node]
     }
 
@@ -111,7 +112,7 @@ impl<T> Tree<T> {
     }
 
     /// Gets mutable reference to a specified node in the tree
-    pub fn get_mut(&mut self, node: usize) -> &mut TreeNode<T> {
+    pub fn get_mut(&mut self, node: usize) -> &mut TreeNode {
         &mut self.nodes[node]
     }
 
@@ -199,12 +200,7 @@ impl<T> Tree<T> {
             (None, branches)
         }
     }
-}
 
-impl<T> Tree<T>
-where
-    T: Debug,
-{
     /// Recursive function that adds node representation to a printable tree builder
     fn print_nodes(&self, root_idx: usize, output_tree: &mut TreeBuilder, debug: bool) {
         let root = self.get(root_idx);
@@ -246,12 +242,7 @@ where
         let tree = builder.build();
         print_tree(&tree).ok();
     }
-}
 
-impl<T> Tree<T>
-where
-    T: Display,
-{
     /// Generate newick representation of tree
     fn to_newick_impl(&self, root: usize) -> String {
         if self.get(root).children.is_empty() {
@@ -285,8 +276,8 @@ where
 }
 
 /// Genereates a random binary tree of a given size
-pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree<String> {
-    let mut tree = Tree::new(String::from("root"));
+pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
+    let mut tree = Tree::new("root");
     let mut rng = thread_rng();
 
     let mut next_deq = VecDeque::new();
@@ -302,9 +293,9 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree<String> {
         .unwrap();
         let l1: Option<f32> = if brlens { Some(rng.gen()) } else { None };
         let l2: Option<f32> = if brlens { Some(rng.gen()) } else { None };
-        next_deq.push_back(tree.add_child_with_len(format!("Node_{counter}"), parent_idx, l1));
+        next_deq.push_back(tree.add_child_with_len(&format!("Node_{counter}"), parent_idx, l1));
         next_deq.push_back(tree.add_child_with_len(
-            format!("Node_{}", counter + 1),
+            &format!("Node_{}", counter + 1),
             parent_idx,
             l2,
         ));
@@ -319,11 +310,11 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree<String> {
 }
 
 /// A node of the Tree
-pub struct TreeNode<T> {
+pub struct TreeNode {
     /// Index of the node
     pub idx: usize,
     /// Value stored in the node (a name)
-    pub val: T,
+    pub val: String,
     /// Index of the parent node
     pub parent: Option<usize>,
     /// Indices of child nodes
@@ -332,9 +323,9 @@ pub struct TreeNode<T> {
     pub length: Option<f32>,
 }
 
-impl<T> TreeNode<T> {
+impl TreeNode {
     /// Creates a new TreeNode
-    pub fn new(idx: usize, val: T, parent: Option<usize>) -> Self {
+    pub fn new(idx: usize, val: String, parent: Option<usize>) -> Self {
         Self {
             idx,
             val,
@@ -345,7 +336,12 @@ impl<T> TreeNode<T> {
     }
 
     /// Creates a new TreeNode with a branch length
-    pub fn new_with_length(idx: usize, val: T, parent: Option<usize>, length: Option<f32>) -> Self {
+    pub fn new_with_length(
+        idx: usize,
+        val: String,
+        parent: Option<usize>,
+        length: Option<f32>,
+    ) -> Self {
         Self {
             idx,
             val,
@@ -356,15 +352,12 @@ impl<T> TreeNode<T> {
     }
 
     /// Sets the internal TreeNode value
-    pub fn set_val(&mut self, val: T) {
+    pub fn set_val(&mut self, val: String) {
         self.val = val;
     }
 }
 
-impl<T> Display for TreeNode<T>
-where
-    T: Debug,
-{
+impl Display for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.length {
             Some(l) => write!(f, "{:?} ({:.3})", self.val, l),
@@ -373,10 +366,7 @@ where
     }
 }
 
-impl<T> Debug for TreeNode<T>
-where
-    T: Debug,
-{
+impl Debug for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -392,7 +382,7 @@ mod tests {
 
     /// Generates example tree from the tree traversal wikipedia page
     /// https://en.wikipedia.org/wiki/Tree_traversal#Depth-first_search
-    fn build_simple_tree() -> Tree<&'static str> {
+    fn build_simple_tree() -> Tree {
         let mut tree = Tree::new("F"); // 0
         tree.add_child("B", 0); // 1
         tree.add_child("G", 0); // 2
@@ -408,7 +398,7 @@ mod tests {
 
     /// Generates example tree from the newick format wikipedia page
     /// https://en.wikipedia.org/wiki/Newick_format#Examples
-    fn build_tree_with_lengths() -> Tree<&'static str> {
+    fn build_tree_with_lengths() -> Tree {
         let mut tree = Tree::new("F"); // 0
         tree.add_child_with_len("A", 0, Some(0.1)); // 1
         tree.add_child_with_len("B", 0, Some(0.2)); // 2
@@ -419,10 +409,7 @@ mod tests {
         tree
     }
 
-    fn get_values<T>(indices: &[usize], tree: &Tree<T>) -> Vec<T>
-    where
-        T: Clone,
-        T: Debug,
+    fn get_values(indices: &[usize], tree: &Tree) -> Vec<String>
     {
         indices
             .iter()
@@ -511,7 +498,6 @@ mod tests {
             }
         }
     }
-
 
     #[test]
     fn get_correct_leaves() {
