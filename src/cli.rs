@@ -1,18 +1,35 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A simple command line tool to generate a random Phylogenentic tree
 #[derive(Parser, Debug)]
 pub struct Args {
-    /// Number of leaves in the tree
-    #[arg(short, long, default_value_t = 20)]
-    pub size: usize,
+    #[command(subcommand)]
+    pub command: Commands,
+}
 
-    /// Generate uniform branch lengths
-    #[arg(short, long)]
-    pub branch_lengths: bool,
 
-    /// File to save the tree to
-    #[arg(short, long)]
-    pub output: PathBuf,
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Generate random tree(s)
+    Generate {
+        /// Number of tips in the generated tree
+        #[arg(short, long, default_value_t = 20)]
+        tips: usize,
+
+        /// Generate uniform branch lengths
+        #[arg(short, long)]
+        branch_lengths: bool,
+
+        /// Output file (directory if generating multiple trees)
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Get statistics about a tree
+    Stats {
+        /// Input newick file of the tree
+        tree: PathBuf
+    }
+
 }

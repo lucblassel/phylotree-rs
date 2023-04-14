@@ -332,6 +332,8 @@ impl Tree {
         root_to_source[cursor - 1]
     }
 
+    /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
+    /// branches in the path have lengths) and the numebr of edges in the path
     pub fn get_distance(&self, source: usize, target: usize) -> (Option<f32>, usize) {
         let mut dist = 0.0;
         let mut branches = 0;
@@ -519,6 +521,12 @@ impl Tree {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Loads a tree from a newick file
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let newick_string = fs::read_to_string(path)?;
+        Self::from_newick(&newick_string)
     }
 
     /// returns a preorder traversal iterator
