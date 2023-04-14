@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// A simple command line tool to generate a random Phylogenentic tree
+/// A simple command line tool to generate a random phylogenetic tree
 #[derive(Parser, Debug)]
 pub struct Args {
     #[command(subcommand)]
