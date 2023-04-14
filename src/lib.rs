@@ -30,9 +30,9 @@ pub struct Tree {
 
 impl Tree {
     /// Creates a Tree with a single root node
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: Option<&str>) -> Self {
         Self {
-            nodes: vec![TreeNode::new(0, String::from(name), None)],
+            nodes: vec![TreeNode::new(0, name.map(String::from), None)],
             tips: HashSet::from_iter(vec![0]),
             is_binary: true,
             height: None,
@@ -52,11 +52,12 @@ impl Tree {
     }
 
     /// Adds a root to an empty
-    pub fn add_root(&mut self, val: &str) -> Result<usize> {
+    pub fn add_root(&mut self, name: Option<&str>) -> Result<usize> {
         if !self.nodes.is_empty() {
             return Err("Trying to add a root to a non empty tree".into());
         }
-        self.nodes.push(TreeNode::new(0, String::from(val), None));
+        self.nodes
+            .push(TreeNode::new(0, name.map(String::from), None));
 
         self.tips.insert(0);
 
@@ -70,18 +71,23 @@ impl Tree {
     }
 
     /// Creates a node and appends it as a child of the specified parent
-    pub fn add_child(&mut self, val: &str, parent: usize) -> usize {
+    pub fn add_child(&mut self, name: Option<&str>, parent: usize) -> usize {
         self.add_child_node(
             parent,
-            TreeNode::new(self.nodes.len(), String::from(val), Some(parent)),
+            TreeNode::new(self.nodes.len(), name.map(String::from), Some(parent)),
         )
     }
 
     /// Creates a node and appends it as a child of the specified parent
-    pub fn add_child_with_len(&mut self, val: &str, parent: usize, len: Option<f32>) -> usize {
+    pub fn add_child_with_len(
+        &mut self,
+        name: Option<&str>,
+        parent: usize,
+        len: Option<f32>,
+    ) -> usize {
         self.add_child_node(
             parent,
-            TreeNode::new_with_length(self.nodes.len(), String::from(val), Some(parent), len),
+            TreeNode::new_with_length(self.nodes.len(), name.map(String::from), Some(parent), len),
         )
     }
 
@@ -411,7 +417,10 @@ impl Tree {
     /// Generate newick representation of tree
     fn to_newick_impl(&self, root: usize) -> String {
         if self.get(root).children.is_empty() {
-            self.get(root).val.to_string()
+            match self.get(root).name.clone() {
+                Some(v) => v,
+                None => String::from(""),
+            }
         } else {
             "(".to_string()
                 + &self
@@ -425,7 +434,10 @@ impl Tree {
                     .collect::<Vec<String>>()
                     .join(",")
                 + ")"
-                + &(self.get(root).val.to_string())
+                + &(match self.get(root).name.clone() {
+                    Some(v) => v,
+                    None => String::from(""),
+                })
         }
     }
 
@@ -438,7 +450,7 @@ impl Tree {
     ) -> Result<&'a str> {
         let node = if let Some(index) = parent {
             // descendant
-            tree.add_child("placeholder", index)
+            tree.add_child(None, index)
         } else {
             // root
             0
@@ -484,7 +496,7 @@ impl Tree {
             .find(|c| c == ':' || c == ';' || c == ')' || c == ',')
             .ok_or("No : or ; found")?;
         let (name, s) = s.split_at(end);
-        tree.get_mut(node).val = name.to_string();
+        tree.get_mut(node).name = Some(name.to_string());
 
         Ok(s)
     }
@@ -496,7 +508,7 @@ impl Tree {
 
     /// Parses a newick string into to Tree
     pub fn from_newick(newick: &str) -> Result<Self> {
-        let mut tree = Tree::new("");
+        let mut tree = Tree::new(None);
         Self::from_newick_impl(newick, None, &mut tree)?;
         Ok(tree)
     }
@@ -587,13 +599,12 @@ impl<'a> Iterator for PostOrder<'a> {
 
 /// Genereates a random binary tree of a given size
 pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
-    let mut tree = Tree::new("root");
+    let mut tree = Tree::new(None);
     let mut rng = thread_rng();
 
     let mut next_deq = VecDeque::new();
     next_deq.push_back(0);
 
-    let mut counter = 1;
     for _ in 0..(n_leaves - 1) {
         let parent_idx = if rng.gen_bool(0.5) {
             next_deq.pop_front()
@@ -603,17 +614,12 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
         .unwrap();
         let l1: Option<f32> = if brlens { Some(rng.gen()) } else { None };
         let l2: Option<f32> = if brlens { Some(rng.gen()) } else { None };
-        next_deq.push_back(tree.add_child_with_len(&format!("Node_{counter}"), parent_idx, l1));
-        next_deq.push_back(tree.add_child_with_len(
-            &format!("Node_{}", counter + 1),
-            parent_idx,
-            l2,
-        ));
-        counter += 2;
+        next_deq.push_back(tree.add_child_with_len(None, parent_idx, l1));
+        next_deq.push_back(tree.add_child_with_len(None, parent_idx, l2));
     }
 
     for (i, idx) in next_deq.iter().enumerate() {
-        tree.get_mut(*idx).set_val(format!("Tip_{i}"));
+        tree.get_mut(*idx).set_name(format!("Tip_{i}"));
     }
 
     tree
@@ -623,8 +629,8 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
 pub struct TreeNode {
     /// Index of the node
     pub idx: usize,
-    /// Value stored in the node (a name)
-    pub val: String,
+    /// Name of the node
+    pub name: Option<String>,
     /// Index of the parent node
     pub parent: Option<usize>,
     /// Indices of child nodes
@@ -637,10 +643,10 @@ pub struct TreeNode {
 
 impl TreeNode {
     /// Creates a new TreeNode
-    pub fn new(idx: usize, val: String, parent: Option<usize>) -> Self {
+    pub fn new(idx: usize, name: Option<String>, parent: Option<usize>) -> Self {
         Self {
             idx,
-            val,
+            name,
             parent,
             children: vec![],
             length: None,
@@ -651,13 +657,13 @@ impl TreeNode {
     /// Creates a new TreeNode with a branch length
     pub fn new_with_length(
         idx: usize,
-        val: String,
+        name: Option<String>,
         parent: Option<usize>,
         length: Option<f32>,
     ) -> Self {
         Self {
             idx,
-            val,
+            name,
             parent,
             children: vec![],
             length,
@@ -665,17 +671,17 @@ impl TreeNode {
         }
     }
 
-    /// Sets the internal TreeNode value
-    pub fn set_val(&mut self, val: String) {
-        self.val = val;
+    /// Sets the internal TreeNode name
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
     }
 }
 
 impl Display for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.length {
-            Some(l) => write!(f, "{:?} ({:.3})", self.val, l),
-            None => write!(f, "{:?}", self.val),
+            Some(l) => write!(f, "{:?} ({:.3})", self.name, l),
+            None => write!(f, "{:?}", self.name),
         }
     }
 }
@@ -685,7 +691,7 @@ impl Debug for TreeNode {
         write!(
             f,
             "{:?} <I:{}> (L: {:?})[P: {:?}][Root: {:?}]",
-            self.val, self.idx, self.length, self.parent, self.distance_to_root
+            self.name, self.idx, self.length, self.parent, self.distance_to_root
         )
     }
 }
@@ -697,15 +703,15 @@ mod tests {
     /// Generates example tree from the tree traversal wikipedia page
     /// https://en.wikipedia.org/wiki/Tree_traversal#Depth-first_search
     fn build_simple_tree() -> Tree {
-        let mut tree = Tree::new("F"); // 0
-        tree.add_child("B", 0); // 1
-        tree.add_child("G", 0); // 2
-        tree.add_child("A", 1); // 3
-        tree.add_child("D", 1); // 4
-        tree.add_child("I", 2); // 5
-        tree.add_child("C", 4); // 6
-        tree.add_child("E", 4); // 7
-        tree.add_child("H", 5); // 8
+        let mut tree = Tree::new(Some("F")); // 0
+        tree.add_child(Some("B"), 0); // 1
+        tree.add_child(Some("G"), 0); // 2
+        tree.add_child(Some("A"), 1); // 3
+        tree.add_child(Some("D"), 1); // 4
+        tree.add_child(Some("I"), 2); // 5
+        tree.add_child(Some("C"), 4); // 6
+        tree.add_child(Some("E"), 4); // 7
+        tree.add_child(Some("H"), 5); // 8
 
         tree
     }
@@ -713,58 +719,58 @@ mod tests {
     /// Generates example tree from the newick format wikipedia page
     /// https://en.wikipedia.org/wiki/Newick_format#Examples
     fn build_tree_with_lengths() -> Tree {
-        let mut tree = Tree::new("F"); // 0
-        tree.add_child_with_len("A", 0, Some(0.1)); // 1
-        tree.add_child_with_len("B", 0, Some(0.2)); // 2
-        tree.add_child_with_len("E", 0, Some(0.5)); // 3
-        tree.add_child_with_len("C", 3, Some(0.3)); // 4
-        tree.add_child_with_len("D", 3, Some(0.4)); // 5
+        let mut tree = Tree::new(Some("F")); // 0
+        tree.add_child_with_len(Some("A"), 0, Some(0.1)); // 1
+        tree.add_child_with_len(Some("B"), 0, Some(0.2)); // 2
+        tree.add_child_with_len(Some("E"), 0, Some(0.5)); // 3
+        tree.add_child_with_len(Some("C"), 3, Some(0.3)); // 4
+        tree.add_child_with_len(Some("D"), 3, Some(0.4)); // 5
 
         tree
     }
 
-    fn get_values(indices: &[usize], tree: &Tree) -> Vec<String> {
+    fn get_values(indices: &[usize], tree: &Tree) -> Vec<Option<String>> {
         indices
             .iter()
-            .map(|idx| tree.get(*idx).val.clone())
+            .map(|idx| tree.get(*idx).name.clone())
             .collect()
     }
 
     #[test]
     fn test_tips() {
-        let mut tree = Tree::new("root");
+        let mut tree = Tree::new(Some("root"));
         assert_eq!(tree.tips, HashSet::from_iter(vec![0]));
 
-        tree.add_child_with_len("A", 0, Some(0.1)); // 1
-        tree.add_child_with_len("B", 0, Some(0.2)); // 2
-        tree.add_child_with_len("E", 0, Some(0.5)); // 3
+        tree.add_child_with_len(Some("A"), 0, Some(0.1)); // 1
+        tree.add_child_with_len(Some("B"), 0, Some(0.2)); // 2
+        tree.add_child_with_len(Some("E"), 0, Some(0.5)); // 3
 
         assert_eq!(tree.tips, HashSet::from_iter(vec![1, 2, 3]));
 
-        tree.add_child_with_len("C", 3, Some(0.3)); // 4
-        tree.add_child_with_len("D", 3, Some(0.4)); // 5
+        tree.add_child_with_len(Some("C"), 3, Some(0.3)); // 4
+        tree.add_child_with_len(Some("D"), 3, Some(0.4)); // 5
 
         assert_eq!(tree.tips, HashSet::from_iter(vec![1, 2, 4, 5]));
     }
 
     #[test]
     fn test_binary() {
-        let mut tree = Tree::new("root");
-        tree.add_child("0L", 0); //1
-        tree.add_child("0R", 0); //2
+        let mut tree = Tree::new(Some("root"));
+        tree.add_child(Some("0L"), 0); //1
+        tree.add_child(Some("0R"), 0); //2
 
         assert!(tree.is_binary());
 
-        tree.add_child("1L", 1); //3
-        tree.add_child("1R", 1); //4
+        tree.add_child(Some("1L"), 1); //3
+        tree.add_child(Some("1R"), 1); //4
 
         assert!(tree.is_binary());
 
-        tree.add_child("3L", 3); //5
-        tree.add_child("3R", 3); //6
+        tree.add_child(Some("3L"), 3); //5
+        tree.add_child(Some("3R"), 3); //6
         assert!(tree.is_binary());
 
-        tree.add_child("3?", 3); //7
+        tree.add_child(Some("3?"), 3); //7
         assert!(!tree.is_binary());
     }
 
@@ -780,35 +786,50 @@ mod tests {
     #[test]
     fn traverse_preorder() {
         let tree = build_simple_tree();
-        let values = get_values(&(tree.preorder(0)), &tree);
+        let values: Vec<_> = get_values(&(tree.preorder(0)), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
     }
 
     #[test]
     fn iter_preorder() {
         let tree = build_simple_tree();
-        let values: Vec<_> = tree.iter_preorder().map(|node| node.val.clone()).collect();
+        let values: Vec<_> = tree
+            .iter_preorder()
+            .flat_map(|node| node.name.clone())
+            .collect();
         assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
     }
 
     #[test]
     fn traverse_postorder() {
         let tree = build_simple_tree();
-        let values = get_values(&(tree.postorder(0)), &tree);
+        let values: Vec<_> = get_values(&(tree.postorder(0)), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     }
 
     #[test]
     fn iter_postorder() {
         let tree = build_simple_tree();
-        let values: Vec<_> = tree.iter_postorder().map(|node| node.val.clone()).collect();
+        let values: Vec<_> = tree
+            .iter_postorder()
+            .flat_map(|node| node.name.clone())
+            .collect();
         assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     }
 
     #[test]
     fn traverse_levelorder() {
         let tree = build_simple_tree();
-        let values = get_values(&(tree.levelorder(0)), &tree);
+        let values: Vec<_> = get_values(&(tree.levelorder(0)), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
     }
 
@@ -816,14 +837,20 @@ mod tests {
     fn prune_tree() {
         let mut tree = build_simple_tree();
         tree.prune(4); // prune D subtree
-        let values = get_values(&(tree.preorder(0)), &tree);
+        let values: Vec<_> = get_values(&(tree.preorder(0)), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["F", "B", "A", "G", "I", "H"]);
     }
 
     #[test]
     fn path_from_root() {
         let tree = build_simple_tree();
-        let values = get_values(&(tree.get_path_from_root(7)), &tree);
+        let values: Vec<_> = get_values(&(tree.get_path_from_root(7)), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["F", "B", "D", "E"])
     }
 
@@ -839,10 +866,10 @@ mod tests {
         let tree = build_simple_tree();
         for ((source, target), ancestor) in test_cases {
             println!(
-                "Testing: ({}, {}) -> {}",
-                tree.get(source).val,
-                tree.get(target).val,
-                tree.get(ancestor).val
+                "Testing: ({:?}, {:?}) -> {:?}",
+                tree.get(source).name,
+                tree.get(target).name,
+                tree.get(ancestor).name
             );
             assert_eq!(ancestor, tree.get_common_ancestor(source, target));
         }
@@ -876,7 +903,10 @@ mod tests {
     #[test]
     fn get_correct_leaves() {
         let tree = build_simple_tree();
-        let values = get_values(&(tree.get_leaves()), &tree);
+        let values: Vec<_> = get_values(&(tree.get_leaves()), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
         assert_eq!(values, vec!["A", "C", "E", "H"])
     }
 
