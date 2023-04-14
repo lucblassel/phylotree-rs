@@ -24,12 +24,16 @@ pub enum Commands {
         /// Output file (directory if generating multiple trees)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Number of trees to generate
+        #[arg(short='n', long)]
+        trees: Option<usize>
     },
 
     /// Get statistics about a tree
     Stats {
         /// Input newick file of the tree
-        tree: PathBuf
+        trees: Vec<PathBuf>
     }
 
 }
