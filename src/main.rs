@@ -23,5 +23,5 @@ fn main() {
     println!("{:?}", args);
 
     let random = generate_tree(args.size, args.branch_lengths);
-    random.to_file(&args.output)
+    random.to_file(&args.output).unwrap()
 }

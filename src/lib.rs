@@ -1,20 +1,31 @@
 #![feature(is_some_and)]
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fmt::{Debug, Display},
     fs,
     iter::zip,
     path::Path,
 };
 
+use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
+
+// pub mod data;
+pub mod io;
+
+type Error = Box<dyn std::error::Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 /// A Vector backed Tree structure
 #[derive(Debug)]
 pub struct Tree {
     nodes: Vec<TreeNode>,
+    tips: HashSet<usize>,
+    is_binary: bool,
+    height: Option<f32>,
+    diameter: Option<f32>,
 }
 
 impl Tree {
@@ -22,37 +33,179 @@ impl Tree {
     pub fn new(name: &str) -> Self {
         Self {
             nodes: vec![TreeNode::new(0, String::from(name), None)],
+            tips: HashSet::from_iter(vec![0]),
+            is_binary: true,
+            height: None,
+            diameter: None,
         }
+    }
+
+    /// Creates an empty Tree
+    pub fn new_empty() -> Self {
+        Self {
+            nodes: vec![],
+            tips: HashSet::new(),
+            is_binary: true,
+            height: None,
+            diameter: None,
+        }
+    }
+
+    /// Adds a root to an empty
+    pub fn add_root(&mut self, val: &str) -> Result<usize> {
+        if !self.nodes.is_empty() {
+            return Err("Trying to add a root to a non empty tree".into());
+        }
+        self.nodes.push(TreeNode::new(0, String::from(val), None));
+
+        self.tips.insert(0);
+
+        Ok(0)
+    }
+
+    /// Reset cached values for metrics like tree diameter and height
+    pub fn reset_cache(&mut self) {
+        self.height = None;
+        self.diameter = None;
     }
 
     /// Creates a node and appends it as a child of the specified parent
     pub fn add_child(&mut self, val: &str, parent: usize) -> usize {
-        let idx = self.nodes.len();
-        self.nodes
-            .push(TreeNode::new(idx, String::from(val), Some(parent)));
-        self.nodes[parent].children.push(idx);
-        idx
+        self.add_child_node(
+            parent,
+            TreeNode::new(self.nodes.len(), String::from(val), Some(parent)),
+        )
     }
 
     /// Creates a node and appends it as a child of the specified parent
     pub fn add_child_with_len(&mut self, val: &str, parent: usize, len: Option<f32>) -> usize {
+        self.add_child_node(
+            parent,
+            TreeNode::new_with_length(self.nodes.len(), String::from(val), Some(parent), len),
+        )
+    }
+
+    fn add_child_node(&mut self, parent: usize, mut node: TreeNode) -> usize {
+        // This insertion might change the height or diameter of the tree
+        self.reset_cache();
+
+        node.distance_to_root = self.get(parent).distance_to_root + 1;
+
         let idx = self.nodes.len();
-        self.nodes.push(TreeNode::new_with_length(
-            idx,
-            String::from(val),
-            Some(parent),
-            len,
-        ));
+        self.nodes.push(node);
+
         self.nodes[parent].children.push(idx);
+        if self.nodes[parent].children.len() > 2 {
+            self.is_binary = false
+        }
+
+        self.tips.remove(&parent);
+        self.tips.insert(idx);
+
         idx
     }
 
+    /// Returns the size of the tree, i.e. the number of tips
     pub fn size(&self) -> Option<usize> {
         if self.nodes.is_empty() {
             None
         } else {
             Some(self.nodes.len())
         }
+    }
+
+    /// Returns height of the tree (i.e. longest distance from tip to root)
+    pub fn height(&mut self) -> Option<f32> {
+        if self.height.is_some() {
+            return self.height;
+        }
+
+        if self.nodes.is_empty() {
+            None
+        } else {
+            let height = self
+                .tips
+                .iter()
+                .map(|&tip_index| {
+                    let (d, n) = self.get_distance(0, tip_index);
+                    match d {
+                        Some(d) => d,
+                        None => n as f32,
+                    }
+                })
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            self.height = height;
+            height
+        }
+    }
+
+    /// Gets the diameter of the tree (i.e. the longest distance between tips)
+    pub fn diameter(&mut self) -> Option<f32> {
+        if self.diameter.is_some() {
+            return self.diameter;
+        }
+
+        if self.nodes.is_empty() {
+            None
+        } else {
+            let diameter = self
+                .tips
+                .iter()
+                .combinations(2)
+                .map(|ids| {
+                    let (d, n) = self.get_distance(*ids[0], *ids[1]);
+                    match d {
+                        Some(d) => d,
+                        None => n as f32,
+                    }
+                })
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            self.diameter = diameter;
+
+            diameter
+        }
+    }
+
+    /// Computes the sackin statistic for tree with Yule normalization by default
+    pub fn sackin(&self) -> Option<usize> {
+        if self.is_rooted() && self.is_binary() {
+            Some(
+                self.tips
+                    .iter()
+                    .map(|&tip_idx| self.get(tip_idx).distance_to_root)
+                    .sum(),
+            )
+        } else {
+            None
+        }
+    }
+
+    /// Computes the normalized sackin statistic with a Yule null model
+    pub fn sackin_yule(&self) -> Option<f64> {
+        self.sackin().map(|i_n| {
+            let n = self.tips.len();
+            let sum: f64 = (2..=n).map(|i| 1.0 / (i as f64)).sum();
+
+            (i_n as f64 - 2.0 * (n as f64) * sum) / n as f64
+        })
+    }
+
+    /// Computes the normalized sackin statistic with a PDA null model
+    pub fn sackin_pda(&self) -> Option<f64> {
+        self.sackin()
+            .map(|i_n| i_n as f64 / f64::powf(self.tips.len() as f64, 3.0 / 2.0))
+    }
+
+    /// Checks if the tree is binary or not
+    pub fn is_binary(&self) -> bool {
+        self.is_binary
+    }
+
+    /// Checks if the tree is rooted
+    pub fn is_rooted(&self) -> bool {
+        !self.nodes.is_empty() && self.nodes[0].children.len() == 2
     }
 
     /// Returns indices in the pre-order traversal
@@ -276,14 +429,84 @@ impl Tree {
         }
     }
 
+    /// Parses a newick string
+    /// Heavily inspired (borrowed...) by https://github.com/RagnarGrootKoerkamp/rust-phylogeny
+    fn from_newick_impl<'a>(
+        mut s: &'a str,
+        parent: Option<usize>,
+        tree: &mut Tree,
+    ) -> Result<&'a str> {
+        let node = if let Some(index) = parent {
+            // descendant
+            tree.add_child("placeholder", index)
+        } else {
+            // root
+            0
+        };
+
+        if let Some(_s) = s.strip_prefix('(') {
+            s = _s;
+            loop {
+                s = Self::from_newick_impl(s, Some(node), tree)?;
+
+                let len = if let Some(_s) = s.strip_prefix(':') {
+                    s = _s;
+                    // The length of the branch ends with , or )
+                    let end = s.find(|c| c == ',' || c == ')').ok_or("No , or ) found")?;
+                    let len;
+                    (len, s) = s.split_at(end);
+                    Some(
+                        len.parse()
+                            .map_err(|e: std::num::ParseFloatError| -> String {
+                                "Could not parse length: ".to_string() + &e.to_string()
+                            })?,
+                    )
+                } else {
+                    None
+                };
+
+                if let Some(child) = tree.get(node).children.last() {
+                    tree.get_mut(*child).length = len;
+                } else {
+                    // Root node has length
+                    tree.get_mut(node).length = len;
+                }
+
+                let done = s.starts_with(')');
+                s = s.split_at(1).1;
+                if done {
+                    break;
+                }
+            }
+        }
+
+        let end = s
+            .find(|c| c == ':' || c == ';' || c == ')' || c == ',')
+            .ok_or("No : or ; found")?;
+        let (name, s) = s.split_at(end);
+        tree.get_mut(node).val = name.to_string();
+
+        Ok(s)
+    }
+
     /// Generate newick representation of tree
     pub fn to_newick(&self) -> String {
         self.to_newick_impl(0) + ";"
     }
 
+    /// Parses a newick string into to Tree
+    pub fn from_newick(newick: &str) -> Result<Self> {
+        let mut tree = Tree::new("");
+        Self::from_newick_impl(newick, None, &mut tree)?;
+        Ok(tree)
+    }
+
     /// Saves the tree to a newick file
-    pub fn to_file(&self, path: &Path) {
-        fs::write(path, self.to_newick()).unwrap()
+    pub fn to_file(&self, path: &Path) -> Result<()> {
+        match fs::write(path, self.to_newick()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// returns a preorder traversal iterator
@@ -294,6 +517,7 @@ impl Tree {
         }
     }
 
+    /// returns a postorder traversal iterator
     pub fn iter_postorder(&self) -> PostOrder<'_> {
         PostOrder::new(self)
     }
@@ -404,9 +628,11 @@ pub struct TreeNode {
     /// Index of the parent node
     pub parent: Option<usize>,
     /// Indices of child nodes
-    children: Vec<usize>,
+    pub children: Vec<usize>,
     /// Length of branch between parent and node
     pub length: Option<f32>,
+    /// Distance to root
+    distance_to_root: usize,
 }
 
 impl TreeNode {
@@ -418,6 +644,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length: None,
+            distance_to_root: 0,
         }
     }
 
@@ -434,6 +661,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length,
+            distance_to_root: 0,
         }
     }
 
@@ -456,8 +684,8 @@ impl Debug for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?} <I:{}> (L: {:?})[P: {:?}]",
-            self.val, self.idx, self.length, self.parent
+            "{:?} <I:{}> (L: {:?})[P: {:?}][Root: {:?}]",
+            self.val, self.idx, self.length, self.parent, self.distance_to_root
         )
     }
 }
@@ -500,6 +728,53 @@ mod tests {
             .iter()
             .map(|idx| tree.get(*idx).val.clone())
             .collect()
+    }
+
+    #[test]
+    fn test_tips() {
+        let mut tree = Tree::new("root");
+        assert_eq!(tree.tips, HashSet::from_iter(vec![0]));
+
+        tree.add_child_with_len("A", 0, Some(0.1)); // 1
+        tree.add_child_with_len("B", 0, Some(0.2)); // 2
+        tree.add_child_with_len("E", 0, Some(0.5)); // 3
+
+        assert_eq!(tree.tips, HashSet::from_iter(vec![1, 2, 3]));
+
+        tree.add_child_with_len("C", 3, Some(0.3)); // 4
+        tree.add_child_with_len("D", 3, Some(0.4)); // 5
+
+        assert_eq!(tree.tips, HashSet::from_iter(vec![1, 2, 4, 5]));
+    }
+
+    #[test]
+    fn test_binary() {
+        let mut tree = Tree::new("root");
+        tree.add_child("0L", 0); //1
+        tree.add_child("0R", 0); //2
+
+        assert!(tree.is_binary());
+
+        tree.add_child("1L", 1); //3
+        tree.add_child("1R", 1); //4
+
+        assert!(tree.is_binary());
+
+        tree.add_child("3L", 3); //5
+        tree.add_child("3R", 3); //6
+        assert!(tree.is_binary());
+
+        tree.add_child("3?", 3); //7
+        assert!(!tree.is_binary());
+    }
+
+    #[test]
+    fn binary_from_newick() {
+        let test_cases = vec![("(A,B,(C,D)E)F;", false), ("((D,E)B,(F,G)C)A;", true)];
+
+        for (newick, is_binary) in test_cases {
+            assert_eq!(Tree::from_newick(newick).unwrap().is_binary(), is_binary)
+        }
     }
 
     #[test]
@@ -620,5 +895,99 @@ mod tests {
     fn to_newick() {
         let tree = build_tree_with_lengths();
         assert_eq!("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", tree.to_newick());
+    }
+
+    // test cases from https://github.com/ila/Newick-validator
+    // For now it does not parse the root node branch length...
+    #[test]
+    fn read_newick() {
+        let newick_strings = vec![
+            "((D,E)B,(F,G)C)A;",
+            "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
+            "(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);",
+            // "(dog:20,(elephant:30,horse:60):20):50;",
+            "(A,B,(C,D));",
+            "(A,B,(C,D)E)F;",
+            // "(((One:0.2,Two:0.3):0.3,(Three:0.5,Four:0.3):0.2):0.3,Five:0.7):0.0;",
+            "(:0.1,:0.2,(:0.3,:0.4):0.5);",
+            // "(:0.1,:0.2,(:0.3,:0.4):0.5):0.0;",
+            "(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);",
+            "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
+            "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
+            "(,,(,));",
+        ];
+        for newick in newick_strings {
+            let tree = Tree::from_newick(newick).unwrap();
+            assert_eq!(newick, tree.to_newick());
+        }
+    }
+
+    #[test]
+    fn test_height() {
+        // heights computed with ete3
+        let test_cases = vec![
+            ("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", 0.9),
+            ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;", 1.0),
+            ("(A,B,(C,D)E)F;", 2.0),
+            (
+                "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip0,Tip1);",
+                8.0,
+            ),
+        ];
+
+        for (newick, height) in test_cases {
+            assert_eq!(Tree::from_newick(newick).unwrap().height().unwrap(), height)
+        }
+    }
+
+    #[test]
+    fn test_diam() {
+        let test_cases = vec![
+            ("((D,E)B,(F,G)C)A;", 4.0),
+            ("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", 1.1),
+            ("(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);", 1.1),
+            ("(A,B,(C,D));", 3.0),
+            ("(A,B,(C,D)E)F;", 3.0),
+        ];
+
+        for (newick, diameter) in test_cases {
+            assert_eq!(
+                Tree::from_newick(newick).unwrap().diameter().unwrap(),
+                diameter
+            )
+        }
+    }
+
+    #[test]
+    fn test_sackin_rooted() {
+        // Sackin index computed with gotree
+        let test_cases = vec![
+            ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 54),
+            ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 34),
+            ("((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 38),
+            ("(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 36),
+        ];
+
+        for (newick, true_sackin) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let sackin = tree.sackin();
+            assert!(sackin.is_some());
+            assert_eq!(tree.sackin().unwrap(), true_sackin);
+        }
+    }
+
+    #[test]
+    fn test_sackin_unrooted() {
+        let test_cases = vec![
+            "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
+            "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
+            "(A,B,(C,D)E)F;",
+            "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip0,Tip1);",
+        ];
+
+        for newick in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            assert!(tree.sackin().is_none());
+        }
     }
 }
