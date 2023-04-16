@@ -62,6 +62,7 @@ Rough API ref goes here
 Various goals and aims for this project:
  - [ ] Tree object
     - [x] Create base tree and node objects
+    - [ ] Rescale tree branch lengths
     - [ ] Traversals:
         - [x] Pre-order
         - [x] Post-order

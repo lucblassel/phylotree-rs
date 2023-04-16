@@ -5,7 +5,7 @@ use std::{
     fmt::{Debug, Display},
     fs,
     iter::zip,
-    path::Path,
+    path::Path, cell::RefCell,
 };
 
 use itertools::Itertools;
@@ -19,13 +19,13 @@ type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
 
 /// A Vector backed Tree structure
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<TreeNode>,
     tips: HashSet<usize>,
     is_binary: bool,
-    height: Option<f32>,
-    diameter: Option<f32>,
+    height: RefCell<Option<f32>>,
+    diameter: RefCell<Option<f32>>,
 }
 
 impl Tree {
@@ -35,8 +35,8 @@ impl Tree {
             nodes: vec![TreeNode::new(0, name.map(String::from), None)],
             tips: HashSet::from_iter(vec![0]),
             is_binary: true,
-            height: None,
-            diameter: None,
+            height: RefCell::new(None),
+            diameter: RefCell::new(None),
         }
     }
 
@@ -46,8 +46,8 @@ impl Tree {
             nodes: vec![],
             tips: HashSet::new(),
             is_binary: true,
-            height: None,
-            diameter: None,
+            height: RefCell::new(None),
+            diameter: RefCell::new(None),
         }
     }
 
@@ -66,8 +66,8 @@ impl Tree {
 
     /// Reset cached values for metrics like tree diameter and height
     pub fn reset_cache(&mut self) {
-        self.height = None;
-        self.diameter = None;
+        self.height = RefCell::new(None);
+        self.diameter = RefCell::new(None);
     }
 
     /// Creates a node and appends it as a child of the specified parent
@@ -121,9 +121,9 @@ impl Tree {
     }
 
     /// Returns height of the tree (i.e. longest distance from tip to root)
-    pub fn height(&mut self) -> Option<f32> {
-        if self.height.is_some() {
-            return self.height;
+    pub fn height(&self) -> Option<f32> {
+        if (*self.height.borrow()).is_some() {
+            return *self.height.borrow();
         }
 
         if self.nodes.is_empty() {
@@ -141,15 +141,15 @@ impl Tree {
                 })
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            self.height = height;
+            (*self.height.borrow_mut()) = height;
             height
         }
     }
 
     /// Gets the diameter of the tree (i.e. the longest distance between tips)
-    pub fn diameter(&mut self) -> Option<f32> {
-        if self.diameter.is_some() {
-            return self.diameter;
+    pub fn diameter(&self) -> Option<f32> {
+        if (*self.diameter.borrow()).is_some() {
+            return *self.diameter.borrow();
         }
 
         if self.nodes.is_empty() {
@@ -168,7 +168,7 @@ impl Tree {
                 })
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            self.diameter = diameter;
+            (*self.diameter.borrow_mut()) = diameter;
 
             diameter
         }
@@ -260,6 +260,15 @@ impl Tree {
         }
 
         indices
+    }
+
+    /// Rescales the branch lengths of a tree
+    pub fn rescale(&mut self, scale: f32) {
+        if let Some(diam) = self.diameter() {
+            for node in self.nodes.iter_mut().skip(1) {
+                node.length = node.length.map(|l| l * scale / diam);
+            }
+        }
     }
 
     /// Gets reference to a specified node in the tree
@@ -633,6 +642,7 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
     tree
 }
 
+#[derive(Clone)]
 /// A node of the Tree
 pub struct TreeNode {
     /// Index of the node
@@ -684,6 +694,31 @@ impl TreeNode {
         self.name = Some(name);
     }
 }
+
+impl PartialEq for TreeNode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.parent, other.parent) {
+            (None, None) | (Some(_), Some(_)) => {}
+            _ => return false,
+        }
+
+        if (self.parent.is_none() && other.parent.is_some())
+            || (self.parent.is_some() && other.parent.is_none())
+        {
+            return false;
+        }
+
+        let lengths_equal = match (self.length, other.length) {
+            (None, None) => true,
+            (Some(l1), Some(l2)) => (l1 - l2).abs() < f32::EPSILON,
+            _ => false,
+        };
+
+        self.name == other.name && self.children.len() == other.children.len() && lengths_equal
+    }
+}
+
+impl Eq for TreeNode {}
 
 impl Display for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1027,5 +1062,45 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             assert!(tree.sackin().is_none());
         }
+    }
+
+    #[test]
+    fn test_rescale() {
+        let test_cases = [
+            ("((D:0.05307533041908017723553570021977,(C:0.08550401213833067060043902074540,(B:0.27463239708134284944307523801399,A:0.37113575171985613287972682883264)1:0.18134330279626256765546088445262)1:0.08033066840794983454188127325324)1:0.13864016688124142229199264875206,E:0.05060148260657528623829293223935);",
+            "((D:0.04212872094323715649322181775460,(C:0.06786909546224775824363462106703,(B:0.21799038323938338401752901063446,A:0.29459024358034957558061250892933)1:0.14394185279875840177687962295749)1:0.06376273658252405718283029045779)1:0.11004609591585229333432494058798,E:0.04016509597234880352134567260691);",
+            0.6525060248498331),
+            ("(E:0.01699652764738122934229380689430,(D:0.00408169520164380558724381842239,(C:0.19713461567160570075962766622979,(B:0.12068059163592816107613003850929,A:0.45190753170439451613660253315174)1:0.03279750996120785189180679708443)1:0.21625179801434316062547225101298)1:0.03998705111996220251668887613050);",
+            "(E:0.01986870266959113798255209815125,(D:0.00477144449924469995355513773916,(C:0.23044760352958004734347241537762,(B:0.14107392068250154681940955470054,A:0.52827357257097584675165080625447)1:0.03833982959587604877338407050047)1:0.25279532182407132845369801543711)1:0.04674430247278672095889717752470);",
+            0.8860217291333011),
+            ("((C:0.20738366520293352590620372666308,(B:0.19695170474498663315543467433599,A:0.02188551422116874478618342436675)1:0.05940680521299050026451382677806)1:0.13029006694844610936279138968530,(E:0.17189347707484656235799036494427,D:0.05867747522240193691622778260353)1:0.08673941227771603257323818070290);",
+            "((C:0.18371634870356487456710681271943,(B:0.17447491841406459478491797199240,A:0.01938786624432843955223582099734)1:0.05262710219338979922287791168856)1:0.11542092936147484161235610145013,(E:0.15227641937588842768747099398752,D:0.05198100577716616849111019860175)1:0.07684042085359836515845444182560);",
+            0.571639790198416),
+        ];
+
+        for (orig, rescaled, scale) in test_cases {
+            let mut tree = Tree::from_newick(orig).unwrap();
+            let rescaled = Tree::from_newick(rescaled).unwrap();
+
+            tree.rescale(scale);
+
+            println!("Dealing with tree: {} and scale {}", orig, scale);
+            for (n1, n2) in zip(tree.nodes, rescaled.nodes) {
+                assert_eq!(n1, n2)
+            }
+        }
+    }
+
+
+    #[test]
+    fn test_mutability() {
+        let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+        // First computation
+        assert_eq!(tree.diameter().unwrap(), 1.1);
+        assert_eq!(tree.height().unwrap(), 0.9);
+        // Cached value
+        eprintln!("{:?}", tree);
+        assert_eq!(tree.diameter().unwrap(), 1.1);
+        assert_eq!(tree.height().unwrap(), 0.9);
     }
 }
