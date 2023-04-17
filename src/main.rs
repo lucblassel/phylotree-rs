@@ -5,18 +5,20 @@ use phylotree::*;
 mod cli;
 
 fn print_header() {
-    println!("height\tnodes\ttips\trooted\tbinary\tsackin")
+    println!("height\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
 }
 
 fn print_stats(path: &Path) {
-    let mut tree = Tree::from_file(path).unwrap();
+    let tree = Tree::from_file(path).unwrap();
     println!(
-        "{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t",
+        "{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}",
         tree.height(),
         tree.size(),
         tree.get_leaves().len(),
         tree.is_rooted(),
         tree.is_binary(),
+        tree.cherries(),
+        tree.colless(),
         tree.sackin()
     )
 }

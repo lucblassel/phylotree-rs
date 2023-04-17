@@ -73,14 +73,16 @@ Various goals and aims for this project:
         - [x] LCA
         - [x] Distance between nodes
         - [ ] RF distance between trees
+        - [ ] Weighted RF 
+        - [ ] Branch score index
         - [ ] Transfer distance
         - [ ] Other distances ? 
-    - [ ] Metrics:
+    - [x] Metrics:
         - [x] Height of the tree
         - [x] Diameter of the tree
         - [x] Sackin index of the tree (with normalized variants)
-        - [ ] Colless index of the tree
-        - [ ] Number of cherries
+        - [x] Colless index of the tree
+        - [x] Number of cherries
  - [ ] Tree simulation
     - [x] Random binary topology
     - [x] Caterpillar trees

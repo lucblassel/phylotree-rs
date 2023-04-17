@@ -9,11 +9,13 @@ use std::{
     path::Path,
 };
 
+use errors::TreeError;
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
 
 // pub mod data;
+pub mod errors;
 pub mod io;
 
 type Error = Box<dyn std::error::Error>;
@@ -176,8 +178,10 @@ impl Tree {
         }
     }
 
-    pub fn cherries(&self) -> Option<usize> {
-        if self.is_rooted() && self.is_binary() && !self.nodes.is_empty() {
+    /// Computes the number of cherries in a tree
+    pub fn cherries(&self) -> Result<usize> {
+        self.check_rooted_binary()?;
+        if !self.nodes.is_empty() {
             let mut n = 0;
             for node in self.nodes.iter() {
                 if node.children.len() == 2
@@ -187,28 +191,67 @@ impl Tree {
                     n += 1;
                 }
             }
-            Some(n)
+            Ok(n)
         } else {
-            None
+            Err(Box::new(TreeError::IsEmpty))
         }
     }
 
-    /// Computes the sackin statistic for tree with Yule normalization by default
-    pub fn sackin(&self) -> Option<usize> {
-        if self.is_rooted() && self.is_binary() {
-            Some(
-                self.tips
-                    .iter()
-                    .map(|&tip_idx| self.get(tip_idx).distance_to_root)
-                    .sum(),
-            )
-        } else {
-            None
-        }
+    /// Computes the Colless index for the tree
+    pub fn colless(&self) -> Result<usize> {
+        self.check_rooted_binary()?;
+
+        let colless = self
+            .nodes
+            .iter()
+            .filter(|node| !node.is_tip())
+            .map(|node| {
+                if node.children.is_empty() {
+                    return 0;
+                }
+                let left = self.get_subtree_leaves(node.children[0]).len();
+                let right = if node.children.len() > 1 {
+                    self.get_subtree_leaves(node.children[1]).len()
+                } else {
+                    0
+                };
+
+                left.abs_diff(right)
+            })
+            .sum();
+
+        Ok(colless)
+    }
+
+    /// Computes the normalized colless statistic with a Yule null model
+    pub fn colless_yule(&self) -> Result<f64> {
+        self.colless().map(|i_c| {
+            let n = self.tips.len() as f64;
+            let e_i_c = n * n.ln() + (0.57721566 -1. - f64::ln(2.0))*n;
+
+            (i_c as f64 - e_i_c) / n
+        })
+    }
+
+    /// Computes the normalized colless statistic with a PDA null model
+    pub fn colless_pda(&self) -> Result<f64> {
+        self.colless()
+            .map(|i_c| i_c as f64 / f64::powf(self.tips.len() as f64, 3.0 / 2.0))
+    }
+
+    /// Computes the sackin statistic for tree
+    pub fn sackin(&self) -> Result<usize> {
+        self.check_rooted_binary()?;
+
+        Ok(self
+            .tips
+            .iter()
+            .map(|&tip_idx| self.get(tip_idx).distance_to_root)
+            .sum())
     }
 
     /// Computes the normalized sackin statistic with a Yule null model
-    pub fn sackin_yule(&self) -> Option<f64> {
+    pub fn sackin_yule(&self) -> Result<f64> {
         self.sackin().map(|i_n| {
             let n = self.tips.len();
             let sum: f64 = (2..=n).map(|i| 1.0 / (i as f64)).sum();
@@ -218,9 +261,20 @@ impl Tree {
     }
 
     /// Computes the normalized sackin statistic with a PDA null model
-    pub fn sackin_pda(&self) -> Option<f64> {
+    pub fn sackin_pda(&self) -> Result<f64> {
         self.sackin()
             .map(|i_n| i_n as f64 / f64::powf(self.tips.len() as f64, 3.0 / 2.0))
+    }
+
+    /// Checks if the tree is rooted and binary
+    pub fn check_rooted_binary(&self) -> Result<()> {
+        if !self.is_rooted() {
+            Err(Box::new(TreeError::IsNotRooted))
+        } else if !self.is_binary() {
+            Err(Box::new(TreeError::IsNotBinary))
+        } else {
+            Ok(())
+        }
     }
 
     /// Checks if the tree is binary or not
@@ -358,6 +412,60 @@ impl Tree {
             .filter(|node| node.children.is_empty())
             .map(|node| node.idx)
             .collect()
+    }
+
+    /// Get indices of descendant nodes.
+    pub fn get_descendants(&self, index: usize) -> Vec<usize> {
+        let mut indices = vec![];
+        if self.nodes[index].is_tip() {
+            return indices;
+        }
+
+        indices.extend(self.nodes[index].children.clone());
+
+        for &child_idx in self.nodes[index].children.iter() {
+            indices.extend(self.get_descendants(child_idx))
+        }
+
+        indices
+    }
+
+    /// Gets the leaf indices in the subtree rooted at note of a specified index
+    pub fn get_subtree_leaves(&self, index: usize) -> Vec<usize> {
+        let mut indices = vec![];
+        if self.nodes[index].is_tip() {
+            return vec![index];
+        }
+
+        for &child_idx in self.nodes[index].children.iter() {
+            indices.extend(self.get_subtree_leaves(child_idx))
+        }
+
+        indices
+    }
+
+    /// Get left subtree
+    pub fn get_left(&self, index: usize) -> Result<Vec<usize>> {
+        if !self.is_binary() {
+            return Err(Box::new(TreeError::IsNotBinary));
+        }
+        if self.nodes[index].is_tip() {
+            return Ok(vec![]);
+        }
+
+        Ok(self.get_descendants(self.nodes[index].children[0]))
+    }
+
+    /// Get right subtree
+    pub fn get_right(&self, index: usize) -> Result<Vec<usize>> {
+        if !self.is_binary() {
+            return Err(Box::new(TreeError::IsNotBinary));
+        }
+        if self.nodes[index].is_tip() {
+            return Ok(vec![]);
+        }
+
+        Ok(self.get_descendants(self.nodes[index].children[1]))
     }
 
     /// Returns the path from the node to the root
@@ -1156,8 +1264,32 @@ mod tests {
         for (newick, true_cherries) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
             let cherries = tree.cherries();
-            assert!(cherries.is_some());
+            assert!(cherries.is_ok());
             assert_eq!(cherries.unwrap(), true_cherries);
+        }
+    }
+
+    #[test]
+    fn test_colless_rooted() {
+        // Colless index computed with gotree
+        let test_cases = vec![
+            ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 36),
+            ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 4),
+            ("((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 12),
+            ("(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 10),
+        ];
+
+        for (newick, true_colless) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let colless = tree.colless();
+            assert!(colless.is_ok());
+            if tree.colless().unwrap() != true_colless {
+                tree.print_debug();
+                panic!(
+                    "Computed colless {} not equal to true {true_colless}",
+                    tree.colless().unwrap()
+                )
+            };
         }
     }
 
@@ -1174,7 +1306,7 @@ mod tests {
         for (newick, true_sackin) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
             let sackin = tree.sackin();
-            assert!(sackin.is_some());
+            assert!(sackin.is_ok());
             assert_eq!(tree.sackin().unwrap(), true_sackin);
         }
     }
@@ -1190,7 +1322,7 @@ mod tests {
 
         for newick in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
-            assert!(tree.sackin().is_none());
+            assert!(tree.sackin().is_err())
         }
     }
 
@@ -1249,5 +1381,23 @@ mod tests {
                 "Failed on: {newick}"
             )
         }
+    }
+
+    #[test]
+    fn test_descendants() {
+        let tree = build_simple_tree();
+        let descendants_b: Vec<_> = get_values(&tree.get_descendants(1), &tree)
+            .into_iter()
+            .flatten()
+            .sorted()
+            .collect();
+        let descendants_g: Vec<_> = get_values(&tree.get_descendants(2), &tree)
+            .into_iter()
+            .flatten()
+            .sorted()
+            .collect();
+
+        assert_eq!(descendants_b, vec!["A", "C", "D", "E"]);
+        assert_eq!(descendants_g, vec!["H", "I"]);
     }
 }
