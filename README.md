@@ -62,12 +62,13 @@ Rough API ref goes here
 Various goals and aims for this project:
  - [ ] Tree object
     - [x] Create base tree and node objects
-    - [ ] Rescale tree branch lengths
-    - [ ] Traversals:
+    - [x] Enforce tip name uniqueness for distance calculations
+    - [x] Rescale tree branch lengths
+    - [x] Traversals:
         - [x] Pre-order
         - [x] Post-order
         - [x] Level-order
-        - [ ] In-order (for binary trees only)
+        - [x] In-order (for binary trees only)
     - [ ] Distances:
         - [x] LCA
         - [x] Distance between nodes
@@ -82,6 +83,7 @@ Various goals and aims for this project:
         - [ ] Number of cherries
  - [ ] Tree simulation
     - [x] Random binary topology
+    - [x] Caterpillar trees
     - [ ] Add different branch length distributions
     - [ ] Add birth death simulation
     - [ ] Add coalescent simulation

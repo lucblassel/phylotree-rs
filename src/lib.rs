@@ -1,11 +1,12 @@
 #![feature(is_some_and)]
 
 use std::{
+    cell::RefCell,
     collections::{HashSet, VecDeque},
     fmt::{Debug, Display},
     fs,
     iter::zip,
-    path::Path, cell::RefCell,
+    path::Path,
 };
 
 use itertools::Itertools;
@@ -101,6 +102,7 @@ impl Tree {
         self.nodes.push(node);
 
         self.nodes[parent].children.push(idx);
+        self.nodes[parent].set_internal();
         if self.nodes[parent].children.len() > 2 {
             self.is_binary = false
         }
@@ -174,6 +176,23 @@ impl Tree {
         }
     }
 
+    pub fn cherries(&self) -> Option<usize> {
+        if self.is_rooted() && self.is_binary() && !self.nodes.is_empty() {
+            let mut n = 0;
+            for node in self.nodes.iter() {
+                if node.children.len() == 2
+                    && self.get(node.children[0]).tip
+                    && self.get(node.children[1]).tip
+                {
+                    n += 1;
+                }
+            }
+            Some(n)
+        } else {
+            None
+        }
+    }
+
     /// Computes the sackin statistic for tree with Yule normalization by default
     pub fn sackin(&self) -> Option<usize> {
         if self.is_rooted() && self.is_binary() {
@@ -214,39 +233,75 @@ impl Tree {
         !self.nodes.is_empty() && self.nodes[0].children.len() == 2
     }
 
+    /// Checks if the tree tips are uniquely named
+    pub fn are_tip_names_unique(&self) -> bool {
+        let n_names = self
+            .tips
+            .iter()
+            .filter_map(|&idx| self.get(idx).name.clone())
+            .sorted()
+            .dedup()
+            .count();
+
+        n_names == self.tips.len()
+    }
+
     /// Returns indices in the pre-order traversal
-    pub fn preorder(&self, root: usize) -> Vec<usize> {
+    pub fn preorder(&self, root: usize) -> Result<Vec<usize>> {
         if root >= self.nodes.len() {
-            panic!("Leaf number {root} does not exist in this tree")
+            return Err(format!("Leaf number {root} does not exist in this tree").into());
         }
 
         let mut indices = vec![root];
         for child in self.nodes[root].children.iter() {
-            indices.extend(self.preorder(*child));
+            indices.extend(self.preorder(*child)?);
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Returns indices in the post-order traversal
-    pub fn postorder(&self, root: usize) -> Vec<usize> {
+    pub fn postorder(&self, root: usize) -> Result<Vec<usize>> {
         if root >= self.nodes.len() {
-            panic!("Leaf number {root} does not exist in this tree")
+            return Err(format!("Leaf number {root} does not exist in this tree").into());
         }
 
         let mut indices = vec![];
         for child in self.nodes[root].children.iter() {
-            indices.extend(self.postorder(*child));
+            indices.extend(self.postorder(*child)?);
         }
         indices.push(root);
 
-        indices
+        Ok(indices)
+    }
+
+    pub fn inorder(&self, root: usize) -> Result<Vec<usize>> {
+        if root >= self.nodes.len() {
+            return Err(format!("Leaf number {root} does not exist in this tree").into());
+        }
+        if !self.is_binary() {
+            return Err("In-order traversal is only possible on binary trees.".into());
+        }
+
+        let mut indices = vec![];
+
+        let children = self.nodes[root].children.clone();
+        // There is a left child
+        if !children.is_empty() {
+            indices.extend(self.inorder(children[0])?);
+        }
+        indices.push(root);
+        // There is a right child
+        if children.len() > 1 {
+            indices.extend(self.inorder(children[1])?);
+        }
+        Ok(indices)
     }
 
     /// Returns the indices in the level-order traversal
-    pub fn levelorder(&self, root: usize) -> Vec<usize> {
+    pub fn levelorder(&self, root: usize) -> Result<Vec<usize>> {
         if root >= self.nodes.len() {
-            panic!("Leaf number {root} does not exist in this tree")
+            return Err(format!("Leaf number {root} does not exist in this tree").into());
         }
         let mut indices = vec![];
         let mut queue = VecDeque::new();
@@ -259,7 +314,7 @@ impl Tree {
             }
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Rescales the branch lengths of a tree
@@ -547,7 +602,7 @@ impl Tree {
     }
 
     /// returns a postorder traversal iterator
-    pub fn iter_postorder(&self) -> PostOrder<'_> {
+    pub fn iter_postorder(&self) -> Result<PostOrder<'_>> {
         PostOrder::new(self)
     }
 }
@@ -590,11 +645,11 @@ pub struct PostOrder<'a> {
 }
 
 impl<'a> PostOrder<'a> {
-    fn new(tree: &'a Tree) -> Self {
-        Self {
+    fn new(tree: &'a Tree) -> Result<Self> {
+        Ok(Self {
             tree,
-            traversal: tree.postorder(0).into_iter().rev().collect(),
-        }
+            traversal: tree.postorder(0)?.into_iter().rev().collect(),
+        })
     }
 }
 
@@ -614,7 +669,7 @@ impl<'a> Iterator for PostOrder<'a> {
     }
 }
 
-/// Genereates a random binary tree of a given size
+/// Genereates a random binary tree of a given size. Branch lengths are uniformly distributed
 pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
     let mut tree = Tree::new(None);
     let mut rng = thread_rng();
@@ -642,6 +697,31 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
     tree
 }
 
+/// Generates a caterpillar tree by adding children to the last node addesd to the tree
+/// until we reach the desired numebr of leaves. Branch lengths are uniformly distributed
+pub fn generate_caterpillar(n_leaves: usize, brlens: bool) -> Tree {
+    let mut tree = Tree::new(None);
+    let mut rng = thread_rng();
+
+    let mut parent = 0;
+    for i in 1..n_leaves {
+        let parent_bkp = parent;
+        let l1: Option<f32> = if brlens { Some(rng.gen()) } else { None };
+        let l2: Option<f32> = if brlens { Some(rng.gen()) } else { None };
+        if i == n_leaves - 1 {
+            // Adding tip
+            tree.add_child_with_len(Some(&format!("Tip_{i}")), parent, l1);
+            tree.add_child_with_len(Some(&format!("Tip_{}", i + 1)), parent, l2);
+        } else {
+            // Adding parent node
+            parent = tree.add_child_with_len(None, parent, l1);
+            tree.add_child_with_len(Some(&format!("Tip_{i}")), parent_bkp, l2);
+        }
+    }
+
+    tree
+}
+
 #[derive(Clone)]
 /// A node of the Tree
 pub struct TreeNode {
@@ -655,6 +735,8 @@ pub struct TreeNode {
     pub children: Vec<usize>,
     /// Length of branch between parent and node
     pub length: Option<f32>,
+    /// Is a tip node
+    tip: bool,
     /// Distance to root
     distance_to_root: usize,
 }
@@ -668,6 +750,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length: None,
+            tip: true,
             distance_to_root: 0,
         }
     }
@@ -685,6 +768,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length,
+            tip: true,
             distance_to_root: 0,
         }
     }
@@ -692,6 +776,21 @@ impl TreeNode {
     /// Sets the internal TreeNode name
     pub fn set_name(&mut self, name: String) {
         self.name = Some(name);
+    }
+
+    /// Sets this node to internal
+    pub fn set_internal(&mut self) {
+        self.tip = false;
+    }
+
+    /// Sets this node to tip
+    pub fn set_tip(&mut self) {
+        self.tip = true;
+    }
+
+    /// Check if the node is a tip node
+    pub fn is_tip(&self) -> bool {
+        self.tip
     }
 }
 
@@ -745,6 +844,8 @@ mod tests {
 
     /// Generates example tree from the tree traversal wikipedia page
     /// https://en.wikipedia.org/wiki/Tree_traversal#Depth-first_search
+    /// The difference is that I is the left child of G since my tree structure
+    /// cannot represent a right child only.
     fn build_simple_tree() -> Tree {
         let mut tree = Tree::new(Some("F")); // 0
         tree.add_child(Some("B"), 0); // 1
@@ -829,7 +930,7 @@ mod tests {
     #[test]
     fn traverse_preorder() {
         let tree = build_simple_tree();
-        let values: Vec<_> = get_values(&(tree.preorder(0)), &tree)
+        let values: Vec<_> = get_values(&(tree.preorder(0).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -849,7 +950,7 @@ mod tests {
     #[test]
     fn traverse_postorder() {
         let tree = build_simple_tree();
-        let values: Vec<_> = get_values(&(tree.postorder(0)), &tree)
+        let values: Vec<_> = get_values(&(tree.postorder(0).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -861,15 +962,26 @@ mod tests {
         let tree = build_simple_tree();
         let values: Vec<_> = tree
             .iter_postorder()
+            .unwrap()
             .flat_map(|node| node.name.clone())
             .collect();
         assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     }
 
     #[test]
+    fn traverse_inorder() {
+        let tree = build_simple_tree();
+        let values: Vec<_> = get_values(&(tree.inorder(0).unwrap()), &tree)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(values, vec!["A", "B", "C", "D", "E", "F", "H", "I", "G"])
+    }
+
+    #[test]
     fn traverse_levelorder() {
         let tree = build_simple_tree();
-        let values: Vec<_> = get_values(&(tree.levelorder(0)), &tree)
+        let values: Vec<_> = get_values(&(tree.levelorder(0).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -880,7 +992,7 @@ mod tests {
     fn prune_tree() {
         let mut tree = build_simple_tree();
         tree.prune(4); // prune D subtree
-        let values: Vec<_> = get_values(&(tree.preorder(0)), &tree)
+        let values: Vec<_> = get_values(&(tree.preorder(0).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -1032,6 +1144,24 @@ mod tests {
     }
 
     #[test]
+    fn test_cherries() {
+        // Number of cherries computed with gotree
+        let test_cases = vec![
+            ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 1),
+            ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 5),
+            ("((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 5),
+            ("(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 4),
+        ];
+
+        for (newick, true_cherries) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let cherries = tree.cherries();
+            assert!(cherries.is_some());
+            assert_eq!(cherries.unwrap(), true_cherries);
+        }
+    }
+
+    #[test]
     fn test_sackin_rooted() {
         // Sackin index computed with gotree
         let test_cases = vec![
@@ -1091,7 +1221,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_mutability() {
         let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
@@ -1102,5 +1231,23 @@ mod tests {
         eprintln!("{:?}", tree);
         assert_eq!(tree.diameter().unwrap(), 1.1);
         assert_eq!(tree.height().unwrap(), 0.9);
+    }
+
+    #[test]
+    fn test_unique_tip_names() {
+        let test_cases = vec![
+            ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",true),
+            ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", true),
+            ("(((((((((,),),),),),),),),);",false),
+            ("(((((((((Tip8,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",false),
+        ];
+
+        for (newick, is_unique) in test_cases {
+            assert_eq!(
+                Tree::from_newick(newick).unwrap().are_tip_names_unique(),
+                is_unique,
+                "Failed on: {newick}"
+            )
+        }
     }
 }
