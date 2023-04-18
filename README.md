@@ -86,7 +86,7 @@ Various goals and aims for this project:
  - [ ] Tree simulation
     - [x] Random binary topology
     - [x] Caterpillar trees
-    - [ ] Add different branch length distributions
+    - [x] Add different branch length distributions
     - [ ] Add birth death simulation
     - [ ] Add coalescent simulation
     - [ ] Simulate ultrametric trees

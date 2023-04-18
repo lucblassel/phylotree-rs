@@ -10,6 +10,7 @@ use std::{
 };
 
 use errors::TreeError;
+use distr::{Distr, Sampler};
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
@@ -17,6 +18,7 @@ use rand::prelude::*;
 // pub mod data;
 pub mod errors;
 pub mod io;
+pub mod distr;
 
 type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
@@ -969,10 +971,13 @@ impl<'a> Iterator for PostOrder<'a> {
     }
 }
 
+
 /// Genereates a random binary tree of a given size. Branch lengths are uniformly distributed
-pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
+pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Tree {
     let mut tree = Tree::new(None);
     let mut rng = thread_rng();
+    
+    let sampler = Sampler::new(sampler_type);
 
     let mut next_deq = VecDeque::new();
     next_deq.push_back(0);
@@ -984,8 +989,8 @@ pub fn generate_tree(n_leaves: usize, brlens: bool) -> Tree {
             next_deq.pop_back()
         }
         .unwrap();
-        let l1: Option<f32> = if brlens { Some(rng.gen()) } else { None };
-        let l2: Option<f32> = if brlens { Some(rng.gen()) } else { None };
+        let l1: Option<f32> = if brlens { Some(sampler.sample(&mut rng)) } else { None };
+        let l2: Option<f32> = if brlens { Some(sampler.sample(&mut rng)) } else { None };
         next_deq.push_back(tree.add_child_with_len(None, parent_idx, l1));
         next_deq.push_back(tree.add_child_with_len(None, parent_idx, l2));
     }
@@ -1376,9 +1381,24 @@ mod tests {
         let mut rng = thread_rng();
 
         for size in (0..20).map(|_| rng.gen_range(10..=100)) {
-            let tree = generate_tree(size, false);
+            let tree = generate_tree(size, false, Distr::Uniform);
             assert_eq!(tree.get_leaves().len(), size);
         }
+    }
+
+    #[test]
+    fn genera_gamma() {
+        use rand::prelude::*;
+        let mut rng = thread_rng();
+        for size in (0..20).map(|_| rng.gen_range(10..=100)) {
+            let tree = generate_tree(size, true, Distr::Gamma);
+            let tree2 = generate_tree(size, true, Distr::Uniform);
+            assert_eq!(tree.get_leaves().len(), size);
+            assert_eq!(tree2.get_leaves().len(), size);
+            println!("G: {}", tree.to_newick());
+            println!("U: {}", tree2.to_newick())
+        }
+        panic!()
     }
 
     #[test]

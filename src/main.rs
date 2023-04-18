@@ -1,6 +1,6 @@
-use std::path::Path;
 use clap::Parser;
 use phylotree::*;
+use std::path::Path;
 
 mod cli;
 
@@ -29,6 +29,7 @@ fn main() {
             branch_lengths,
             output,
             trees,
+            distribution,
         } => {
             if let Some(ntrees) = trees {
                 // Create output directory if it's missing
@@ -36,11 +37,11 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate_tree(tips, branch_lengths);
+                    let random = generate_tree(tips, branch_lengths, distribution);
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate_tree(tips, branch_lengths);
+                let random = generate_tree(tips, branch_lengths, distribution);
                 random.to_file(&output).unwrap()
             }
         }

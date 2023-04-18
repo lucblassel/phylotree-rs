@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::distr::Distr;
+
 /// A simple command line tool to generate a random phylogenetic tree
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -27,7 +29,11 @@ pub enum Commands {
 
         /// Number of trees to generate
         #[arg(short='n', long)]
-        trees: Option<usize>
+        trees: Option<usize>,
+
+        /// Distribution of branch lengths
+        #[arg(value_enum, short, long, default_value_t=Distr::Uniform)]
+        distribution: Distr
     },
 
     /// Get statistics about a tree
