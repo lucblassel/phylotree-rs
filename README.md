@@ -72,9 +72,9 @@ Various goals and aims for this project:
     - [ ] Distances:
         - [x] LCA
         - [x] Distance between nodes
-        - [ ] RF distance between trees
-        - [ ] Weighted RF 
-        - [ ] Branch score index
+        - [x] RF distance between trees
+        - [x] Weighted RF 
+        - [x] Branch score index
         - [ ] Transfer distance
         - [ ] Other distances ? 
     - [x] Metrics:
