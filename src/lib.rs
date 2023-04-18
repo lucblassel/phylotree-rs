@@ -29,6 +29,7 @@ pub struct Tree {
     is_binary: bool,
     height: RefCell<Option<f32>>,
     diameter: RefCell<Option<f32>>,
+    leaf_index: RefCell<Option<Vec<String>>>,
 }
 
 impl Tree {
@@ -40,6 +41,7 @@ impl Tree {
             is_binary: true,
             height: RefCell::new(None),
             diameter: RefCell::new(None),
+            leaf_index: RefCell::new(None),
         }
     }
 
@@ -51,6 +53,7 @@ impl Tree {
             is_binary: true,
             height: RefCell::new(None),
             diameter: RefCell::new(None),
+            leaf_index: RefCell::new(None),
         }
     }
 
@@ -227,7 +230,7 @@ impl Tree {
     pub fn colless_yule(&self) -> Result<f64> {
         self.colless().map(|i_c| {
             let n = self.tips.len() as f64;
-            let e_i_c = n * n.ln() + (0.57721566 -1. - f64::ln(2.0))*n;
+            let e_i_c = n * n.ln() + (0.57721566 - 1. - f64::ln(2.0)) * n;
 
             (i_c as f64 - e_i_c) / n
         })
@@ -405,6 +408,46 @@ impl Tree {
         n.children = vec![];
     }
 
+    /// Remove nodes with only one child
+    pub fn compress(&mut self) -> Result<()> {
+        for node in self.nodes.clone().into_iter() {
+            if node.children.len() != 1 {
+                continue;
+            }
+
+            let parent = self.get(node.idx).parent;
+            let parent_len = self.get(node.idx).length;
+            let child_idx = self.get(node.idx).children[0];
+            let child_len = self.get(child_idx).length;
+
+            // Compress tree
+            if let Some(parent_idx) = parent {
+                // Make parent node point to new child
+                let parent_node = self.get_mut(parent_idx);
+                let parent_node_idx = parent_node
+                    .children
+                    .iter()
+                    .position(|&idx| idx == node.idx)
+                    .unwrap();
+                parent_node.children[parent_node_idx] = child_idx;
+            }
+
+            let child = self.get_mut(child_idx);
+            child.parent = parent;
+            child.length = match (parent_len, child_len) {
+                (Some(d1), Some(d2)) => Some(d1 + d2),
+                (None, None) => None,
+                (Some(d), None) | (None, Some(d)) => Some(d),
+            };
+
+            let node = self.get_mut(node.idx);
+            node.length = None;
+            node.parent = None;
+            node.children = vec![];
+        }
+        Ok(())
+    }
+
     /// Gets the index of leaf nodes in the tree
     pub fn get_leaves(&self) -> Vec<usize> {
         self.nodes
@@ -544,6 +587,76 @@ impl Tree {
         } else {
             (None, branches)
         }
+    }
+
+    /// Get Vec containing leaf names
+    pub fn get_leaf_names(&self) -> Vec<String> {
+        self.tips
+            .iter()
+            .filter_map(|&tip_index| self.get(tip_index).name.clone())
+            .collect()
+    }
+
+    /// Initializes the leaf index
+    fn init_leaf_index(&self) -> Result<()> {
+        if self.nodes.is_empty() {
+            return Err(Box::new(TreeError::IsEmpty));
+        }
+        if self.leaf_index.borrow().is_some() {
+            return Ok(());
+        }
+
+        let names = self.get_leaf_names();
+        if names.len() != self.tips.len() {
+            return Err(Box::new(TreeError::UnnamedLeaves));
+        }
+
+        if !self.are_tip_names_unique() {
+            return Err(Box::new(TreeError::DuplicateLeafNames));
+        }
+
+        (*self.leaf_index.borrow_mut()) = Some(names.into_iter().sorted().collect());
+
+        Ok(())
+    }
+
+    /// Get the partition corresponding to the branch associated to the node at index
+    pub fn get_partition(&self, index: usize) -> Result<usize> {
+        self.init_leaf_index()?;
+
+        let indices = self
+            .get_subtree_leaves(index)
+            .into_iter()
+            .filter_map(|index| self.get(index).name.clone())
+            .into_iter()
+            .map(|name| {
+                let v = self.leaf_index.borrow().clone();
+                v.map(|v| v.iter().position(|n| *n == name).unwrap())
+                    .unwrap()
+            });
+
+        let mut hash = 0;
+        for index in indices {
+            hash ^= 1 << index;
+        }
+
+        Ok(hash)
+    }
+
+    /// Get all partitions of a tree
+    pub fn get_partitions(&self) -> Result<Vec<usize>> {
+        self.init_leaf_index()?;
+
+        self.nodes
+            .iter()
+            .filter(|n| !n.deleted)
+            .map(|v| self.get_partition(v.idx))
+            .collect()
+    }
+
+    /// Resets the leaf index
+    fn reset_leaf_index(&self) {
+        (*self.leaf_index.borrow_mut()) = None;
     }
 
     /// Recursive function that adds node representation to a printable tree builder
@@ -847,6 +960,8 @@ pub struct TreeNode {
     tip: bool,
     /// Distance to root
     distance_to_root: usize,
+    ///
+    deleted: bool,
 }
 
 impl TreeNode {
@@ -860,6 +975,7 @@ impl TreeNode {
             length: None,
             tip: true,
             distance_to_root: 0,
+            deleted: false,
         }
     }
 
@@ -878,6 +994,7 @@ impl TreeNode {
             length,
             tip: true,
             distance_to_root: 0,
+            deleted: false,
         }
     }
 
@@ -1399,5 +1516,50 @@ mod tests {
 
         assert_eq!(descendants_b, vec!["A", "C", "D", "E"]);
         assert_eq!(descendants_g, vec!["H", "I"]);
+    }
+
+    #[test]
+    fn test_compress() {
+        let mut tree = Tree::new(Some("root"));
+        tree.add_child_with_len(Some("tip_A"), 0, Some(1.0));
+        tree.add_child_with_len(Some("in_B"), 0, Some(1.0));
+        tree.add_child_with_len(Some("in_C"), 2, Some(1.0));
+        tree.add_child_with_len(Some("tip_D"), 3, Some(1.0));
+
+        tree.compress().unwrap();
+
+        assert_eq!(tree.to_newick(), "(tip_A:1,tip_D:3)root;");
+    }
+
+    #[test]
+    fn test_get_partitions() {
+        let test_cases = vec![
+            (
+                "(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 
+                "(Tip0,((Tip2,(Tip3,(Tip4,(Tip5,(Tip6,((Tip8,Tip9),Tip7)))))),Tip1));",
+            ),
+            (
+                "(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 
+                "(((c:0.1,d:0.1):0.1,((g:0.1,h:0.1):0.1,(f:0.1,e:0.1):0.1):0.1):0.1,((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1);",
+            ),
+            (
+                "((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 
+                "((((e:0.2,f:0.2):0.2,((i:0.2,j:0.2):0.2,(g:0.2,h:0.2):0.2):0.2):0.2,(d:0.2,c:0.2):0.2):0.2,(b:0.2,a:0.2):0.2);",
+            ),
+            (
+                "(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 
+                "((((g:0.3,f:0.3):0.3,((i:0.3,j:0.3):0.3,h:0.3):0.3):0.3,(d:0.3,e:0.3):0.3):0.3,((b:0.3,c:0.3):0.3,a:0.3):0.3);",
+            ),
+        ];
+
+        for (newick, rot_newick) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let rota = Tree::from_newick(rot_newick).unwrap();
+
+            let ps_orig: HashSet<_> = HashSet::from_iter(tree.get_partitions().unwrap());
+            let ps_rota: HashSet<_> = HashSet::from_iter(rota.get_partitions().unwrap());
+
+            assert_eq!(ps_orig, ps_rota);
+        }
     }
 }
