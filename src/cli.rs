@@ -40,6 +40,21 @@ pub enum Commands {
     Stats {
         /// Input newick file of the tree
         trees: Vec<PathBuf>
+    },
+
+    /// Compare two trees
+    Compare {
+        /// Reference tree
+        reftree: PathBuf,
+        /// Tree to compare to reference
+        tocompare: PathBuf,
+    },
+    /// Compute RF between two tree
+    RF {
+        /// Reference tree
+        reftree: PathBuf,
+        /// Tree to compare to reference
+        tocompare: PathBuf,
     }
 
 }

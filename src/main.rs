@@ -51,5 +51,37 @@ fn main() {
                 print_stats(&tree)
             }
         }
+        cli::Commands::Compare { reftree, tocompare } => {
+            let reftree = Tree::from_file(&reftree).unwrap();
+            let compare = Tree::from_file(&tocompare).unwrap();
+
+            let ref_parts = reftree.get_partitions().unwrap();
+            let other_parts = compare.get_partitions().unwrap();
+
+            let common = ref_parts.intersection(&other_parts).count();
+            let rf = reftree.robinson_foulds(&compare).unwrap();
+
+            dbg!("Ref: {}", reftree.leaf_index);
+            dbg!("Cmp: {}", compare.leaf_index);
+            eprintln!("Ref: {ref_parts:#?}");
+            eprintln!("Cmp: {other_parts:#?}");
+
+            println!("tree\treference\tcommon\tcompared\trf");
+            println!(
+                "0\t{}\t{}\t{}\t{}",
+                ref_parts.len() - common,
+                common,
+                other_parts.len() - common,
+                rf,
+            )
+        }
+        cli::Commands::RF { reftree, tocompare } => {
+            let reftree = Tree::from_file(&reftree).unwrap();
+            let compare = Tree::from_file(&tocompare).unwrap();
+
+            let rf = reftree.robinson_foulds_new(&compare).unwrap();
+
+            println!("{rf}")
+        }
     }
 }
