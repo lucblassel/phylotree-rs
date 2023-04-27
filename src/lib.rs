@@ -1,4 +1,4 @@
-#![feature(is_some_and)]
+// #![feature(is_some_and)]
 
 use std::{
     cell::RefCell,
@@ -9,19 +9,21 @@ use std::{
     path::Path,
 };
 
-use errors::TreeError;
 use distr::{Distr, Sampler};
+use errors::TreeError;
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
 
 // pub mod data;
+pub mod distr;
 pub mod errors;
 pub mod io;
-pub mod distr;
 
 type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
+type Edge = usize;
 
 /// A Vector backed Tree structure
 #[derive(Debug, Clone)]
@@ -29,9 +31,11 @@ pub struct Tree {
     nodes: Vec<TreeNode>,
     tips: HashSet<usize>,
     is_binary: bool,
+    is_rooted: bool,
     height: RefCell<Option<f32>>,
     diameter: RefCell<Option<f32>>,
-    leaf_index: RefCell<Option<Vec<String>>>,
+    pub leaf_index: RefCell<Option<Vec<String>>>,
+    partitions: RefCell<Option<HashMap<usize, Option<f32>>>>,
 }
 
 impl Tree {
@@ -41,9 +45,11 @@ impl Tree {
             nodes: vec![TreeNode::new(0, name.map(String::from), None)],
             tips: HashSet::from_iter(vec![0]),
             is_binary: true,
+            is_rooted: true,
             height: RefCell::new(None),
             diameter: RefCell::new(None),
             leaf_index: RefCell::new(None),
+            partitions: RefCell::new(None),
         }
     }
 
@@ -53,9 +59,11 @@ impl Tree {
             nodes: vec![],
             tips: HashSet::new(),
             is_binary: true,
+            is_rooted: true,
             height: RefCell::new(None),
             diameter: RefCell::new(None),
             leaf_index: RefCell::new(None),
+            partitions: RefCell::new(None),
         }
     }
 
@@ -112,6 +120,10 @@ impl Tree {
         self.nodes[parent].set_internal();
         if self.nodes[parent].children.len() > 2 {
             self.is_binary = false
+        }
+
+        if parent == 0 && self.nodes[parent].children.len() == 3 {
+            self.is_rooted = false
         }
 
         self.tips.remove(&parent);
@@ -628,14 +640,12 @@ impl Tree {
     }
 
     /// Get the partition corresponding to the branch associated to the node at index
-    pub fn get_partition(&self, index: usize) -> Result<usize> {
+    pub fn get_partition(&self, index: usize) -> Result<Edge> {
         self.init_leaf_index()?;
-
         let indices = self
             .get_subtree_leaves(index)
             .into_iter()
             .filter_map(|index| self.get(index).name.clone())
-            .into_iter()
             .map(|name| {
                 let v = self.leaf_index.borrow().clone();
                 v.map(|v| v.iter().position(|n| *n == name).unwrap())
@@ -650,52 +660,223 @@ impl Tree {
         Ok(hash)
     }
 
-    /// Get all partitions of a tree
-    pub fn get_partitions(&self) -> Result<Vec<usize>> {
+    /// Get the partition corresponding to the branch associated to the node at index
+    pub fn get_partition_new(&self, index: usize) -> Result<FixedBitSet> {
         self.init_leaf_index()?;
 
-        self.nodes
+        let indices = self
+            .get_subtree_leaves(index)
+            .into_iter()
+            .filter_map(|index| self.get(index).name.clone())
+            .map(|name| {
+                let v = self.leaf_index.borrow().clone();
+                v.map(|v| v.iter().position(|n| *n == name).unwrap())
+                    .unwrap()
+            });
+
+        let mut bitset = FixedBitSet::with_capacity(self.tips.len());
+        for index in indices {
+            bitset.insert(index);
+        }
+
+        let mut toggled = bitset.clone();
+        toggled.toggle_range(..);
+
+        Ok(toggled.min(bitset))
+    }
+
+    /// Caches partitions for distance computation
+    fn init_partitions_new(&self) -> Result<HashMap<FixedBitSet, Option<f32>>> {
+        self.init_leaf_index()?;
+
+        let mut partitions: HashMap<FixedBitSet, Option<f32>> = HashMap::new();
+
+        for node in self
+            .nodes
             .iter()
-            .filter(|n| !(n.deleted || n.parent.is_none())) // skipping root & deleted nodes
-            .map(|v| self.get_partition(v.idx))
-            .collect()
+            .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
+        {
+            let part = self.get_partition_new(node.idx)?;
+
+            if part.count_ones(..) == 1 {
+                continue;
+            }
+
+            let new_len = node.length;
+            let old_len = partitions.get(&part);
+
+            let len = match (new_len, old_len) {
+                (None, None) => None,
+                (Some(new_len), Some(old_len)) => old_len.map(|v| v + new_len),
+                (Some(new_len), None) => Some(new_len),
+                (None, Some(old_len)) => *old_len,
+            };
+
+            partitions.insert(part, len);
+        }
+
+        Ok(partitions)
+    }
+
+    fn get_partitions_new(&self) -> Result<HashSet<FixedBitSet>> {
+        self.init_leaf_index()?;
+
+        let partitions = self.init_partitions_new()?;
+
+        Ok(HashSet::from_iter(partitions.keys().map(|k| k.clone())))
+    }
+
+    /// Computes the Robinson Foulds distance between two trees
+    pub fn robinson_foulds_new(&self, other: &Self) -> Result<usize> {
+        let partitions_s = self.get_partitions_new()?;
+        let partitions_o = other.get_partitions_new()?;
+
+        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
+            return Err(TreeError::DifferentTipIndices.into());
+        }
+
+        let mut root_s = HashSet::new();
+        for i in self.nodes[0].children.iter() {
+            root_s.insert(self.get_partition_new(*i)?);
+        }
+        let mut root_o = HashSet::new();
+        for i in other.nodes[0].children.iter() {
+            root_o.insert(other.get_partition_new(*i)?);
+        }
+
+        let same_root = root_s == root_o;
+
+        let i = partitions_o.intersection(&partitions_s).count();
+        let rf = partitions_o.len() + partitions_s.len() - 2 * i;
+
+        // Hacky...
+        if self.is_rooted && rf != 0 && !same_root {
+            Ok(rf + 2)
+        } else {
+            Ok(rf)
+        }
+    }
+
+    /// Computes the normalized Robinson Foulds distance between two trees
+    pub fn robinson_foulds_norm_new(&self, other: &Self) -> Result<f32> {
+        let rf = self.robinson_foulds_new(other)?;
+
+        let partitions_s = self.get_partitions_new()?;
+        let partitions_o = other.get_partitions_new()?;
+
+        let tot = partitions_o.len() + partitions_s.len();
+
+        Ok((rf as f32) / (tot as f32))
+    }
+
+    /// Caches partitions for distance computation
+    fn init_partitions(&self) -> Result<()> {
+        self.init_leaf_index()?;
+
+        if self.partitions.borrow().is_some() {
+            return Ok(());
+        }
+
+        let mut partitions: HashMap<Edge, Option<f32>> = HashMap::new();
+
+        let m: usize = 2u64.pow(self.tips.len() as u32) as usize - 1;
+        for node in self
+            .nodes
+            .iter()
+            .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
+        {
+            let part = self.get_partition(node.idx)?;
+            let part = part.min(m ^ part);
+
+            let new_len = node.length;
+            let old_len = partitions.get(&part);
+
+            let len = match (new_len, old_len) {
+                (None, None) => None,
+                (Some(new_len), Some(old_len)) => old_len.map(|v| v + new_len),
+                (Some(new_len), None) => Some(new_len),
+                (None, Some(old_len)) => *old_len,
+            };
+
+            partitions.insert(part, len);
+        }
+
+        (*self.partitions.borrow_mut()) = Some(partitions);
+
+        Ok(())
+    }
+
+    pub fn get_partitions(&self) -> Result<HashSet<Edge>> {
+        self.init_leaf_index()?;
+
+        if self.partitions.borrow().is_none() {
+            self.init_partitions()?;
+        }
+
+        Ok(HashSet::from_iter(
+            self.partitions
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|(k, _)| *k),
+        ))
     }
 
     /// Get all partitions of a tree
-    pub fn get_partitions_with_lengths(&self) -> Result<Vec<(usize, f32)>> {
+    pub fn get_partitions_with_lengths(&self) -> Result<HashMap<Edge, f32>> {
         self.init_leaf_index()?;
 
-        let ps: Result<Vec<_>> = self
-            .nodes
-            .iter()
-            .filter(|n| !(n.deleted || n.parent.is_none())) // skipping root & deleted nodes
-            .map(|v| self.get_partition(v.idx))
-            .collect();
-        let ps = ps?;
-
-        let lens: Vec<_> = self.nodes.iter().filter_map(|v| v.length).collect();
-
-        if ps.len() != lens.len() {
-            return Err(TreeError::MissingBranchLengths.into());
+        if self.partitions.borrow().is_none() {
+            self.init_partitions()?;
         }
 
-        Ok(std::iter::zip(ps, lens).collect())
+        let mut partitions = HashMap::new();
+        for (hash, len) in self.partitions.borrow().as_ref().unwrap().iter() {
+            if len.is_none() {
+                return Err(TreeError::MissingBranchLengths.into());
+            }
+            partitions.insert(*hash, len.unwrap());
+        }
+
+        Ok(partitions)
     }
 
     /// Computes the Robinson Foulds distance between two trees
     pub fn robinson_foulds(&self, other: &Self) -> Result<usize> {
-        let partitions_s: HashSet<_> = HashSet::from_iter(self.get_partitions()?);
-        let partitions_o: HashSet<_> = HashSet::from_iter(other.get_partitions()?);
+        let partitions_s = self.get_partitions()?;
+        let partitions_o = other.get_partitions()?;
+
+        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
+            return Err(TreeError::DifferentTipIndices.into());
+        }
 
         let i = partitions_o.intersection(&partitions_s).count();
 
         Ok(partitions_o.len() + partitions_s.len() - 2 * i)
     }
 
+    /// Computes the normalized Robinson Foulds distance between two trees
+    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f32> {
+        let partitions_s = self.get_partitions()?;
+        let partitions_o = other.get_partitions()?;
+
+        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
+            return Err(TreeError::DifferentTipIndices.into());
+        }
+
+        let i = partitions_o.intersection(&partitions_s).count();
+
+        let tot = partitions_o.len() + partitions_s.len();
+        let rf = tot - 2 * i;
+
+        Ok((rf as f32) / (tot as f32))
+    }
+
     /// Computes the weighted Robinson Foulds distance between two trees
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f32> {
-        let partitions_s: HashMap<_, _> = HashMap::from_iter(self.get_partitions_with_lengths()?);
-        let partitions_o: HashMap<_, _> = HashMap::from_iter(other.get_partitions_with_lengths()?);
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
 
         let mut dist = 0.;
 
@@ -718,8 +899,8 @@ impl Tree {
 
     /// Computes the khuner felsenstein branch score between two trees
     pub fn khuner_felsenstein(&self, other: &Self) -> Result<f32> {
-        let partitions_s: HashMap<_, _> = HashMap::from_iter(self.get_partitions_with_lengths()?);
-        let partitions_o: HashMap<_, _> = HashMap::from_iter(other.get_partitions_with_lengths()?);
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
 
         let mut dist = 0.;
 
@@ -784,89 +965,20 @@ impl Tree {
 
     /// Generate newick representation of tree
     fn to_newick_impl(&self, root: usize) -> String {
-        if self.get(root).children.is_empty() {
-            match self.get(root).name.clone() {
-                Some(v) => v,
-                None => String::from(""),
-            }
+        let root = self.get(root);
+        if root.children.is_empty() {
+            root.to_newick()
         } else {
             "(".to_string()
-                + &self
-                    .get(root)
+                + &(root
                     .children
                     .iter()
-                    .map(|child_idx| match self.get(*child_idx).length {
-                        Some(l) => format!("{}:{l}", self.to_newick_impl(*child_idx)),
-                        None => self.to_newick_impl(*child_idx),
-                    })
-                    .collect::<Vec<String>>()
-                    .join(",")
+                    .map(|child_idx| self.to_newick_impl(*child_idx)))
+                .collect::<Vec<String>>()
+                .join(",")
                 + ")"
-                + &(match self.get(root).name.clone() {
-                    Some(v) => v,
-                    None => String::from(""),
-                })
+                + &(root.to_newick())
         }
-    }
-
-    /// Parses a newick string
-    /// Heavily inspired (borrowed...) by https://github.com/RagnarGrootKoerkamp/rust-phylogeny
-    fn from_newick_impl<'a>(
-        mut s: &'a str,
-        parent: Option<usize>,
-        tree: &mut Tree,
-    ) -> Result<&'a str> {
-        let node = if let Some(index) = parent {
-            // descendant
-            tree.add_child(None, index)
-        } else {
-            // root
-            0
-        };
-
-        if let Some(_s) = s.strip_prefix('(') {
-            s = _s;
-            loop {
-                s = Self::from_newick_impl(s, Some(node), tree)?;
-
-                let len = if let Some(_s) = s.strip_prefix(':') {
-                    s = _s;
-                    // The length of the branch ends with , or )
-                    let end = s.find(|c| c == ',' || c == ')').ok_or("No , or ) found")?;
-                    let len;
-                    (len, s) = s.split_at(end);
-                    Some(
-                        len.parse()
-                            .map_err(|e: std::num::ParseFloatError| -> String {
-                                "Could not parse length: ".to_string() + &e.to_string()
-                            })?,
-                    )
-                } else {
-                    None
-                };
-
-                if let Some(child) = tree.get(node).children.last() {
-                    tree.get_mut(*child).length = len;
-                } else {
-                    // Root node has length
-                    tree.get_mut(node).length = len;
-                }
-
-                let done = s.starts_with(')');
-                s = s.split_at(1).1;
-                if done {
-                    break;
-                }
-            }
-        }
-
-        let end = s
-            .find(|c| c == ':' || c == ';' || c == ')' || c == ',')
-            .ok_or("No : or ; found")?;
-        let (name, s) = s.split_at(end);
-        tree.get_mut(node).name = Some(name.to_string());
-
-        Ok(s)
     }
 
     /// Generate newick representation of tree
@@ -876,8 +988,138 @@ impl Tree {
 
     /// Parses a newick string into to Tree
     pub fn from_newick(newick: &str) -> Result<Self> {
-        let mut tree = Tree::new(None);
-        Self::from_newick_impl(newick, None, &mut tree)?;
+        #[derive(Debug)]
+        enum Field {
+            Name,
+            Length,
+            Comment,
+        }
+
+        let mut tree = Tree::new_empty();
+
+        let mut parsing = Field::Name;
+        let mut current_name: Option<String> = None;
+        let mut current_length: Option<String> = None;
+        let mut current_index = None;
+        let mut parent_stack = Vec::new();
+
+        for c in newick.chars() {
+            // eprintln!("Parsing: {c}");
+            match c {
+                '(' => {
+                    // Start subtree
+                    match parent_stack.last() {
+                        None => parent_stack.push(tree.add_root(None)?),
+                        Some(parent) => parent_stack.push(tree.add_child(None, *parent)),
+                    };
+                    // eprintln!(
+                    //     "\t\tOPEN: Adding empty node to parent stack -> index {:?}",
+                    //     parent_stack.last()
+                    // )
+                }
+                ':' => {
+                    parsing = Field::Length;
+                }
+                ',' => {
+                    // eprintln!("\t\tSIBL: Adding name and length to current node {current_index:?}");
+                    let node = if let Some(index) = current_index {
+                        tree.get_mut(index)
+                    } else {
+                        if let Some(parent) = parent_stack.last() {
+                            current_index = Some(tree.add_child(None, *parent));
+                            // eprintln!("\t\tSIBL: Adding Child node of parent {parent} -> index is set to {current_index:?}");
+                        } else {
+                            unreachable!("Sould not be possible to have named child with no parent")
+                        };
+                        tree.get_mut(current_index.unwrap())
+                    };
+
+                    node.name = current_name;
+                    if let Some(length) = current_length {
+                        node.length = Some(length.parse()?);
+                    }
+
+                    // eprintln!("\t\tSIBL: Resetting name and length and index");
+                    current_name = None;
+                    current_length = None;
+                    current_index = None;
+
+                    parsing = Field::Name;
+                }
+                ')' => {
+                    // eprintln!("\t\tCLOSE: Adding name and length to current node {current_index:?}");
+                    let node = if let Some(index) = current_index {
+                        tree.get_mut(index)
+                    } else {
+                        if let Some(parent) = parent_stack.last() {
+                            current_index = Some(tree.add_child(None, *parent));
+                            // eprintln!("\t\tCLOSE: Adding Child node of parent {parent} -> index is set to {current_index:?}");
+                        } else {
+                            unreachable!("Sould not be possible to have named child with no parent")
+                        };
+                        tree.get_mut(current_index.unwrap())
+                    };
+
+                    node.name = current_name;
+                    if let Some(length) = current_length {
+                        node.length = Some(length.parse()?);
+                    }
+
+                    // eprintln!("\t\tCLOSE: Resetting name and index");
+                    current_name = None;
+                    current_length = None;
+
+                    parsing = Field::Name;
+
+                    // eprintln!(
+                    //     "\t\tCLOSE: Setting current index to last parent: {:?}",
+                    //     parent_stack.last()
+                    // );
+                    if let Some(parent) = parent_stack.pop() {
+                        current_index = Some(parent)
+                    } else {
+                        return Err("Ending SubTree with no parent node...".into());
+                    }
+                }
+                ';' => {
+                    // Finish parsing the Tree
+                    // eprintln!("\t\tEND: Adding name and length to current node {current_index:?}");
+                    let node = tree.get_mut(current_index.unwrap());
+                    node.name = current_name;
+                    if let Some(length) = current_length {
+                        node.length = Some(length.parse()?);
+                    }
+
+                    return Ok(tree);
+                }
+                _ => {
+                    match parsing {
+                        Field::Name => {
+                            if let Some(name) = current_name.as_mut() {
+                                name.push(c)
+                            } else {
+                                current_name = Some(c.into())
+                            }
+                        }
+                        Field::Length => {
+                            if let Some(length) = current_length.as_mut() {
+                                length.push(c)
+                            } else {
+                                current_length = Some(c.into())
+                            }
+                        }
+                        Field::Comment => unimplemented!(),
+                    };
+                }
+            }
+
+            // eprintln!("\tparsing: {parsing:?}");
+            // eprintln!("\tcurrent_name: {current_name:?}");
+            // eprintln!("\tcurrent_length: {current_length:?}");
+            // eprintln!("\tcurrent_index: {current_index:?}");
+            // eprintln!("\tparent_stack: {parent_stack:?}");
+        }
+
         Ok(tree)
     }
 
@@ -971,12 +1213,11 @@ impl<'a> Iterator for PostOrder<'a> {
     }
 }
 
-
 /// Genereates a random binary tree of a given size. Branch lengths are uniformly distributed
 pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Tree {
     let mut tree = Tree::new(None);
     let mut rng = thread_rng();
-    
+
     let sampler = Sampler::new(sampler_type);
 
     let mut next_deq = VecDeque::new();
@@ -989,8 +1230,16 @@ pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Tree
             next_deq.pop_back()
         }
         .unwrap();
-        let l1: Option<f32> = if brlens { Some(sampler.sample(&mut rng)) } else { None };
-        let l2: Option<f32> = if brlens { Some(sampler.sample(&mut rng)) } else { None };
+        let l1: Option<f32> = if brlens {
+            Some(sampler.sample(&mut rng))
+        } else {
+            None
+        };
+        let l2: Option<f32> = if brlens {
+            Some(sampler.sample(&mut rng))
+        } else {
+            None
+        };
         next_deq.push_back(tree.add_child_with_len(None, parent_idx, l1));
         next_deq.push_back(tree.add_child_with_len(None, parent_idx, l2));
     }
@@ -1101,6 +1350,16 @@ impl TreeNode {
     pub fn is_tip(&self) -> bool {
         self.tip
     }
+
+    /// Returns String with node in newick format
+    pub fn to_newick(&self) -> String {
+        match (&(self.name), &(self.length)) {
+            (None, None) => "".into(),
+            (None, Some(l)) => format!(":{l}"),
+            (Some(n), None) => n.clone(),
+            (Some(n), Some(l)) => format!("{n}:{l}"),
+        }
+    }
 }
 
 impl PartialEq for TreeNode {
@@ -1141,8 +1400,8 @@ impl Debug for TreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?} <I:{}> (L: {:?})[P: {:?}][Root: {:?}]",
-            self.name, self.idx, self.length, self.parent, self.distance_to_root
+            "{:?} <I:{}> (L: {:?})[P: {:?}][Root: {:?}] (C: {:?})",
+            self.name, self.idx, self.length, self.parent, self.distance_to_root, self.children,
         )
     }
 }
@@ -1150,6 +1409,8 @@ impl Debug for TreeNode {
 #[cfg(test)]
 #[allow(clippy::excessive_precision)]
 mod tests {
+    use std::borrow::Borrow;
+
     use super::*;
 
     /// Generates example tree from the tree traversal wikipedia page
@@ -1359,7 +1620,9 @@ mod tests {
             match dist {
                 None => assert!(d_pred.is_none()),
                 Some(d) => {
-                    assert!(d_pred.is_some_and(|x| (x - d).abs() < f32::EPSILON))
+                    assert!(d_pred.is_some());
+                    assert!((d_pred.unwrap() - d).abs() < f32::EPSILON);
+                    // assert!(.is_some_and(|x| (x - d).abs() < f32::EPSILON))
                 }
             }
         }
@@ -1398,7 +1661,6 @@ mod tests {
             println!("G: {}", tree.to_newick());
             println!("U: {}", tree2.to_newick())
         }
-        panic!()
     }
 
     #[test]
@@ -1408,19 +1670,18 @@ mod tests {
     }
 
     // test cases from https://github.com/ila/Newick-validator
-    // For now it does not parse the root node branch length...
     #[test]
     fn read_newick() {
         let newick_strings = vec![
             "((D,E)B,(F,G)C)A;",
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             "(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);",
-            // "(dog:20,(elephant:30,horse:60):20):50;",
+            "(dog:20,(elephant:30,horse:60):20):50;",
             "(A,B,(C,D));",
             "(A,B,(C,D)E)F;",
-            // "(((One:0.2,Two:0.3):0.3,(Three:0.5,Four:0.3):0.2):0.3,Five:0.7):0.0;",
+            "(((One:0.2,Two:0.3):0.3,(Three:0.5,Four:0.3):0.2):0.3,Five:0.7):0;",
             "(:0.1,:0.2,(:0.3,:0.4):0.5);",
-            // "(:0.1,:0.2,(:0.3,:0.4):0.5):0.0;",
+            "(:0.1,:0.2,(:0.3,:0.4):0.5):0;",
             "(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);",
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
@@ -1688,7 +1949,16 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             let rota = Tree::from_newick(rot_newick).unwrap();
 
-            assert_eq!(tree.robinson_foulds(&rota).unwrap(), 0);
+            tree.init_leaf_index().unwrap();
+            rota.init_leaf_index().unwrap();
+
+            assert_eq!(
+                tree.robinson_foulds(&rota).unwrap(),
+                0,
+                "Ref{:#?}\nRot:{:#?}",
+                tree.leaf_index,
+                rota.leaf_index
+            );
         }
     }
 
@@ -1725,8 +1995,9 @@ mod tests {
             vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
         ];
 
-        for indices in (0..trees.len()).into_iter().combinations(2) {
+        for indices in (0..trees.len()).combinations(2) {
             let (i0, i1) = (indices[0], indices[1]);
+
             let t0 = Tree::from_newick(trees[i0]).unwrap();
             let t1 = Tree::from_newick(trees[i1]).unwrap();
 
@@ -2133,6 +2404,192 @@ mod tests {
             );
 
             assert_eq!(t0.khuner_felsenstein(&t1).unwrap(), rfs[i0][i1])
+        }
+    }
+
+    #[test]
+    fn test_RF_unrooted() {
+        let ref_s = "(((aaaaaaaaad:0.18749,aaaaaaaaae:0.18749):0.18749,((aaaaaaaaaf:0.18749,(aaaaaaaaag:0.18749,(aaaaaaaaah:0.18749,(aaaaaaaaai:0.18749,aaaaaaaaaj:0.18749):0.18749):0.18749):0.18749):0.18749,(aaaaaaaaak:0.18749,(aaaaaaaaal:0.18749,aaaaaaaaam:0.18749):0.18749):0.18749):0.18749):0.18749,((aaaaaaaaan:0.18749,aaaaaaaaao:0.18749):0.18749,(aaaaaaaaaa:0.18749,(aaaaaaaaab:0.18749,aaaaaaaaac:0.18749):0.18749):0.18749):0.18749);";
+        let prd_s = "(aaaaaaaaag:0.24068,(aaaaaaaaah:0.21046,(aaaaaaaaai:0.15487,aaaaaaaaaj:0.17073)1.000:0.22813)0.999:0.26655,(aaaaaaaaaf:0.27459,((((aaaaaaaaan:0.17964,aaaaaaaaao:0.13686)0.994:0.18171,(aaaaaaaaaa:0.19386,(aaaaaaaaab:0.15663,aaaaaaaaac:0.20015)1.000:0.26799)0.981:0.15442)0.999:0.38320,(aaaaaaaaad:0.18133,aaaaaaaaae:0.17164)0.990:0.18734)0.994:0.18560,(aaaaaaaaak:0.24485,(aaaaaaaaal:0.17930,aaaaaaaaam:0.22072)1.000:0.22274)0.307:0.05569)1.000:0.22736)0.945:0.12401);";
+
+        let ref_tree = Tree::from_newick(ref_s).unwrap();
+        let prd_tree = Tree::from_newick(prd_s).unwrap();
+
+        let ref_parts: HashSet<_> = HashSet::from_iter(ref_tree.get_partitions().unwrap());
+        let prd_parts: HashSet<_> = HashSet::from_iter(prd_tree.get_partitions().unwrap());
+
+        // let common = ref_parts.intersection(&prd_parts).count();
+
+        println!("Leaf indices:");
+        println!("Ref: {:#?}", ref_tree.leaf_index);
+
+        println!("\nPartitions: ");
+        println!("Ref: ");
+        for i in ref_parts.iter().sorted() {
+            println!("\t{i:#018b}");
+        }
+        println!("\nPrd: ");
+        for i in prd_parts.iter().sorted() {
+            println!("\t{i:#018b}");
+        }
+
+        // println!("tree\treference\tcommon\tcompared\trf\trf_comp");
+        // println!(
+        //     "0\t{}\t{}\t{}\t{}\t{}",
+        //     ref_parts.len() - common,
+        //     common,
+        //     prd_parts.len() - common,
+        //     rf,
+        //     ref_parts.len() + prd_parts.len() - 2*common,
+        // );
+
+        // panic!()
+    }
+
+    #[test]
+    fn rooted_vs_unrooted_partitions() {
+        let rooted = Tree::from_newick("((Tip_3,Tip_4),(Tip_0,(Tip_1,Tip_2)));").unwrap();
+        let unrooted = Tree::from_newick("(Tip_3,Tip_4,(Tip_0,(Tip_1,Tip_2)));").unwrap();
+
+        let parts_rooted = rooted.get_partitions().unwrap();
+        let parts_unrooted = unrooted.get_partitions().unwrap();
+
+        assert_eq!(parts_rooted, parts_unrooted);
+    }
+
+    #[test]
+    fn new_vs_old() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
+
+        for newicks in trees.iter().combinations(2) {
+            let t1 = Tree::from_newick(newicks[0]).unwrap();
+            let t2 = Tree::from_newick(newicks[1]).unwrap();
+
+            assert_eq!(
+                t1.robinson_foulds(&t2).unwrap(),
+                t1.robinson_foulds_new(&t2).unwrap()
+            )
+        }
+    }
+
+    #[test]
+    fn medium() {
+        fn get_bitset(hash: usize, len: usize) -> FixedBitSet {
+            // eprintln!("Converting : {hash}");
+            let mut set = FixedBitSet::with_capacity(len);
+            let mut hash = hash;
+            for i in 0..len {
+                // eprintln!("\t{hash:#0len$b}", len = len);
+                if hash & 1 == 1 {
+                    set.insert(i)
+                }
+                hash >>= 1
+            }
+            let mut toggled = set.clone();
+            toggled.toggle_range(..);
+
+            // println!("Done\n");
+
+            set.min(toggled)
+        }
+
+        let n1 = "((((Tip_13,Tip_14),(Tip_15,(Tip_16,Tip_17))),(((Tip_18,Tip_19),Tip_0),(Tip_1,Tip_2))),((Tip_3,(Tip_4,Tip_5)),(Tip_6,(Tip_7,(Tip_8,(Tip_9,(Tip_10,(Tip_11,Tip_12))))))));";
+        let n2 = "(((Tip_7,(Tip_8,Tip_9)),((Tip_10,(Tip_11,Tip_12)),((Tip_13,(Tip_14,Tip_15)),(Tip_16,Tip_17)))),((Tip_18,Tip_19),(Tip_0,(Tip_1,(Tip_2,(Tip_3,(Tip_4,(Tip_5,Tip_6))))))));";
+        let rf_true = 26;
+
+        let reftree = Tree::from_newick(n1).unwrap();
+        let compare = Tree::from_newick(n2).unwrap();
+
+        let index: Vec<_> = reftree.get_leaf_names().into_iter().sorted().collect();
+        let index2: Vec<_> = compare.get_leaf_names().into_iter().sorted().collect();
+
+        let p1 = reftree.get_partitions_new().unwrap();
+        println!("REF: [");
+        for p in p1 {
+            print!("(");
+            for b in p.ones() {
+                print!("{:?}, ", index[b]);
+            }
+            println!("),");
+        }
+        println!("]\n");
+
+        let p2 = compare.get_partitions_new().unwrap();
+        println!("COMP: [");
+        for p in p2 {
+            print!("(");
+            for b in p.ones() {
+                print!("{:?}, ", index2[b]);
+            }
+            println!("),");
+        }
+        println!("]\n");
+
+        for node in compare.nodes.iter() {
+            if node.is_tip() {
+                println!("COMP TIP: {node:?}")
+            }
+        }
+
+        // dbg!(&reftree);
+        // dbg!(&compare);
+
+        assert_eq!(reftree.robinson_foulds_new(&compare).unwrap(), rf_true)
+    }
+
+    #[test]
+    // Robinson foulds distances according to
+    // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
+    fn robinson_foulds_treedist_new() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
+        let rfs = vec![
+            vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
+            vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
+            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+            vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
+            vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
+            vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
+            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+            vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
+            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+        ];
+
+        for indices in (0..trees.len()).combinations(2) {
+            let (i0, i1) = (indices[0], indices[1]);
+
+            let t0 = Tree::from_newick(trees[i0]).unwrap();
+            let t1 = Tree::from_newick(trees[i1]).unwrap();
+
+            assert_eq!(t0.robinson_foulds_new(&t1).unwrap(), rfs[i0][i1])
         }
     }
 }

@@ -15,5 +15,7 @@ pub enum TreeError {
     #[error("The leaf index of the tree is not initialized.")]
     LeafIndexNotInitialized,
     #[error("The tree must have all branch lengths")]
-    MissingBranchLengths
+    MissingBranchLengths,
+    #[error("The trees have different tips indices")]
+    DifferentTipIndices
 }
