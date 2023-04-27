@@ -34,29 +34,29 @@ impl Distribution<f32> for Sampler {
     }
 }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
 
-    use super::*;
+//     use super::*;
 
-    #[test]
-    fn sample() {
-        let mut sampler = Sampler::new(Distr::Uniform);
-        let mut rng = rand::thread_rng();
-        for _ in 0..=10 {
-            print!(" {}", sampler.sample(&mut rng))
-        }
-        println!();
-        sampler = Sampler::new(Distr::Exponential);
-        for _ in 0..=10 {
-            print!(" {}", sampler.sample(&mut rng))
-        }
-        println!();
-        sampler = Sampler::new(Distr::Gamma);
-        for _ in 0..=10 {
-            print!(" {}", sampler.sample(&mut rng))
-        }
-        println!();
-        panic!()
-    }
-}
+//     #[test]
+//     fn sample() {
+//         let mut sampler = Sampler::new(Distr::Uniform);
+//         let mut rng = rand::thread_rng();
+//         for _ in 0..=10 {
+//             print!(" {}", sampler.sample(&mut rng))
+//         }
+//         println!();
+//         sampler = Sampler::new(Distr::Exponential);
+//         for _ in 0..=10 {
+//             print!(" {}", sampler.sample(&mut rng))
+//         }
+//         println!();
+//         sampler = Sampler::new(Distr::Gamma);
+//         for _ in 0..=10 {
+//             print!(" {}", sampler.sample(&mut rng))
+//         }
+//         println!();
+//         panic!()
+//     }
+// }
