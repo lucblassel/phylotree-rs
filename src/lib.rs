@@ -19,7 +19,6 @@ use rand::prelude::*;
 // pub mod data;
 pub mod distr;
 pub mod errors;
-pub mod io;
 
 type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
