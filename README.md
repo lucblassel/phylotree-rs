@@ -55,6 +55,20 @@ Options:
   -h, --help  Print help
 ```
 
+### phylotree compare
+```
+Compare two trees
+
+Usage: phylotree compare <REFTREE> <TOCOMPARE>
+
+Arguments:
+  <REFTREE>    Reference tree
+  <TOCOMPARE>  Tree to compare to reference
+
+Options:
+  -h, --help  Print help
+```
+
 ## API
 Rough API ref goes here
 
