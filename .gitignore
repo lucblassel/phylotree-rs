@@ -5,6 +5,7 @@
 *.nwk
 *.newick
 *.json
+test*/
 
 ### macOS ###
 # General
