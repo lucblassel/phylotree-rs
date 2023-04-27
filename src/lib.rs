@@ -10,7 +10,7 @@ use std::{
 };
 
 use distr::{Distr, Sampler};
-use errors::TreeError;
+use errors::{ParseError, TreeError};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
@@ -722,7 +722,7 @@ impl Tree {
 
         let partitions = self.init_partitions_new()?;
 
-        Ok(HashSet::from_iter(partitions.keys().map(|k| k.clone())))
+        Ok(HashSet::from_iter(partitions.keys().cloned()))
     }
 
     /// Computes the Robinson Foulds distance between two trees
@@ -1002,6 +1002,8 @@ impl Tree {
         let mut current_index = None;
         let mut parent_stack = Vec::new();
 
+        let mut open_delimiters = Vec::new();
+
         for c in newick.chars() {
             // eprintln!("Parsing: {c}");
             match c {
@@ -1011,6 +1013,7 @@ impl Tree {
                         None => parent_stack.push(tree.add_root(None)?),
                         Some(parent) => parent_stack.push(tree.add_child(None, *parent)),
                     };
+                    open_delimiters.push(0);
                     // eprintln!(
                     //     "\t\tOPEN: Adding empty node to parent stack -> index {:?}",
                     //     parent_stack.last()
@@ -1046,6 +1049,7 @@ impl Tree {
                     parsing = Field::Name;
                 }
                 ')' => {
+                    open_delimiters.pop();
                     // eprintln!("\t\tCLOSE: Adding name and length to current node {current_index:?}");
                     let node = if let Some(index) = current_index {
                         tree.get_mut(index)
@@ -1081,6 +1085,9 @@ impl Tree {
                     }
                 }
                 ';' => {
+                    if !open_delimiters.is_empty() {
+                        return Err(ParseError::UnclosedBracket.into());
+                    }
                     // Finish parsing the Tree
                     // eprintln!("\t\tEND: Adding name and length to current node {current_index:?}");
                     let node = tree.get_mut(current_index.unwrap());
@@ -1101,6 +1108,9 @@ impl Tree {
                             }
                         }
                         Field::Length => {
+                            if c.is_whitespace() {
+                                return Err(ParseError::WhiteSpaceInNumber.into())
+                            }
                             if let Some(length) = current_length.as_mut() {
                                 length.push(c)
                             } else {
@@ -1119,7 +1129,7 @@ impl Tree {
             // eprintln!("\tparent_stack: {parent_stack:?}");
         }
 
-        Ok(tree)
+        Err(ParseError::NoClosingSemicolon.into())
     }
 
     /// Saves the tree to a newick file
@@ -1408,7 +1418,6 @@ impl Debug for TreeNode {
 #[cfg(test)]
 #[allow(clippy::excessive_precision)]
 mod tests {
-    use std::borrow::Borrow;
 
     use super::*;
 
@@ -1689,6 +1698,19 @@ mod tests {
         for newick in newick_strings {
             let tree = Tree::from_newick(newick).unwrap();
             assert_eq!(newick, tree.to_newick());
+        }
+    }
+
+    #[test]
+    fn read_newick_fails() {
+        let newick_strings = vec![
+            ("((D,E)B,(F,G,C)A;", ParseError::UnclosedBracket),
+            ("((D,E)B,(F,G)C)A", ParseError::NoClosingSemicolon)
+        ];
+        for (newick, _error) in newick_strings {
+            let tree = Tree::from_newick(newick);
+            assert!(tree.is_err());
+            assert!(tree.err().unwrap().is::<ParseError>())
         }
     }
 
@@ -2407,7 +2429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_RF_unrooted() {
+    fn test_rf_unrooted() {
         let ref_s = "(((aaaaaaaaad:0.18749,aaaaaaaaae:0.18749):0.18749,((aaaaaaaaaf:0.18749,(aaaaaaaaag:0.18749,(aaaaaaaaah:0.18749,(aaaaaaaaai:0.18749,aaaaaaaaaj:0.18749):0.18749):0.18749):0.18749):0.18749,(aaaaaaaaak:0.18749,(aaaaaaaaal:0.18749,aaaaaaaaam:0.18749):0.18749):0.18749):0.18749):0.18749,((aaaaaaaaan:0.18749,aaaaaaaaao:0.18749):0.18749,(aaaaaaaaaa:0.18749,(aaaaaaaaab:0.18749,aaaaaaaaac:0.18749):0.18749):0.18749):0.18749);";
         let prd_s = "(aaaaaaaaag:0.24068,(aaaaaaaaah:0.21046,(aaaaaaaaai:0.15487,aaaaaaaaaj:0.17073)1.000:0.22813)0.999:0.26655,(aaaaaaaaaf:0.27459,((((aaaaaaaaan:0.17964,aaaaaaaaao:0.13686)0.994:0.18171,(aaaaaaaaaa:0.19386,(aaaaaaaaab:0.15663,aaaaaaaaac:0.20015)1.000:0.26799)0.981:0.15442)0.999:0.38320,(aaaaaaaaad:0.18133,aaaaaaaaae:0.17164)0.990:0.18734)0.994:0.18560,(aaaaaaaaak:0.24485,(aaaaaaaaal:0.17930,aaaaaaaaam:0.22072)1.000:0.22274)0.307:0.05569)1.000:0.22736)0.945:0.12401);";
 

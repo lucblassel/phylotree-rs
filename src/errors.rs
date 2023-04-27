@@ -19,3 +19,13 @@ pub enum TreeError {
     #[error("The trees have different tips indices")]
     DifferentTipIndices
 }
+
+#[derive(Error, Debug, PartialEq)]
+pub enum ParseError {
+    #[error("Cannot have whitespace in number field")]
+    WhiteSpaceInNumber,
+    #[error("Missing a closing bracket")]
+    UnclosedBracket,
+    #[error("The tree is missin a semi colon at the end")]
+    NoClosingSemicolon
+}
