@@ -9,6 +9,7 @@ use std::{
     path::Path,
 };
 
+use distance::DistanceMatrix;
 use distr::{Distr, Sampler};
 use errors::{ParseError, TreeError};
 use fixedbitset::FixedBitSet;
@@ -17,10 +18,12 @@ use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
 
 // pub mod data;
+pub mod distance;
 pub mod distr;
 pub mod errors;
 
 type Error = Box<dyn std::error::Error>;
+type ResultStd<T,E> = std::result::Result<T,E>;
 type Result<T> = std::result::Result<T, Error>;
 type Edge = usize;
 
@@ -980,6 +983,145 @@ impl Tree {
         }
     }
 
+    fn compute_distance_cached(
+        &self,
+        source: usize,
+        target: usize,
+        cache: &mut HashMap<(usize, usize), f32>,
+        calling_from: Option<usize>,
+        depth: usize,
+    ) -> ResultStd<f32, TreeError> {
+        let n_source = self.get(source).name.clone();
+        let n_target = self.get(target).name.clone();
+
+        eprintln!(
+            "{s:<len$}Computing source:{n_source:?}, target:{n_target:?}",
+            len = depth * 2,
+            s = "    "
+        );
+        let key = (source.min(target), source.max(target));
+
+        // Distance is cached
+        if let Some(d) = cache.get(&key) {
+            eprintln!("{s:<len$}  cached: {d:?}", len = depth * 2, s = "    ");
+            return Ok(*d);
+        }
+
+        let node = self.get(source);
+
+        // We are at the target
+        if source == target {
+            eprintln!("{s:<len$}  source == target", len = depth * 2, s = "    ");
+            return Ok(0.0);
+        }
+
+        let mut dists = vec![];
+
+        // Check all possible distances from chilren to target
+        for child in node.children.iter() {
+            if Some(*child) != calling_from {
+                let brlen = match self.get(*child).length {
+                    Some(l) => l,
+                    None => return Err(TreeError::MissingBranchLengths),
+                };
+                eprintln!(
+                    "{s:<len$}  checking source child: {:?}",
+                    self.get(*child).name,
+                    len = depth * 2,
+                    s = "    ",
+                );
+
+                match self.compute_distance_cached(*child, target, cache, Some(source), depth + 1) {
+                    Ok(d) => dists.push(d + brlen),
+                    Err(TreeError::CannotComputeRecursiveDistance) => {},
+                    Err(e) => return Err(e)
+                };
+            }
+        }
+
+        // Check distance from parent to target
+        if let Some(parent) = node.parent {
+            if Some(parent) != calling_from {
+                eprintln!(
+                    "{s:<len$}  checking source parent: {:?}",
+                    self.get(parent).name,
+                    len = depth * 2,
+                    s = "    "
+                );
+                let brlen = match node.length {
+                    Some(l) => l,
+                    None => return Err(TreeError::MissingBranchLengths),
+                };
+
+                match self.compute_distance_cached(parent, target, cache, Some(source), depth + 1) {
+                    Ok(d) => dists.push(d + brlen),
+                    Err(TreeError::CannotComputeRecursiveDistance) => {},
+                    Err(e) => return Err(e)
+                };
+            }
+        }
+
+        eprintln!(
+            "{s:<len$}  Possible distances: {dists:?}",
+            len = depth * 2,
+            s = "    "
+        );
+
+        if let Some(d) = dists.into_iter().min_by(|a, b| a.partial_cmp(b).unwrap()) {
+            eprintln!(
+                "{s:<len$}  Caching chosen distance: {d:?}",
+                len = depth * 2,
+                s = "    "
+            );
+            eprintln!(
+                "{s:<len$}  Cache: {cache:?}",
+                len = depth * 2,
+                s = "    "
+            );
+            cache.insert(key, d);
+            // The clone is important for floating point comparisons apparently...
+            Ok(d.clone())
+        } else {
+            Err(TreeError::CannotComputeRecursiveDistance)
+        }
+    }
+
+    /// Compute the distance matrix from the tree
+    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f32>> {
+        let mut cache = HashMap::new();
+        let mut matrix = DistanceMatrix::new(self.tips.len());
+
+        for pair in self.tips.iter().combinations(2) {
+            let (i1, i2) = (pair[0], pair[1]);
+            let d = self.compute_distance_cached(*i1, *i2, &mut cache, None, 0)?;
+            let name1 = self.get(*i1).name.clone().unwrap();
+            let name2 = self.get(*i2).name.clone().unwrap();
+
+            matrix.set(&name1, &name2, d, false)?;
+        }
+
+        Ok(matrix)
+    }
+
+    /// Compute distance matrix from tree without a cache
+    pub fn distance_matrix_uncached(&self) -> Result<DistanceMatrix<f32>> {
+        let mut matrix = DistanceMatrix::new(self.tips.len());
+
+        for pair in self.tips.iter().combinations(2) {
+            let (i1, i2) = (pair[0], pair[1]);
+            if let (Some(d), _) = self.get_distance(*i1, *i2) {
+                let name1 = self.get(*i1).name.clone().unwrap();
+                let name2 = self.get(*i2).name.clone().unwrap();
+
+                matrix.set(&name1, &name2, d, false)?;
+            } else {
+                return Err(TreeError::MissingBranchLengths.into());
+            }
+        }
+
+        Ok(matrix)
+    }
+
     /// Generate newick representation of tree
     pub fn to_newick(&self) -> String {
         self.to_newick_impl(0) + ";"
@@ -1109,7 +1251,7 @@ impl Tree {
                         }
                         Field::Length => {
                             if c.is_whitespace() {
-                                return Err(ParseError::WhiteSpaceInNumber.into())
+                                return Err(ParseError::WhiteSpaceInNumber.into());
                             }
                             if let Some(length) = current_length.as_mut() {
                                 length.push(c)
@@ -1705,7 +1847,7 @@ mod tests {
     fn read_newick_fails() {
         let newick_strings = vec![
             ("((D,E)B,(F,G,C)A;", ParseError::UnclosedBracket),
-            ("((D,E)B,(F,G)C)A", ParseError::NoClosingSemicolon)
+            ("((D,E)B,(F,G)C)A", ParseError::NoClosingSemicolon),
         ];
         for (newick, _error) in newick_strings {
             let tree = Tree::from_newick(newick);
@@ -2611,6 +2753,64 @@ mod tests {
             let t1 = Tree::from_newick(trees[i1]).unwrap();
 
             assert_eq!(t0.robinson_foulds_new(&t1).unwrap(), rfs[i0][i1])
+        }
+    }
+
+    // the reference distance matrix was computed with ete3
+    #[test]
+    fn compute_distance_matrix() {
+        let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
+        let true_dists: HashMap<(String, String), f32> = HashMap::from_iter(vec![
+            (("A".into(), "B".into()), 0.30000000000000004),
+            (("A".into(), "C".into()), 1.5),
+            (("A".into(), "D".into()), 1.6),
+            (("B".into(), "C".into()), 1.6),
+            (("B".into(), "D".into()), 1.7000000000000002),
+            (("C".into(), "D".into()), 0.7),
+        ]);
+
+        let matrix = tree.distance_matrix().unwrap();
+
+        for ((n1, n2), dist) in true_dists {
+            assert!(
+                (dist - matrix.get(&n1, &n2).unwrap()) <= f32::EPSILON,
+                "d({n1},{n2}) want:{dist} got:{}",
+                matrix.get(&n1, &n2).unwrap()
+            )
+        }
+    }
+
+    #[test]
+    fn compare_distance_matrices_cached_non_cached() {
+        let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,E:0.5)G;").unwrap();
+
+        let matrix = tree.distance_matrix().unwrap();
+        let matrix_non_cached = tree.distance_matrix_uncached().unwrap();
+
+        for pair in tree.get_leaf_names().iter().combinations(2) {
+            let d_cached = matrix.get(pair[0], pair[1]).unwrap();
+            let d = matrix_non_cached.get(pair[0], pair[1]).unwrap();
+            assert!(
+                (d_cached - d).abs() <= f32::EPSILON,
+                "d{pair:?} CACHE:{d_cached} NOCACHE:{d}"
+            )
+        }
+    }
+
+    #[test]
+    fn compare_random_matrices() {
+        let tree = generate_tree(4, true, Distr::Exponential);
+
+        let matrix = tree.distance_matrix().unwrap();
+        let matrix_non_cached = tree.distance_matrix_uncached().unwrap();
+
+        for pair in tree.get_leaf_names().iter().combinations(2) {
+            let d_cached = matrix.get(pair[0], pair[1]).unwrap();
+            let d = matrix_non_cached.get(pair[0], pair[1]).unwrap();
+            assert!(
+                (d_cached - d).abs() <= f32::EPSILON,
+                "d{pair:?} CACHE:{d_cached} NOCACHE:{d}"
+            )
         }
     }
 }
