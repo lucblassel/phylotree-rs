@@ -19,7 +19,7 @@ pub enum TreeError {
     #[error("The trees have different tips indices.")]
     DifferentTipIndices,
     #[error("Cannot compute recursive distance.")]
-    CannotComputeRecursiveDistance
+    CannotComputeRecursiveDistance,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -29,15 +29,5 @@ pub enum ParseError {
     #[error("Missing a closing bracket.")]
     UnclosedBracket,
     #[error("The tree is missin a semi colon at the end.")]
-    NoClosingSemicolon
-}
-
-#[derive(Error, Debug)]
-pub enum DistanceMatrixError {
-    #[error("Distance already exists, cannot overwrite it.")]
-    OverwritingNotPermitted,
-    #[error("You added more sequences than there is room for in the matrix.")]
-    SizeExceeded,
-    #[error("Missing distance between {0} and {1}")]
-    MissinDinstance(String,String)
+    NoClosingSemicolon,
 }
