@@ -97,6 +97,13 @@ Various goals and aims for this project:
         - [x] Sackin index of the tree (with normalized variants)
         - [x] Colless index of the tree
         - [x] Number of cherries
+    - [ ] Convert to distance matrix
+        - [x] Write to phylip
+        - [ ] Read form phylip 
+    - [ ] Build from Distance matrix
+        - [ ] UPGMA
+        - [ ] NJ
+        - [ ] BIONJ ?
  - [ ] Tree simulation
     - [x] Random binary topology
     - [x] Caterpillar trees
