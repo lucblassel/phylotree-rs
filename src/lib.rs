@@ -983,113 +983,59 @@ impl Tree {
         }
     }
 
-    fn compute_distance_cached(
+    fn distance_matrix_recursive_impl(
         &self,
-        source: usize,
-        target: usize,
-        cache: &mut HashMap<(usize, usize), f32>,
-        calling_from: Option<usize>,
-        depth: usize,
-    ) -> ResultStd<f32, TreeError> {
-        let n_source = self.get(source).name.clone();
-        let n_target = self.get(target).name.clone();
-
-        eprintln!(
-            "{s:<len$}Computing source:{n_source:?}, target:{n_target:?}",
-            len = depth * 2,
-            s = "    "
-        );
-        let key = (source.min(target), source.max(target));
-
-        // Distance is cached
-        if let Some(d) = cache.get(&key) {
-            eprintln!("{s:<len$}  cached: {d:?}", len = depth * 2, s = "    ");
-            return Ok(*d);
+        current: usize,
+        prev: Option<usize>,
+        lengths: &mut [f32],
+        currlength: f32,
+    ) -> Result<()> {
+        if prev.is_some() && self.tips.contains(&current) {
+            lengths[current] = currlength;
+            return Ok(());
         }
 
-        let node = self.get(source);
-
-        // We are at the target
-        if source == target {
-            eprintln!("{s:<len$}  source == target", len = depth * 2, s = "    ");
-            return Ok(0.0);
+        let mut neighbors: Vec<_> = self
+            .get(current)
+            .children
+            .clone()
+            .into_iter()
+            .map(|idx| (idx, self.get(idx).length))
+            .collect();
+        if let Some(parent) = self.get(current).parent {
+            neighbors.push((parent, self.get(current).length))
         }
 
-        let mut dists = vec![];
-
-        // Check all possible distances from chilren to target
-        for child in node.children.iter() {
-            if Some(*child) != calling_from {
-                let brlen = match self.get(*child).length {
-                    Some(l) => l,
-                    None => return Err(TreeError::MissingBranchLengths),
-                };
-                eprintln!(
-                    "{s:<len$}  checking source child: {:?}",
-                    self.get(*child).name,
-                    len = depth * 2,
-                    s = "    ",
-                );
-
-                match self.compute_distance_cached(*child, target, cache, Some(source), depth + 1) {
-                    Ok(d) => dists.push(d + brlen),
-                    Err(TreeError::CannotComputeRecursiveDistance) => {}
-                    Err(e) => return Err(e),
-                };
+        for (neighbor, brlen) in neighbors {
+            if Some(neighbor) != prev {
+                if let Some(brlen) = brlen {
+                    self.distance_matrix_recursive_impl(
+                        neighbor,
+                        Some(current),
+                        lengths,
+                        currlength + brlen,
+                    )?
+                } else {
+                    return Err(TreeError::MissingBranchLengths.into());
+                }
             }
         }
 
-        // Check distance from parent to target
-        if let Some(parent) = node.parent {
-            if Some(parent) != calling_from {
-                eprintln!(
-                    "{s:<len$}  checking source parent: {:?}",
-                    self.get(parent).name,
-                    len = depth * 2,
-                    s = "    "
-                );
-                let brlen = match node.length {
-                    Some(l) => l,
-                    None => return Err(TreeError::MissingBranchLengths),
-                };
-
-                match self.compute_distance_cached(parent, target, cache, Some(source), depth + 1) {
-                    Ok(d) => dists.push(d + brlen),
-                    Err(TreeError::CannotComputeRecursiveDistance) => {}
-                    Err(e) => return Err(e),
-                };
-            }
-        }
-
-        eprintln!(
-            "{s:<len$}  Possible distances: {dists:?}",
-            len = depth * 2,
-            s = "    "
-        );
-
-        if let Some(d) = dists.into_iter().min_by(|a, b| a.partial_cmp(b).unwrap()) {
-            eprintln!(
-                "{s:<len$}  Caching chosen distance: {d:?}",
-                len = depth * 2,
-                s = "    "
-            );
-            eprintln!("{s:<len$}  Cache: {cache:?}", len = depth * 2, s = "    ");
-            cache.insert(key, d);
-
-            Ok(d)
-        } else {
-            Err(TreeError::CannotComputeRecursiveDistance)
-        }
+        Ok(())
     }
 
-    /// Compute the distance matrix from the tree
-    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f32>> {
-        let mut cache = HashMap::new();
+    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<f32>> {
+        let size = self.nodes.len();
         let mut matrix = DistanceMatrix::new(self.tips.len());
+        let mut cache: Vec<Vec<_>> = vec![vec![f32::INFINITY; size]; size];
+
+        for tip in self.tips.iter() {
+            self.distance_matrix_recursive_impl(*tip, None, &mut cache[*tip], 0.0)?
+        }
 
         for pair in self.tips.iter().combinations(2) {
             let (i1, i2) = (pair[0], pair[1]);
-            let d = self.compute_distance_cached(*i1, *i2, &mut cache, None, 0)?;
+            let d = cache[*i1][*i2];
             let name1 = self.get(*i1).name.clone().unwrap();
             let name2 = self.get(*i2).name.clone().unwrap();
 
@@ -1100,7 +1046,7 @@ impl Tree {
     }
 
     /// Compute distance matrix from tree without a cache
-    pub fn distance_matrix_uncached(&self) -> Result<DistanceMatrix<f32>> {
+    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f32>> {
         let mut matrix = DistanceMatrix::new(self.tips.len());
 
         for pair in self.tips.iter().combinations(2) {
@@ -2772,41 +2718,6 @@ mod tests {
                 (dist - matrix.get(&n1, &n2).unwrap()) <= f32::EPSILON,
                 "d({n1},{n2}) want:{dist} got:{}",
                 matrix.get(&n1, &n2).unwrap()
-            )
-        }
-    }
-
-    #[test]
-    fn compare_distance_matrices_cached_non_cached() {
-        let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,E:0.5)G;").unwrap();
-
-        let matrix = tree.distance_matrix().unwrap();
-        let matrix_non_cached = tree.distance_matrix_uncached().unwrap();
-
-        for pair in tree.get_leaf_names().iter().combinations(2) {
-            let d_cached = matrix.get(pair[0], pair[1]).unwrap();
-            let d = matrix_non_cached.get(pair[0], pair[1]).unwrap();
-            assert!(
-                (d_cached - d).abs() <= f32::EPSILON,
-                "d{pair:?} CACHE:{d_cached} NOCACHE:{d}"
-            )
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn compare_random_matrices() {
-        let tree = generate_tree(4, true, Distr::Exponential);
-
-        let matrix = tree.distance_matrix().unwrap();
-        let matrix_non_cached = tree.distance_matrix_uncached().unwrap();
-
-        for pair in tree.get_leaf_names().iter().combinations(2) {
-            let d_cached = matrix.get(pair[0], pair[1]).unwrap();
-            let d = matrix_non_cached.get(pair[0], pair[1]).unwrap();
-            assert!(
-                (d_cached - d).abs() <= f32::EPSILON,
-                "d{pair:?} CACHE:{d_cached} NOCACHE:{d}"
             )
         }
     }
