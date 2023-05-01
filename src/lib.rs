@@ -23,7 +23,6 @@ pub mod distr;
 pub mod errors;
 
 type Error = Box<dyn std::error::Error>;
-type ResultStd<T, E> = std::result::Result<T, E>;
 type Result<T> = std::result::Result<T, Error>;
 type Edge = usize;
 
@@ -1083,11 +1082,11 @@ impl Tree {
         let mut parsing = Field::Name;
         let mut current_name: Option<String> = None;
         let mut current_length: Option<String> = None;
+        let mut current_comment: Option<String> = None;
         let mut current_index = None;
         let mut parent_stack = Vec::new();
 
         let mut open_delimiters = Vec::new();
-
         let mut within_quotes = false;
 
         for c in newick.chars() {
@@ -1097,6 +1096,16 @@ impl Tree {
                     name.push(c)
                 } else {
                     current_name = Some(c.into())
+                }
+                continue;
+            }
+
+            // Add current character to comment
+            if parsing == Field::Comment && c != ']' {
+                if let Some(comment) = current_comment.as_mut() {
+                    comment.push(c)
+                } else {
+                    current_comment = Some(c.into())
                 }
                 continue;
             }
@@ -1113,6 +1122,12 @@ impl Tree {
                             current_name = Some(c.into())
                         }
                     }
+                }
+                '[' => {
+                    parsing = Field::Comment;
+                }
+                ']' => {
+                    parsing = Field::Name;
                 }
                 '(' => {
                     // Start subtree
@@ -1140,11 +1155,13 @@ impl Tree {
                     };
 
                     node.name = current_name;
+                    node.comment = current_comment;
                     if let Some(length) = current_length {
                         node.length = Some(length.parse()?);
                     }
 
                     current_name = None;
+                    current_comment = None;
                     current_length = None;
                     current_index = None;
 
@@ -1165,11 +1182,13 @@ impl Tree {
                     };
 
                     node.name = current_name;
+                    node.comment = current_comment;
                     if let Some(length) = current_length {
                         node.length = Some(length.parse()?);
                     }
 
                     current_name = None;
+                    current_comment = None;
                     current_length = None;
 
                     parsing = Field::Name;
@@ -1187,6 +1206,7 @@ impl Tree {
                     }
                     let node = tree.get_mut(current_index.unwrap());
                     node.name = current_name;
+                    node.comment = current_comment;
                     if let Some(length) = current_length {
                         node.length = Some(length.parse()?);
                     }
@@ -1388,6 +1408,8 @@ pub struct TreeNode {
     pub children: Vec<usize>,
     /// Length of branch between parent and node
     pub length: Option<f32>,
+    /// Optional comment attached to node
+    pub comment: Option<String>,
     /// Is a tip node
     tip: bool,
     /// Distance to root
@@ -1405,6 +1427,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length: None,
+            comment: None,
             tip: true,
             distance_to_root: 0,
             deleted: false,
@@ -1424,6 +1447,7 @@ impl TreeNode {
             parent,
             children: vec![],
             length,
+            comment: None,
             tip: true,
             distance_to_root: 0,
             deleted: false,
@@ -1452,12 +1476,21 @@ impl TreeNode {
 
     /// Returns String with node in newick format
     pub fn to_newick(&self) -> String {
-        match (&(self.name), &(self.length)) {
-            (None, None) => "".into(),
-            (None, Some(l)) => format!(":{l}"),
-            (Some(n), None) => n.clone(),
-            (Some(n), Some(l)) => format!("{n}:{l}"),
+        let mut repr = String::new();
+
+        if let Some(name) = self.name.clone() {
+            repr += &name;
         }
+
+        if let Some(comment) = self.comment.clone() {
+            repr += &format!("[{}]", &comment);
+        }
+
+        if let Some(length) = self.length {
+            repr += &format!(":{}", &length);
+        }
+
+        repr
     }
 }
 
@@ -1785,6 +1818,7 @@ mod tests {
             "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
             "(,,(,));",
             "(\"hungarian dog\":20,(\"indian elephant\":30,\"swedish horse\":60):20):50;",
+            "(\"hungarian dog\"[Comment_1]:20,(\"indian elephant\":30,\"swedish horse[Another interesting comment]\":60):20):50;",
         ];
         for newick in newick_strings {
             let tree = Tree::from_newick(newick).unwrap();
