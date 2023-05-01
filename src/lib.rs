@@ -1071,7 +1071,7 @@ impl Tree {
 
     /// Parses a newick string into to Tree
     pub fn from_newick(newick: &str) -> Result<Self> {
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         enum Field {
             Name,
             Length,
@@ -1088,9 +1088,32 @@ impl Tree {
 
         let mut open_delimiters = Vec::new();
 
+        let mut within_quotes = false;
+
         for c in newick.chars() {
-            // eprintln!("Parsing: {c}");
+            // Add character in quotes to name
+            if within_quotes && parsing == Field::Name && c != '"' {
+                if let Some(name) = current_name.as_mut() {
+                    name.push(c)
+                } else {
+                    current_name = Some(c.into())
+                }
+                continue;
+            }
+
             match c {
+                '"' => {
+                    // Enter or close quoted section (name)
+                    // TODO: handle escaped quotes
+                    within_quotes = !within_quotes;
+                    if parsing == Field::Name {
+                        if let Some(name) = current_name.as_mut() {
+                            name.push(c)
+                        } else {
+                            current_name = Some(c.into())
+                        }
+                    }
+                }
                 '(' => {
                     // Start subtree
                     match parent_stack.last() {
@@ -1098,22 +1121,18 @@ impl Tree {
                         Some(parent) => parent_stack.push(tree.add_child(None, *parent)),
                     };
                     open_delimiters.push(0);
-                    // eprintln!(
-                    //     "\t\tOPEN: Adding empty node to parent stack -> index {:?}",
-                    //     parent_stack.last()
-                    // )
                 }
                 ':' => {
+                    // Start parsing length
                     parsing = Field::Length;
                 }
                 ',' => {
-                    // eprintln!("\t\tSIBL: Adding name and length to current node {current_index:?}");
+                    // Add sibling
                     let node = if let Some(index) = current_index {
                         tree.get_mut(index)
                     } else {
                         if let Some(parent) = parent_stack.last() {
                             current_index = Some(tree.add_child(None, *parent));
-                            // eprintln!("\t\tSIBL: Adding Child node of parent {parent} -> index is set to {current_index:?}");
                         } else {
                             unreachable!("Sould not be possible to have named child with no parent")
                         };
@@ -1125,7 +1144,6 @@ impl Tree {
                         node.length = Some(length.parse()?);
                     }
 
-                    // eprintln!("\t\tSIBL: Resetting name and length and index");
                     current_name = None;
                     current_length = None;
                     current_index = None;
@@ -1133,14 +1151,13 @@ impl Tree {
                     parsing = Field::Name;
                 }
                 ')' => {
+                    // Close subtree
                     open_delimiters.pop();
-                    // eprintln!("\t\tCLOSE: Adding name and length to current node {current_index:?}");
                     let node = if let Some(index) = current_index {
                         tree.get_mut(index)
                     } else {
                         if let Some(parent) = parent_stack.last() {
                             current_index = Some(tree.add_child(None, *parent));
-                            // eprintln!("\t\tCLOSE: Adding Child node of parent {parent} -> index is set to {current_index:?}");
                         } else {
                             unreachable!("Sould not be possible to have named child with no parent")
                         };
@@ -1152,16 +1169,11 @@ impl Tree {
                         node.length = Some(length.parse()?);
                     }
 
-                    // eprintln!("\t\tCLOSE: Resetting name and index");
                     current_name = None;
                     current_length = None;
 
                     parsing = Field::Name;
 
-                    // eprintln!(
-                    //     "\t\tCLOSE: Setting current index to last parent: {:?}",
-                    //     parent_stack.last()
-                    // );
                     if let Some(parent) = parent_stack.pop() {
                         current_index = Some(parent)
                     } else {
@@ -1169,11 +1181,10 @@ impl Tree {
                     }
                 }
                 ';' => {
+                    // Finish parsing the Tree
                     if !open_delimiters.is_empty() {
                         return Err(ParseError::UnclosedBracket.into());
                     }
-                    // Finish parsing the Tree
-                    // eprintln!("\t\tEND: Adding name and length to current node {current_index:?}");
                     let node = tree.get_mut(current_index.unwrap());
                     node.name = current_name;
                     if let Some(length) = current_length {
@@ -1183,6 +1194,7 @@ impl Tree {
                     return Ok(tree);
                 }
                 _ => {
+                    // Parse characters in fields
                     match parsing {
                         Field::Name => {
                             if let Some(name) = current_name.as_mut() {
@@ -1205,12 +1217,6 @@ impl Tree {
                     };
                 }
             }
-
-            // eprintln!("\tparsing: {parsing:?}");
-            // eprintln!("\tcurrent_name: {current_name:?}");
-            // eprintln!("\tcurrent_length: {current_length:?}");
-            // eprintln!("\tcurrent_index: {current_index:?}");
-            // eprintln!("\tparent_stack: {parent_stack:?}");
         }
 
         Err(ParseError::NoClosingSemicolon.into())
@@ -1778,6 +1784,7 @@ mod tests {
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
             "(,,(,));",
+            "(\"hungarian dog\":20,(\"indian elephant\":30,\"swedish horse\":60):20):50;",
         ];
         for newick in newick_strings {
             let tree = Tree::from_newick(newick).unwrap();
