@@ -6,6 +6,10 @@
 *.newick
 *.json
 test*/
+*.mat
+*.py
+*.csv
+matrix_test/
 
 ### macOS ###
 # General
