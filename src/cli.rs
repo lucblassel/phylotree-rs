@@ -55,6 +55,16 @@ pub enum Commands {
         reftree: PathBuf,
         /// Tree to compare to reference
         tocompare: PathBuf,
+    },
+    /// Output th ephylogenetic distance matrix of the tree
+    Matrix {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// Output a square matrix instead of a triangular one
+        #[arg(short, long)]
+        square: bool,
+        /// FIle to save the matrix to
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     }
-
 }
