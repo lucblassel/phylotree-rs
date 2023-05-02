@@ -33,10 +33,10 @@ pub struct Tree {
     tips: HashSet<usize>,
     is_binary: bool,
     is_rooted: bool,
-    height: RefCell<Option<f32>>,
-    diameter: RefCell<Option<f32>>,
+    height: RefCell<Option<f64>>,
+    diameter: RefCell<Option<f64>>,
     pub leaf_index: RefCell<Option<Vec<String>>>,
-    partitions: RefCell<Option<HashMap<usize, Option<f32>>>>,
+    partitions: RefCell<Option<HashMap<usize, Option<f64>>>>,
 }
 
 impl Tree {
@@ -100,7 +100,7 @@ impl Tree {
         &mut self,
         name: Option<&str>,
         parent: usize,
-        len: Option<f32>,
+        len: Option<f64>,
     ) -> usize {
         self.add_child_node(
             parent,
@@ -143,7 +143,7 @@ impl Tree {
     }
 
     /// Returns height of the tree (i.e. longest distance from tip to root)
-    pub fn height(&self) -> Option<f32> {
+    pub fn height(&self) -> Option<f64> {
         if (*self.height.borrow()).is_some() {
             return *self.height.borrow();
         }
@@ -158,7 +158,7 @@ impl Tree {
                     let (d, n) = self.get_distance(0, tip_index);
                     match d {
                         Some(d) => d,
-                        None => n as f32,
+                        None => n as f64,
                     }
                 })
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -169,7 +169,7 @@ impl Tree {
     }
 
     /// Gets the diameter of the tree (i.e. the longest distance between tips)
-    pub fn diameter(&self) -> Option<f32> {
+    pub fn diameter(&self) -> Option<f64> {
         if (*self.diameter.borrow()).is_some() {
             return *self.diameter.borrow();
         }
@@ -185,7 +185,7 @@ impl Tree {
                     let (d, n) = self.get_distance(*ids[0], *ids[1]);
                     match d {
                         Some(d) => d,
-                        None => n as f32,
+                        None => n as f64,
                     }
                 })
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -390,7 +390,7 @@ impl Tree {
     }
 
     /// Rescales the branch lengths of a tree
-    pub fn rescale(&mut self, scale: f32) {
+    pub fn rescale(&mut self, scale: f64) {
         if let Some(diam) = self.diameter() {
             for node in self.nodes.iter_mut().skip(1) {
                 node.length = node.length.map(|l| l * scale / diam);
@@ -564,7 +564,7 @@ impl Tree {
 
     /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
     /// branches in the path have lengths) and the numebr of edges in the path
-    pub fn get_distance(&self, source: usize, target: usize) -> (Option<f32>, usize) {
+    pub fn get_distance(&self, source: usize, target: usize) -> (Option<f64>, usize) {
         let mut dist = 0.0;
         let mut branches = 0;
         let mut all_dists = true;
@@ -687,10 +687,10 @@ impl Tree {
     }
 
     /// Caches partitions for distance computation
-    fn init_partitions_new(&self) -> Result<HashMap<FixedBitSet, Option<f32>>> {
+    fn init_partitions_new(&self) -> Result<HashMap<FixedBitSet, Option<f64>>> {
         self.init_leaf_index()?;
 
-        let mut partitions: HashMap<FixedBitSet, Option<f32>> = HashMap::new();
+        let mut partitions: HashMap<FixedBitSet, Option<f64>> = HashMap::new();
 
         for node in self
             .nodes
@@ -759,7 +759,7 @@ impl Tree {
     }
 
     /// Computes the normalized Robinson Foulds distance between two trees
-    pub fn robinson_foulds_norm_new(&self, other: &Self) -> Result<f32> {
+    pub fn robinson_foulds_norm_new(&self, other: &Self) -> Result<f64> {
         let rf = self.robinson_foulds_new(other)?;
 
         let partitions_s = self.get_partitions_new()?;
@@ -767,7 +767,7 @@ impl Tree {
 
         let tot = partitions_o.len() + partitions_s.len();
 
-        Ok((rf as f32) / (tot as f32))
+        Ok((rf as f64) / (tot as f64))
     }
 
     /// Caches partitions for distance computation
@@ -778,7 +778,7 @@ impl Tree {
             return Ok(());
         }
 
-        let mut partitions: HashMap<Edge, Option<f32>> = HashMap::new();
+        let mut partitions: HashMap<Edge, Option<f64>> = HashMap::new();
 
         let m: usize = 2u64.pow(self.tips.len() as u32) as usize - 1;
         for node in self
@@ -825,7 +825,7 @@ impl Tree {
     }
 
     /// Get all partitions of a tree
-    pub fn get_partitions_with_lengths(&self) -> Result<HashMap<Edge, f32>> {
+    pub fn get_partitions_with_lengths(&self) -> Result<HashMap<Edge, f64>> {
         self.init_leaf_index()?;
 
         if self.partitions.borrow().is_none() {
@@ -858,7 +858,7 @@ impl Tree {
     }
 
     /// Computes the normalized Robinson Foulds distance between two trees
-    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f32> {
+    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64> {
         let partitions_s = self.get_partitions()?;
         let partitions_o = other.get_partitions()?;
 
@@ -871,11 +871,11 @@ impl Tree {
         let tot = partitions_o.len() + partitions_s.len();
         let rf = tot - 2 * i;
 
-        Ok((rf as f32) / (tot as f32))
+        Ok((rf as f64) / (tot as f64))
     }
 
     /// Computes the weighted Robinson Foulds distance between two trees
-    pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f32> {
+    pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -899,7 +899,7 @@ impl Tree {
     }
 
     /// Computes the khuner felsenstein branch score between two trees
-    pub fn khuner_felsenstein(&self, other: &Self) -> Result<f32> {
+    pub fn khuner_felsenstein(&self, other: &Self) -> Result<f64> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -907,15 +907,15 @@ impl Tree {
 
         for (edge, len_s) in partitions_s.iter() {
             if let Some(len_o) = partitions_o.get(edge) {
-                dist += f32::powi(len_s - len_o, 2)
+                dist += f64::powi(len_s - len_o, 2)
             } else {
-                dist += f32::powi(*len_s, 2)
+                dist += f64::powi(*len_s, 2)
             }
         }
 
         for (edge, len_o) in partitions_o.iter() {
             if !partitions_s.contains_key(edge) {
-                dist += f32::powi(*len_o, 2)
+                dist += f64::powi(*len_o, 2)
             }
         }
 
@@ -986,8 +986,8 @@ impl Tree {
         &self,
         current: usize,
         prev: Option<usize>,
-        lengths: &mut [f32],
-        currlength: f32,
+        lengths: &mut [f64],
+        currlength: f64,
     ) -> Result<()> {
         if prev.is_some() && self.tips.contains(&current) {
             lengths[current] = currlength;
@@ -1023,10 +1023,10 @@ impl Tree {
         Ok(())
     }
 
-    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<f32>> {
+    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<f64>> {
         let size = self.nodes.len();
         let mut matrix = DistanceMatrix::new(self.tips.len());
-        let mut cache: Vec<Vec<_>> = vec![vec![f32::INFINITY; size]; size];
+        let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
 
         for tip in self.tips.iter() {
             self.distance_matrix_recursive_impl(*tip, None, &mut cache[*tip], 0.0)?
@@ -1045,7 +1045,7 @@ impl Tree {
     }
 
     /// Compute distance matrix from tree without a cache
-    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f32>> {
+    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>> {
         let mut matrix = DistanceMatrix::new(self.tips.len());
 
         for pair in self.tips.iter().combinations(2) {
@@ -1349,12 +1349,12 @@ pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Tree
             next_deq.pop_back()
         }
         .unwrap();
-        let l1: Option<f32> = if brlens {
+        let l1: Option<f64> = if brlens {
             Some(sampler.sample(&mut rng))
         } else {
             None
         };
-        let l2: Option<f32> = if brlens {
+        let l2: Option<f64> = if brlens {
             Some(sampler.sample(&mut rng))
         } else {
             None
@@ -1379,8 +1379,8 @@ pub fn generate_caterpillar(n_leaves: usize, brlens: bool) -> Tree {
     let mut parent = 0;
     for i in 1..n_leaves {
         let parent_bkp = parent;
-        let l1: Option<f32> = if brlens { Some(rng.gen()) } else { None };
-        let l2: Option<f32> = if brlens { Some(rng.gen()) } else { None };
+        let l1: Option<f64> = if brlens { Some(rng.gen()) } else { None };
+        let l2: Option<f64> = if brlens { Some(rng.gen()) } else { None };
         if i == n_leaves - 1 {
             // Adding tip
             tree.add_child_with_len(Some(&format!("Tip_{i}")), parent, l1);
@@ -1407,7 +1407,7 @@ pub struct TreeNode {
     /// Indices of child nodes
     pub children: Vec<usize>,
     /// Length of branch between parent and node
-    pub length: Option<f32>,
+    pub length: Option<f64>,
     /// Optional comment attached to node
     pub comment: Option<String>,
     /// Is a tip node
@@ -1439,7 +1439,7 @@ impl TreeNode {
         idx: usize,
         name: Option<String>,
         parent: Option<usize>,
-        length: Option<f32>,
+        length: Option<f64>,
     ) -> Self {
         Self {
             idx,
@@ -1509,7 +1509,7 @@ impl PartialEq for TreeNode {
 
         let lengths_equal = match (self.length, other.length) {
             (None, None) => true,
-            (Some(l1), Some(l2)) => (l1 - l2).abs() < f32::EPSILON,
+            (Some(l1), Some(l2)) => (l1 - l2).abs() < f64::EPSILON,
             _ => false,
         };
 
@@ -1752,8 +1752,7 @@ mod tests {
                 None => assert!(d_pred.is_none()),
                 Some(d) => {
                     assert!(d_pred.is_some());
-                    assert!((d_pred.unwrap() - d).abs() < f32::EPSILON);
-                    // assert!(.is_some_and(|x| (x - d).abs() < f32::EPSILON))
+                    assert!((d_pred.unwrap() - d).abs() < f64::EPSILON);
                 }
             }
         }
@@ -2340,12 +2339,12 @@ mod tests {
             ],
         ];
 
-        for indices in (0..trees.len()).into_iter().combinations(2) {
+        for indices in (0..trees.len()).combinations(2) {
             let (i0, i1) = (indices[0], indices[1]);
             let t0 = Tree::from_newick(trees[i0]).unwrap();
             let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-            assert!((t0.weighted_robinson_foulds(&t1).unwrap() - rfs[i0][i1]).abs() <= f32::EPSILON)
+            assert!((t0.weighted_robinson_foulds(&t1).unwrap() - rfs[i0][i1]).abs() <= f64::EPSILON)
         }
     }
 
@@ -2367,7 +2366,7 @@ mod tests {
             "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
             "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
         ];
-        let rfs: Vec<Vec<f32>> = vec![
+        let rfs: Vec<Vec<f64>> = vec![
             vec![
                 0.,
                 0.2,
@@ -2538,7 +2537,7 @@ mod tests {
             ],
         ];
 
-        for indices in (0..trees.len()).into_iter().combinations(2) {
+        for indices in (0..trees.len()).combinations(2) {
             let (i0, i1) = (indices[0], indices[1]);
             let t0 = Tree::from_newick(trees[i0]).unwrap();
             let t1 = Tree::from_newick(trees[i1]).unwrap();
@@ -2743,7 +2742,7 @@ mod tests {
     #[test]
     fn compute_distance_matrix() {
         let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
-        let true_dists: HashMap<(String, String), f32> = HashMap::from_iter(vec![
+        let true_dists: HashMap<(String, String), f64> = HashMap::from_iter(vec![
             (("A".into(), "B".into()), 0.30000000000000004),
             (("A".into(), "C".into()), 1.5),
             (("A".into(), "D".into()), 1.6),
@@ -2756,7 +2755,7 @@ mod tests {
 
         for ((n1, n2), dist) in true_dists {
             assert!(
-                (dist - matrix.get(&n1, &n2).unwrap()) <= f32::EPSILON,
+                (dist - matrix.get(&n1, &n2).unwrap()) <= f64::EPSILON,
                 "d({n1},{n2}) want:{dist} got:{}",
                 matrix.get(&n1, &n2).unwrap()
             )
