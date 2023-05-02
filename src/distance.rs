@@ -1,8 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Iter, HashMap, HashSet},
     fmt::{Debug, Display},
+    fs,
+    path::Path,
     str::FromStr,
-    vec, path::Path, fs,
+    vec,
 };
 
 use itertools::Itertools;
@@ -84,6 +86,11 @@ where
     /// Get the mutable distance between two sequences
     pub fn get_mut(&mut self, id_1: &str, id_2: &str) -> Option<&mut T> {
         self.matrix.get_mut(&self.get_key(id_1, id_2))
+    }
+
+    /// Return iterator over the distance matrix
+    pub fn iter(&self) -> Iter<(String, String), T> {
+        self.matrix.iter()
     }
 
     /// Set an entry in the distance matrix, if overwriting is permitted and the key
@@ -232,7 +239,6 @@ where
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip(&newick_string, square)
     }
-
 }
 
 #[cfg(test)]
