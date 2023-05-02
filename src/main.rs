@@ -4,7 +4,7 @@ use std::path::Path;
 
 mod cli;
 
-fn print_header() {
+fn print_stats_header() {
     println!("height\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
 }
 
@@ -33,6 +33,11 @@ fn main() {
         } => {
             if let Some(ntrees) = trees {
                 // Create output directory if it's missing
+                assert!(
+                    output.is_some(),
+                    "If you are generating multiple trees you must specify an output directory"
+                );
+                let output = output.unwrap();
                 std::fs::create_dir_all(&output).unwrap();
 
                 for i in 1..=ntrees {
@@ -42,11 +47,15 @@ fn main() {
                 }
             } else {
                 let random = generate_tree(tips, branch_lengths, distribution);
-                random.to_file(&output).unwrap()
+                if let Some(output) = output {
+                    random.to_file(&output).unwrap()
+                } else {
+                    println!("{}", random.to_newick())
+                }
             }
         }
         cli::Commands::Stats { trees } => {
-            print_header();
+            print_stats_header();
             for tree in trees {
                 print_stats(&tree)
             }
@@ -61,11 +70,6 @@ fn main() {
             let common = ref_parts.intersection(&other_parts).count();
             let rf = reftree.robinson_foulds(&compare).unwrap();
 
-            dbg!("Ref: {}", reftree.leaf_index);
-            dbg!("Cmp: {}", compare.leaf_index);
-            eprintln!("Ref: {ref_parts:#?}");
-            eprintln!("Cmp: {other_parts:#?}");
-
             println!("tree\treference\tcommon\tcompared\trf");
             println!(
                 "0\t{}\t{}\t{}\t{}",
@@ -79,7 +83,7 @@ fn main() {
             let reftree = Tree::from_file(&reftree).unwrap();
             let compare = Tree::from_file(&tocompare).unwrap();
 
-            let rf = reftree.robinson_foulds_new(&compare).unwrap();
+            let rf = reftree.robinson_foulds(&compare).unwrap();
 
             println!("{rf}")
         }

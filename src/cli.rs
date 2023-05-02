@@ -25,7 +25,7 @@ pub enum Commands {
 
         /// Output file (directory if generating multiple trees)
         #[arg(short, long)]
-        output: PathBuf,
+        output: Option<PathBuf>,
 
         /// Number of trees to generate
         #[arg(short='n', long)]
