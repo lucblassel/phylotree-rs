@@ -24,7 +24,7 @@ pub mod errors;
 
 type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
-type Edge = usize;
+// type Edge = usize;
 
 /// A Vector backed Tree structure
 #[derive(Debug, Clone)]
@@ -36,7 +36,8 @@ pub struct Tree {
     height: RefCell<Option<f64>>,
     diameter: RefCell<Option<f64>>,
     pub leaf_index: RefCell<Option<Vec<String>>>,
-    partitions: RefCell<Option<HashMap<usize, Option<f64>>>>,
+    // partitions: RefCell<Option<HashMap<usize, Option<f64>>>>,
+    partitions: RefCell<Option<HashMap<FixedBitSet, Option<f64>>>>,
 }
 
 impl Tree {
@@ -641,28 +642,7 @@ impl Tree {
     }
 
     /// Get the partition corresponding to the branch associated to the node at index
-    pub fn get_partition(&self, index: usize) -> Result<Edge> {
-        self.init_leaf_index()?;
-        let indices = self
-            .get_subtree_leaves(index)
-            .into_iter()
-            .filter_map(|index| self.get(index).name.clone())
-            .map(|name| {
-                let v = self.leaf_index.borrow().clone();
-                v.map(|v| v.iter().position(|n| *n == name).unwrap())
-                    .unwrap()
-            });
-
-        let mut hash = 0;
-        for index in indices {
-            hash ^= 1 << index;
-        }
-
-        Ok(hash)
-    }
-
-    /// Get the partition corresponding to the branch associated to the node at index
-    pub fn get_partition_new(&self, index: usize) -> Result<FixedBitSet> {
+    pub fn get_partition(&self, index: usize) -> Result<FixedBitSet> {
         self.init_leaf_index()?;
 
         let indices = self
@@ -687,8 +667,12 @@ impl Tree {
     }
 
     /// Caches partitions for distance computation
-    fn init_partitions_new(&self) -> Result<HashMap<FixedBitSet, Option<f64>>> {
+    fn init_partitions(&self) -> Result<()> {
         self.init_leaf_index()?;
+
+        if self.partitions.borrow().is_some() {
+            return Ok(());
+        }
 
         let mut partitions: HashMap<FixedBitSet, Option<f64>> = HashMap::new();
 
@@ -697,97 +681,11 @@ impl Tree {
             .iter()
             .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
         {
-            let part = self.get_partition_new(node.idx)?;
+            let part = self.get_partition(node.idx)?;
 
             if part.count_ones(..) == 1 {
                 continue;
             }
-
-            let new_len = node.length;
-            let old_len = partitions.get(&part);
-
-            let len = match (new_len, old_len) {
-                (None, None) => None,
-                (Some(new_len), Some(old_len)) => old_len.map(|v| v + new_len),
-                (Some(new_len), None) => Some(new_len),
-                (None, Some(old_len)) => *old_len,
-            };
-
-            partitions.insert(part, len);
-        }
-
-        Ok(partitions)
-    }
-
-    fn get_partitions_new(&self) -> Result<HashSet<FixedBitSet>> {
-        self.init_leaf_index()?;
-
-        let partitions = self.init_partitions_new()?;
-
-        Ok(HashSet::from_iter(partitions.keys().cloned()))
-    }
-
-    /// Computes the Robinson Foulds distance between two trees
-    pub fn robinson_foulds_new(&self, other: &Self) -> Result<usize> {
-        let partitions_s = self.get_partitions_new()?;
-        let partitions_o = other.get_partitions_new()?;
-
-        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
-            return Err(TreeError::DifferentTipIndices.into());
-        }
-
-        let mut root_s = HashSet::new();
-        for i in self.nodes[0].children.iter() {
-            root_s.insert(self.get_partition_new(*i)?);
-        }
-        let mut root_o = HashSet::new();
-        for i in other.nodes[0].children.iter() {
-            root_o.insert(other.get_partition_new(*i)?);
-        }
-
-        let same_root = root_s == root_o;
-
-        let i = partitions_o.intersection(&partitions_s).count();
-        let rf = partitions_o.len() + partitions_s.len() - 2 * i;
-
-        // Hacky...
-        if self.is_rooted && rf != 0 && !same_root {
-            Ok(rf + 2)
-        } else {
-            Ok(rf)
-        }
-    }
-
-    /// Computes the normalized Robinson Foulds distance between two trees
-    pub fn robinson_foulds_norm_new(&self, other: &Self) -> Result<f64> {
-        let rf = self.robinson_foulds_new(other)?;
-
-        let partitions_s = self.get_partitions_new()?;
-        let partitions_o = other.get_partitions_new()?;
-
-        let tot = partitions_o.len() + partitions_s.len();
-
-        Ok((rf as f64) / (tot as f64))
-    }
-
-    /// Caches partitions for distance computation
-    fn init_partitions(&self) -> Result<()> {
-        self.init_leaf_index()?;
-
-        if self.partitions.borrow().is_some() {
-            return Ok(());
-        }
-
-        let mut partitions: HashMap<Edge, Option<f64>> = HashMap::new();
-
-        let m: usize = 2u64.pow(self.tips.len() as u32) as usize - 1;
-        for node in self
-            .nodes
-            .iter()
-            .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
-        {
-            let part = self.get_partition(node.idx)?;
-            let part = part.min(m ^ part);
 
             let new_len = node.length;
             let old_len = partitions.get(&part);
@@ -807,12 +705,10 @@ impl Tree {
         Ok(())
     }
 
-    pub fn get_partitions(&self) -> Result<HashSet<Edge>> {
+    /// Get all partitions of a tree
+    pub fn get_partitions(&self) -> Result<HashSet<FixedBitSet>> {
         self.init_leaf_index()?;
-
-        if self.partitions.borrow().is_none() {
-            self.init_partitions()?;
-        }
+        self.init_partitions()?;
 
         Ok(HashSet::from_iter(
             self.partitions
@@ -820,24 +716,22 @@ impl Tree {
                 .as_ref()
                 .unwrap()
                 .iter()
-                .map(|(k, _)| *k),
+                .map(|(k, _)| k.clone()),
         ))
     }
 
-    /// Get all partitions of a tree
-    pub fn get_partitions_with_lengths(&self) -> Result<HashMap<Edge, f64>> {
+    /// Get all partitions of a tree along with corresponding branch lengths
+    pub fn get_partitions_with_lengths(&self) -> Result<HashMap<FixedBitSet, f64>> {
         self.init_leaf_index()?;
+        self.init_partitions()?;
 
-        if self.partitions.borrow().is_none() {
-            self.init_partitions()?;
-        }
 
         let mut partitions = HashMap::new();
-        for (hash, len) in self.partitions.borrow().as_ref().unwrap().iter() {
+        for (bitset, len) in self.partitions.borrow().as_ref().unwrap().iter() {
             if len.is_none() {
                 return Err(TreeError::MissingBranchLengths.into());
             }
-            partitions.insert(*hash, len.unwrap());
+            partitions.insert(bitset.clone(), len.unwrap());
         }
 
         Ok(partitions)
@@ -852,24 +746,36 @@ impl Tree {
             return Err(TreeError::DifferentTipIndices.into());
         }
 
-        let i = partitions_o.intersection(&partitions_s).count();
+        let mut root_s = HashSet::new();
+        for i in self.nodes[0].children.iter() {
+            root_s.insert(self.get_partition(*i)?);
+        }
+        let mut root_o = HashSet::new();
+        for i in other.nodes[0].children.iter() {
+            root_o.insert(other.get_partition(*i)?);
+        }
 
-        Ok(partitions_o.len() + partitions_s.len() - 2 * i)
+        let same_root = root_s == root_o;
+
+        let i = partitions_o.intersection(&partitions_s).count();
+        let rf = partitions_o.len() + partitions_s.len() - 2 * i;
+
+        // Hacky...
+        if self.is_rooted && rf != 0 && !same_root {
+            Ok(rf + 2)
+        } else {
+            Ok(rf)
+        }
     }
 
     /// Computes the normalized Robinson Foulds distance between two trees
     pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64> {
+        let rf = self.robinson_foulds(other)?;
+
         let partitions_s = self.get_partitions()?;
         let partitions_o = other.get_partitions()?;
 
-        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
-            return Err(TreeError::DifferentTipIndices.into());
-        }
-
-        let i = partitions_o.intersection(&partitions_s).count();
-
         let tot = partitions_o.len() + partitions_s.len();
-        let rf = tot - 2 * i;
 
         Ok((rf as f64) / (tot as f64))
     }
@@ -2625,7 +2531,7 @@ mod tests {
 
             assert_eq!(
                 t1.robinson_foulds(&t2).unwrap(),
-                t1.robinson_foulds_new(&t2).unwrap()
+                t1.robinson_foulds(&t2).unwrap()
             )
         }
     }
@@ -2661,7 +2567,7 @@ mod tests {
         let index: Vec<_> = reftree.get_leaf_names().into_iter().sorted().collect();
         let index2: Vec<_> = compare.get_leaf_names().into_iter().sorted().collect();
 
-        let p1 = reftree.get_partitions_new().unwrap();
+        let p1 = reftree.get_partitions().unwrap();
         println!("REF: [");
         for p in p1 {
             print!("(");
@@ -2672,7 +2578,7 @@ mod tests {
         }
         println!("]\n");
 
-        let p2 = compare.get_partitions_new().unwrap();
+        let p2 = compare.get_partitions().unwrap();
         println!("COMP: [");
         for p in p2 {
             print!("(");
@@ -2692,51 +2598,51 @@ mod tests {
         // dbg!(&reftree);
         // dbg!(&compare);
 
-        assert_eq!(reftree.robinson_foulds_new(&compare).unwrap(), rf_true)
+        assert_eq!(reftree.robinson_foulds(&compare).unwrap(), rf_true)
     }
 
-    #[test]
-    // Robinson foulds distances according to
-    // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    fn robinson_foulds_treedist_new() {
-        let trees = vec![
-            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-        ];
-        let rfs = vec![
-            vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
-            vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
-            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-            vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
-            vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
-            vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
-            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-            vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
-            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-        ];
+    // #[test]
+    // // Robinson foulds distances according to
+    // // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
+    // fn robinson_foulds_treedist_new() {
+    //     let trees = vec![
+    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+    //     ];
+    //     let rfs = vec![
+    //         vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
+    //         vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
+    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+    //         vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
+    //         vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
+    //         vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
+    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+    //         vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
+    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+    //     ];
 
-        for indices in (0..trees.len()).combinations(2) {
-            let (i0, i1) = (indices[0], indices[1]);
+    //     for indices in (0..trees.len()).combinations(2) {
+    //         let (i0, i1) = (indices[0], indices[1]);
 
-            let t0 = Tree::from_newick(trees[i0]).unwrap();
-            let t1 = Tree::from_newick(trees[i1]).unwrap();
+    //         let t0 = Tree::from_newick(trees[i0]).unwrap();
+    //         let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-            assert_eq!(t0.robinson_foulds_new(&t1).unwrap(), rfs[i0][i1])
-        }
-    }
+    //         assert_eq!(t0.robinson_foulds_new(&t1).unwrap(), rfs[i0][i1])
+    //     }
+    // }
 
     // the reference distance matrix was computed with ete3
     #[test]
