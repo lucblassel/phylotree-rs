@@ -1,5 +1,14 @@
+use std::fmt::{Debug, Display};
+
 use clap::ValueEnum;
-use rand_distr::{Distribution, Exp, Uniform, Gamma};
+use num_traits::{Float, Zero};
+use numeric_literals::replace_numeric_literals;
+use rand_distr::{uniform::SampleUniform, Distribution, Exp, Gamma, Uniform};
+use trait_set::trait_set;
+
+trait_set! {
+    pub trait BranchLength = Debug + Display + Float + Zero + SampleUniform;
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Distr {
@@ -8,24 +17,43 @@ pub enum Distr {
     Gamma,
 }
 
-pub enum Sampler {
-    Uniform(Uniform<f32>),
-    Exponential(Exp<f32>),
-    Gamma(Gamma<f32>),
+pub enum Sampler<T>
+where
+    T: BranchLength,
+    rand_distr::StandardNormal: rand_distr::Distribution<T>,
+    rand_distr::Exp1: rand_distr::Distribution<T>,
+    rand_distr::Open01: rand_distr::Distribution<T>,
+{
+    Uniform(Uniform<T>),
+    Exponential(Exp<T>),
+    Gamma(Gamma<T>),
 }
 
-impl Sampler {
-    pub fn new(v:Distr) -> Self {
+impl<T> Sampler<T>
+where
+    T: BranchLength,
+    rand_distr::StandardNormal: rand_distr::Distribution<T>,
+    rand_distr::Exp1: rand_distr::Distribution<T>,
+    rand_distr::Open01: rand_distr::Distribution<T>,
+{
+    #[replace_numeric_literals(T::from(literal).unwrap())]
+    pub fn new(v: Distr) -> Self {
         match v {
-            Distr::Uniform => Self::Uniform(Uniform::new(0.002, 1.0)),
+            Distr::Uniform => Self::Uniform(Uniform::<T>::new(0.002, 1.0)),
             Distr::Exponential => Self::Exponential(Exp::new(0.15).unwrap()),
-            Distr::Gamma => Self::Gamma(Gamma::new(4.0,1.0).unwrap()),
+            Distr::Gamma => Self::Gamma(Gamma::new(4.0, 1.0).unwrap()),
         }
     }
 }
 
-impl Distribution<f32> for Sampler {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> f32 {
+impl<T> Distribution<T> for Sampler<T>
+where
+    T: BranchLength,
+    rand_distr::StandardNormal: rand_distr::Distribution<T>,
+    rand_distr::Exp1: rand_distr::Distribution<T>,
+    rand_distr::Open01: rand_distr::Distribution<T>,
+{
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> T {
         match self {
             Sampler::Uniform(u) => u.sample(rng),
             Sampler::Exponential(e) => e.sample(rng),
