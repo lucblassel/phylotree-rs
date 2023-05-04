@@ -24,6 +24,8 @@ pub struct Node {
     pub comment: Option<String>,
     /// Number of edges to root
     pub depth: usize,
+    // Whether the node is deleted or not
+    pub(crate) deleted: bool,
 }
 
 impl Node {
@@ -38,6 +40,7 @@ impl Node {
             child_edges: None,
             comment: None,
             depth: 0,
+            deleted: false,
         }
     }
 
@@ -52,6 +55,7 @@ impl Node {
             child_edges: None,
             comment: None,
             depth: 0,
+            deleted: false,
         }
     }
 
@@ -77,6 +81,12 @@ impl Node {
         self.depth = depth;
     }
 
+    /// Empties the node and sets it as deleted
+    pub(crate) fn delete(&mut self) {
+        *self = Self::new();
+        self.deleted = true;
+    }
+
     /// Adds a child to the node
     /// ```
     /// use phylotree::tree::Node;
@@ -85,7 +95,7 @@ impl Node {
     /// parent.id = 0;
     /// let mut child = Node::new();
     /// child.id = 1;
-    /// 
+    ///
     /// let l = 0.1;
     ///
     /// child.set_parent(parent.id, Some(l));
@@ -117,6 +127,16 @@ impl Node {
             self.child_edges
                 .as_mut()
                 .map(|edges| edges.insert(*child, edge));
+        }
+    }
+
+    /// Rescales parent and chilhd edges by a factor.
+    pub(crate) fn rescale_edges(&mut self, factor: f64) {
+        self.parent_edge = self.parent_edge.map(|edge| edge * factor);
+        if let Some(edges) = &mut self.child_edges {
+            for (_, v) in edges.iter_mut() {
+                *v *= factor;
+            }
         }
     }
 
