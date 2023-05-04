@@ -18,6 +18,7 @@ use ptree::{print_tree, TreeBuilder};
 use rand::prelude::*;
 
 // pub mod data;
+pub mod tree;
 pub mod distance;
 pub mod distr;
 pub mod errors;
