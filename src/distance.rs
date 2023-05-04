@@ -94,7 +94,7 @@ where
     }
 
     /// Set an entry in the distance matrix, if overwriting is permitted and the key
-    /// exists it returns the old value as Some<old>
+    /// exists it returns the old value as `Some(old)`
     pub fn set(
         &mut self,
         id_1: &str,

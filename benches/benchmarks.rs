@@ -16,7 +16,7 @@ fn from_elem(c: &mut Criterion) {
     let tree: Tree = generate_tree(100, true, phylotree::distr::Distr::Uniform);
 
     c.bench_with_input(
-        BenchmarkId::new("input_uncached", tree.size().unwrap()),
+        BenchmarkId::new("input_uncached", tree.size()),
         &tree,
         |b, s| {
             b.iter(|| distance_naive(s));
@@ -24,7 +24,7 @@ fn from_elem(c: &mut Criterion) {
     );
 
     c.bench_with_input(
-        BenchmarkId::new("input_recursive", tree.size().unwrap()),
+        BenchmarkId::new("input_recursive", tree.size()),
         &tree,
         |b, s| {
             b.iter(|| distance_recurs(s));

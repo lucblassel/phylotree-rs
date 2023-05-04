@@ -26,6 +26,18 @@ type Error = Box<dyn std::error::Error>;
 type Result<T> = std::result::Result<T, Error>;
 // type Edge = usize;
 
+/// Struct to hold tree comparison metrics
+pub struct Comparison {
+    /// Robinson Foulds metric
+    pub rf: f64,
+    /// Normalized Robinson Foulds
+    pub norm_rf: f64,
+    /// Weighted Robinson Foulds
+    pub weighted_rf: f64,
+    /// Khuner Felsenstein Branch Score
+    pub branch_score: f64,
+}
+
 /// A Vector backed Tree structure
 #[derive(Debug, Clone)]
 pub struct Tree {
@@ -35,7 +47,7 @@ pub struct Tree {
     is_rooted: bool,
     height: RefCell<Option<f64>>,
     diameter: RefCell<Option<f64>>,
-    pub leaf_index: RefCell<Option<Vec<String>>>,
+    leaf_index: RefCell<Option<Vec<String>>>,
     // partitions: RefCell<Option<HashMap<usize, Option<f64>>>>,
     partitions: RefCell<Option<HashMap<FixedBitSet, Option<f64>>>>,
 }
@@ -134,13 +146,14 @@ impl Tree {
         idx
     }
 
-    /// Returns the size of the tree, i.e. the number of tips
-    pub fn size(&self) -> Option<usize> {
-        if self.nodes.is_empty() {
-            None
-        } else {
-            Some(self.nodes.len())
-        }
+    /// Returns the size of the tree, i.e. the number of nodes
+    pub fn size(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns the number of tips in the tree
+    pub fn n_tips(&self) -> usize {
+        self.nodes.iter().filter(|node| node.tip).count()
     }
 
     /// Returns height of the tree (i.e. longest distance from tip to root)
@@ -348,6 +361,8 @@ impl Tree {
         Ok(indices)
     }
 
+    /// Returns indices in the in-order traversal.  
+    /// Note that this is only possible for binary trees
     pub fn inorder(&self, root: usize) -> Result<Vec<usize>> {
         if root >= self.nodes.len() {
             return Err(format!("Leaf number {root} does not exist in this tree").into());
@@ -391,7 +406,22 @@ impl Tree {
     }
 
     /// Rescales the branch lengths of a tree
+    /// ```
+    /// use phylotree::Tree;
+    /// 
+    /// let mut tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// tree.rescale(0.5);
+    /// 
+    /// assert_eq!(tree.to_newick(), "(A:0.05,B:0.1,(C:0.15,D:0.2)E:0.25)F;");
+    /// ```
     pub fn rescale(&mut self, scale: f64) {
+        for node in self.nodes.iter_mut().skip(1) {
+            node.length = node.length.map(|l| l * scale);
+        }
+    }
+
+    /// Rescale the branch lenghts of a tree, normalized by its diameter
+    pub fn rescale_norm(&mut self, scale: f64) {
         if let Some(diam) = self.diameter() {
             for node in self.nodes.iter_mut().skip(1) {
                 node.length = node.length.map(|l| l * scale / diam);
@@ -725,7 +755,6 @@ impl Tree {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
-
         let mut partitions = HashMap::new();
         for (bitset, len) in self.partitions.borrow().as_ref().unwrap().iter() {
             if len.is_none() {
@@ -738,6 +767,7 @@ impl Tree {
     }
 
     /// Computes the Robinson Foulds distance between two trees
+    /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds(&self, other: &Self) -> Result<usize> {
         let partitions_s = self.get_partitions()?;
         let partitions_o = other.get_partitions()?;
@@ -768,7 +798,8 @@ impl Tree {
         }
     }
 
-    /// Computes the normalized Robinson Foulds distance between two trees
+    /// Computes the normalized Robinson Foulds distance between two trees  
+    /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64> {
         let rf = self.robinson_foulds(other)?;
 
@@ -780,7 +811,8 @@ impl Tree {
         Ok((rf as f64) / (tot as f64))
     }
 
-    /// Computes the weighted Robinson Foulds distance between two trees
+    /// Computes the weighted Robinson Foulds distance between two trees  
+    /// See also [Tree::compare_topologies()]
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
@@ -804,7 +836,8 @@ impl Tree {
         Ok(dist)
     }
 
-    /// Computes the khuner felsenstein branch score between two trees
+    /// Computes the khuner felsenstein branch score between two trees  
+    /// See also [Tree::compare_topologies()]
     pub fn khuner_felsenstein(&self, other: &Self) -> Result<f64> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
@@ -826,6 +859,80 @@ impl Tree {
         }
 
         Ok(dist.sqrt())
+    }
+
+    /// Compute several comparison metrics in one pass.
+    /// This is more efficient than calling the different functions independently.
+    /// Example:  
+    /// 
+    /// ```
+    /// use phylotree::Tree;
+    /// 
+    /// let tree1 = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// let tree2 = Tree::from_newick("(A:0.1,D:0.2,(C:0.3,B:0.4)E:0.5)F;").unwrap();
+    /// 
+    /// let rf = tree1.robinson_foulds(&tree2).unwrap() as f64;
+    /// let norm_rf = tree1.robinson_foulds_norm(&tree2).unwrap();
+    /// let weighted_rf = tree1.weighted_robinson_foulds(&tree2).unwrap();
+    /// let branch_score = tree1.khuner_felsenstein(&tree2).unwrap();
+    /// 
+    /// let comparison = tree1.compare_topologies(&tree2).unwrap();
+    /// 
+    /// assert_eq!(rf, comparison.rf);
+    /// assert_eq!(norm_rf, comparison.norm_rf);
+    /// assert_eq!(weighted_rf, comparison.weighted_rf);
+    /// assert_eq!(branch_score, comparison.branch_score);
+    /// ```
+    pub fn compare_topologies(&self, other: &Self) -> Result<Comparison> {
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
+
+        let tot = partitions_o.len() + partitions_s.len();
+
+        let mut intersection = 0.;
+        let mut rf_weight = 0.;
+        let mut kf = 0.;
+
+        for (edge, len_s) in partitions_s.iter() {
+            if let Some(len_o) = partitions_o.get(edge) {
+                rf_weight += (len_s - len_o).abs();
+                kf += f64::powi(len_s - len_o, 2);
+                intersection += 1.0;
+            } else {
+                rf_weight += len_s;
+                kf += f64::powi(*len_s, 2);
+            }
+        }
+
+        for (edge, len_o) in partitions_o.iter() {
+            if !partitions_s.contains_key(edge) {
+                rf_weight += len_o;
+                kf += f64::powi(*len_o, 2);
+            }
+        }
+
+        let mut rf = tot as f64 - 2.0 * intersection;
+
+        // Hacky...
+        let mut root_s = HashSet::new();
+        for i in self.nodes[0].children.iter() {
+            root_s.insert(self.get_partition(*i)?);
+        }
+        let mut root_o = HashSet::new();
+        for i in other.nodes[0].children.iter() {
+            root_o.insert(other.get_partition(*i)?);
+        }
+        let same_root = root_s == root_o;
+        if self.is_rooted && rf != 0.0 && !same_root {
+            rf += 2.0;
+        }
+
+        Ok(Comparison {
+            rf,
+            norm_rf: rf / tot as f64,
+            weighted_rf: rf_weight,
+            branch_score: kf.sqrt(),
+        })
     }
 
     /// Recursive function that adds node representation to a printable tree builder
@@ -950,6 +1057,7 @@ impl Tree {
         Ok(matrix)
     }
 
+
     /// Compute distance matrix from tree without a cache
     pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>> {
         let mut matrix = DistanceMatrix::new(self.tips.len());
@@ -970,11 +1078,28 @@ impl Tree {
     }
 
     /// Generate newick representation of tree
+    /// ```
+    /// use phylotree::Tree;
+    /// 
+    /// let newick = "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;";
+    /// let tree = Tree::from_newick(newick).unwrap();
+    /// 
+    /// assert_eq!(tree.to_newick(), newick)
+    /// ```
     pub fn to_newick(&self) -> String {
         self.to_newick_impl(0) + ";"
     }
 
     /// Parses a newick string into to Tree
+    /// ```
+    /// use phylotree::Tree;
+    /// 
+    /// let newick = "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;";
+    /// let tree = Tree::from_newick(newick).unwrap();
+    /// 
+    /// assert_eq!(tree.n_tips(), 4);
+    /// assert_eq!(tree.is_rooted(), false);
+    /// ```
     pub fn from_newick(newick: &str) -> Result<Self> {
         #[derive(Debug, PartialEq)]
         enum Field {
@@ -1186,7 +1311,7 @@ impl<'a> Iterator for PreOrder<'a> {
     type Item = &'a TreeNode;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, self.tree.size())
+        (0, Some(self.tree.size()))
     }
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1226,7 +1351,7 @@ impl<'a> Iterator for PostOrder<'a> {
     type Item = &'a TreeNode;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, self.tree.size())
+        (0, Some(self.tree.size()))
     }
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1856,7 +1981,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rescale() {
+    fn test_rescale_norm() {
         let test_cases = [
             ("((D:0.05307533041908017723553570021977,(C:0.08550401213833067060043902074540,(B:0.27463239708134284944307523801399,A:0.37113575171985613287972682883264)1:0.18134330279626256765546088445262)1:0.08033066840794983454188127325324)1:0.13864016688124142229199264875206,E:0.05060148260657528623829293223935);",
             "((D:0.04212872094323715649322181775460,(C:0.06786909546224775824363462106703,(B:0.21799038323938338401752901063446,A:0.29459024358034957558061250892933)1:0.14394185279875840177687962295749)1:0.06376273658252405718283029045779)1:0.11004609591585229333432494058798,E:0.04016509597234880352134567260691);",
@@ -1873,7 +1998,7 @@ mod tests {
             let mut tree = Tree::from_newick(orig).unwrap();
             let rescaled = Tree::from_newick(rescaled).unwrap();
 
-            tree.rescale(scale);
+            tree.rescale_norm(scale);
 
             println!("Dealing with tree: {} and scale {}", orig, scale);
             for (n1, n2) in zip(tree.nodes, rescaled.nodes) {
