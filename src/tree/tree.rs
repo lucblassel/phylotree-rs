@@ -14,6 +14,8 @@ use thiserror::Error;
 use super::node::{Node, NodeError};
 use super::{Edge, NodeId};
 
+use crate::distance::DistanceMatrix;
+
 #[derive(Error, Debug)]
 pub enum TreeError {
     #[error("This tree is not Binary.")]
@@ -42,6 +44,8 @@ pub enum TreeError {
     CouldNotCompressNode(NodeId),
     #[error("Could operate on Node")]
     NodeError(#[from] NodeError),
+    #[error("Could not convert to matrix")]
+    MatrixError(#[from] crate::distance::Error),
 }
 
 #[derive(Error, Debug)]
@@ -1155,6 +1159,41 @@ impl Tree {
         } else {
             Ok((None, branches))
         }
+    }
+
+    /// Computes the distance matrix of the tree. 
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// 
+    /// let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
+    /// let matrix = tree.distance_matrix().unwrap();
+    /// 
+    /// let phylip="\
+    /// 4
+    /// T0    0  1.6  0.9  1.6
+    /// T1    1.6  0  1.5  0.4
+    /// T2    0.9  1.5  0  1.5
+    /// T3    1.6  0.4  1.5  0
+    /// ";
+    /// 
+    /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
+    /// ```
+    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>, TreeError> {
+        let mut matrix = DistanceMatrix::new(self.n_leaves());
+
+        for pair in self.get_leaves().iter().combinations(2) {
+            let (i1, i2) = (pair[0], pair[1]);
+            if let (Some(d), _) = self.get_distance(i1, i2)? {
+                let name1 = self.get(i1)?.name.clone().unwrap();
+                let name2 = self.get(i2)?.name.clone().unwrap();
+
+                matrix.set(&name1, &name2, d, false)?;
+            } else {
+                return Err(TreeError::MissingBranchLengths);
+            }
+        }
+
+        Ok(matrix)
     }
 
     // ##################
@@ -2594,26 +2633,26 @@ mod tests {
     }
 
     // the reference distance matrix was computed with ete3
-    // #[test]
-    // fn compute_distance_matrix() {
-    //     let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
-    //     let true_dists: HashMap<(String, String), f64> = HashMap::from_iter(vec![
-    //         (("A".into(), "B".into()), 0.30000000000000004),
-    //         (("A".into(), "C".into()), 1.5),
-    //         (("A".into(), "D".into()), 1.6),
-    //         (("B".into(), "C".into()), 1.6),
-    //         (("B".into(), "D".into()), 1.7000000000000002),
-    //         (("C".into(), "D".into()), 0.7),
-    //     ]);
+    #[test]
+    fn compute_distance_matrix() {
+        let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
+        let true_dists: HashMap<(String, String), f64> = HashMap::from_iter(vec![
+            (("A".into(), "B".into()), 0.30000000000000004),
+            (("A".into(), "C".into()), 1.5),
+            (("A".into(), "D".into()), 1.6),
+            (("B".into(), "C".into()), 1.6),
+            (("B".into(), "D".into()), 1.7000000000000002),
+            (("C".into(), "D".into()), 0.7),
+        ]);
 
-    //     let matrix = tree.distance_matrix().unwrap();
+        let matrix = tree.distance_matrix().unwrap();
 
-    //     for ((n1, n2), dist) in true_dists {
-    //         assert!(
-    //             (dist - matrix.get(&n1, &n2).unwrap()) <= f64::EPSILON,
-    //             "d({n1},{n2}) want:{dist} got:{}",
-    //             matrix.get(&n1, &n2).unwrap()
-    //         )
-    //     }
-    // }
+        for ((n1, n2), dist) in true_dists {
+            assert!(
+                (dist - matrix.get(&n1, &n2).unwrap()) <= f64::EPSILON,
+                "d({n1},{n2}) want:{dist} got:{}",
+                matrix.get(&n1, &n2).unwrap()
+            )
+        }
+    }
 }
