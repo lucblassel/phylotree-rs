@@ -1,9 +1,18 @@
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},
+    ops::Index,
 };
 
+use thiserror::Error;
+
 use super::{Edge, NodeId};
+
+#[derive(Error, Debug)]
+pub enum NodeError {
+    #[error("Node {parent} does not have child {child}.")]
+    HasNoChild { parent: NodeId, child: NodeId },
+}
 
 #[derive(Clone)]
 /// A node of the Tree
@@ -128,6 +137,24 @@ impl Node {
                 .as_mut()
                 .map(|edges| edges.insert(*child, edge));
         }
+    }
+
+    /// Removes the child from the node
+    pub fn remove_child(&mut self, child: &NodeId) -> Result<(), NodeError> {
+        let vec_index = match self.children.iter().position(|node_id| node_id == child) {
+            Some(idx) => idx,
+            None => {
+                return Err(NodeError::HasNoChild {
+                    parent: self.id,
+                    child: *child,
+                })
+            }
+        };
+
+        self.children.remove(vec_index);
+        self.child_edges.as_mut().map(|edges| edges.remove(child));
+
+        Ok(())
     }
 
     /// Rescales parent and chilhd edges by a factor.
