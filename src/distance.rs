@@ -1,3 +1,6 @@
+//! Compute and manipulate phylogenetic distance matrices
+//! 
+
 use std::{
     collections::{hash_map::Iter, HashMap, HashSet},
     fmt::{Debug, Display},
@@ -11,48 +14,67 @@ use itertools::Itertools;
 use num_traits::{Float, Zero};
 use thiserror::Error;
 
+/// Errors that can occur when reading, writing and manipulating [`DistanceMatrix`] structs.
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum MatrixError {
+    /// We are trying to insert a distance that already exists in the matrix
     #[error("Distance already exists, cannot overwrite it.")]
     OverwritingNotPermitted,
-    #[error("You added more sequences than there is room for in the matrix.")]
+    /// We are trying to add more taxa than we allocated space in the matrix for
+    #[error("You added more taxa than there is room for in the matrix.")]
     SizeExceeded,
+    /// We are trying to access a distance between two taxa that does not 
+    /// exist in the matrix
     #[error("Missing distance between {0} and {1}.")]
     MissingDistance(String, String),
+    /// There was an [`std::io::Error`] when writing the matrix to a phylip file
     #[error("Error writing file")]
-    IOError(#[from] std::io::Error),
+    IoError(#[from] std::io::Error),
 }
 
+/// Errors that can occur when parsing phylip distance matrix files.
 #[derive(Error, Debug)]
 pub enum ParseError<T>
 where
     T: Debug,
 {
+    /// The phylip file is empty
     #[error("Matrix file is empty.")]
     EmptyMatrixFile,
+    /// There was a [`std::num::ParseIntError`] when reading the number of taxa
     #[error("Could not parse size from file.")]
     SizeParseError(#[from] std::num::ParseIntError),
+    /// One of the matrix rows is empty
     #[error("Row {0} is empty.")]
     EmptyRow(usize),
+    /// There was an error when reading a distance. 
     #[error("Could not parse distance from file.")]
     DistParseError,
-    #[error("Missing distance from matrix line {0}")]
+    /// There is a missing distance from one of the matrix rows
+    #[error("Missing distance from matrix row {0}")]
     MissingDistance(usize),
+    /// The size of the matrix and the number of rows do not match
     #[error("Size and number of rows do not match: {0} rows for size {1}")]
     SizeAndRowsMismatch(usize, usize),
+    /// The square phylip matrix is not symmetric
     #[error("Non symetric matrix: {0} and {1} are different")]
     NonSymmetric(T, T),
+    /// There was a [`MatrixError`] when create the distance matrix object
     #[error("Error creating matrix.")]
-    MatrixError(#[from] crate::distance::Error),
+    MatrixError(#[from] MatrixError),
+    /// There was a [`std::io::Error`] when reading the phylip file
     #[error("Error reading file")]
-    IOError(#[from] std::io::Error),
+    IoError(#[from] std::io::Error),
 }
 
 #[derive(Debug)]
-/// Struct representing a phylogenetic distance matrix
+/// A phylogenetic distance matrix
 pub struct DistanceMatrix<T> {
+    /// Number of taxa in the matrix
     pub size: usize,
+    /// Identifiers of the taxa
     pub ids: HashSet<String>,
+    // Distaces between taxa
     matrix: HashMap<(String, String), T>,
 }
 
@@ -101,14 +123,14 @@ where
         id_2: &str,
         dist: T,
         overwrite: bool,
-    ) -> Result<Option<T>, Error> {
+    ) -> Result<Option<T>, MatrixError> {
         if let Some(old_dist) = self.get_mut(id_1, id_2) {
             if overwrite {
                 let copy = *old_dist;
                 *old_dist = dist;
                 return Ok(Some(copy));
             } else {
-                return Err(Error::OverwritingNotPermitted);
+                return Err(MatrixError::OverwritingNotPermitted);
             }
         }
 
@@ -117,14 +139,14 @@ where
         self.ids.insert(id_2.to_owned());
 
         if self.ids.len() > self.size {
-            Err(Error::SizeExceeded)
+            Err(MatrixError::SizeExceeded)
         } else {
             Ok(None)
         }
     }
 
     /// Returns a string representing the distance matrix in square format
-    fn to_phylip_square(&self) -> Result<String, Error> {
+    fn to_phylip_square(&self) -> Result<String, MatrixError> {
         let names: Vec<_> = self.ids.iter().cloned().sorted().collect();
         let mut output = format!("{}\n", self.size);
 
@@ -134,7 +156,7 @@ where
                 let d = if name1 != name2 {
                     *self
                         .get(name1, name2)
-                        .ok_or::<Error>(Error::MissingDistance(name1.clone(), name2.clone()))?
+                        .ok_or::<MatrixError>(MatrixError::MissingDistance(name1.clone(), name2.clone()))?
                 } else {
                     Zero::zero()
                 };
@@ -148,7 +170,7 @@ where
     }
 
     /// Returns a string representing the distance matrix in triangle format
-    fn to_phylip_triangle(&self) -> Result<String, Error> {
+    fn to_phylip_triangle(&self) -> Result<String, MatrixError> {
         let names: Vec<_> = self.ids.iter().cloned().sorted().collect();
         let mut output = format!("{}\n", self.size);
 
@@ -160,7 +182,7 @@ where
                 }
                 let d = self
                     .get(name1, name2)
-                    .ok_or::<Error>(Error::MissingDistance(name1.clone(), name2.clone()))?;
+                    .ok_or::<MatrixError>(MatrixError::MissingDistance(name1.clone(), name2.clone()))?;
                 output += &format!("  {}", d);
             }
             output += "\n"
@@ -169,8 +191,8 @@ where
         Ok(output)
     }
 
-    /// Outputs the matrix in phylip format to a String
-    pub fn to_phylip(&self, square: bool) -> Result<String, Error> {
+    /// Outputs the matrix as a phylip formatted string
+    pub fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
         if square {
             self.to_phylip_square()
         } else {
@@ -178,11 +200,11 @@ where
         }
     }
 
-    /// Saves the tree to a newick file
-    pub fn to_file(&self, path: &Path, square: bool) -> Result<(), Error> {
+    /// Writes the matrix to a phylip file
+    pub fn to_file(&self, path: &Path, square: bool) -> Result<(), MatrixError> {
         match fs::write(path, self.to_phylip(square)?) {
             Ok(_) => Ok(()),
-            Err(e) => Err(Error::IOError(e)),
+            Err(e) => Err(MatrixError::IoError(e)),
         }
     }
 
@@ -234,7 +256,7 @@ where
         Ok(matrix)
     }
 
-    /// Loads a tree from a newick file
+    /// Reads the matrix from a phylip file
     pub fn from_file(path: &Path, square: bool) -> Result<Self, ParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip(&newick_string, square)

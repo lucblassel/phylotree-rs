@@ -2,7 +2,7 @@ use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 
-use phylotree::{generate_tree, Tree};
+use phylotree::{generate_tree, tree::Tree};
 
 fn distance_naive(tree: &Tree) {
     let _matrix = tree.distance_matrix().unwrap();
@@ -13,7 +13,7 @@ fn distance_recurs(tree: &Tree) {
 }
 
 fn from_elem(c: &mut Criterion) {
-    let tree: Tree = generate_tree(100, true, phylotree::distr::Distr::Uniform);
+    let tree: Tree = generate_tree(100, true, phylotree::distr::Distr::Uniform).unwrap();
 
     c.bench_with_input(
         BenchmarkId::new("input_uncached", tree.size()),

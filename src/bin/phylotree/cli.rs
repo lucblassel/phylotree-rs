@@ -1,16 +1,17 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::distr::Distr;
+use phylotree::distr::Distr;
 
 /// A simple command line tool to generate a random phylogenetic tree
 #[derive(Parser, Debug)]
 pub struct Args {
     #[command(subcommand)]
+    /// The command to execute
     pub command: Commands,
 }
 
-
+/// The available commands in the `phylotree` tool
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Generate random tree(s)
@@ -49,14 +50,7 @@ pub enum Commands {
         /// Tree to compare to reference
         tocompare: PathBuf,
     },
-    /// Compute RF between two tree
-    RF {
-        /// Reference tree
-        reftree: PathBuf,
-        /// Tree to compare to reference
-        tocompare: PathBuf,
-    },
-    /// Output th ephylogenetic distance matrix of the tree
+    /// Output the phylogenetic distance matrix of the tree
     Matrix {
         /// The phylogenetic tree
         tree: PathBuf,
