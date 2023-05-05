@@ -14,7 +14,6 @@ keywords = [
     "cli",
     "newick",
     "phylip",
-    "utility",
 ]
 categories = [
     "command-line-utilities",
