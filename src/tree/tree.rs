@@ -1,5 +1,6 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use std::collections::VecDeque;
 use std::iter::zip;
 use std::{
     cell::RefCell,
@@ -10,7 +11,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::node::Node;
+use super::node::{Node, NodeError};
 use super::{Edge, NodeId};
 
 #[derive(Error, Debug)]
@@ -37,6 +38,10 @@ pub enum TreeError {
     RootNotFound,
     #[error("Error writing tree to file")]
     IoError(#[from] std::io::Error),
+    #[error("Could not compress node {0}, it does not have exactly one parent and one child")]
+    CouldNotCompressNode(NodeId),
+    #[error("Could operate on Node")]
+    NodeError(#[from] NodeError),
 }
 
 #[derive(Error, Debug)]
@@ -55,6 +60,19 @@ pub enum ParseError {
     NoSubtreeParent,
     #[error("Problem reading file")]
     IoError(#[from] std::io::Error),
+}
+
+/// Struct to hold tree comparison metrics
+#[derive(Debug, Clone)]
+pub struct Comparison {
+    /// Robinson Foulds metric
+    pub rf: f64,
+    /// Normalized Robinson Foulds
+    pub norm_rf: f64,
+    /// Weighted Robinson Foulds
+    pub weighted_rf: f64,
+    /// Khuner Felsenstein Branch Score
+    pub branch_score: f64,
 }
 
 /// A Vector backed Tree structure
@@ -76,7 +94,7 @@ impl Tree {
     }
 
     // ############################
-    // # adding and getting nodes #
+    // # ADDING AND GETTING NODES #
     // ############################
 
     /// Add a new node to the tree.
@@ -199,7 +217,77 @@ impl Tree {
             .collect()
     }
 
-    /// Gets the leaf indices in the subtree rooted at node of a specified index
+    /// Returns a [`Vec`] containing the Names of the leaf nodes of the tree
+    /// ```
+    /// use phylotree::tree::{Tree, Node};
+    ///
+    /// let mut tree = Tree::new();
+    /// let root_idx = tree.add(Node::new());
+    /// let _ = tree.add_child(Node::new_named("left"), root_idx, None).unwrap();
+    /// let _ = tree.add_child(Node::new_named("right"), root_idx, None).unwrap();
+    ///
+    /// let names: Vec<_> = tree.get_leaf_names()
+    ///     .into_iter()
+    ///     .flatten()
+    ///     .collect();
+    /// assert_eq!(names, vec!["left", "right"]);
+    /// ```
+    pub fn get_leaf_names(&self) -> Vec<Option<String>> {
+        self.get_leaves()
+            .iter()
+            .map(|leaf_id| self.get(leaf_id).name.clone())
+            .collect()
+    }
+
+    /// Gets the node ids of all the nodes in the subtree rooted at the specified node
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// let sub_root = tree.get_by_name("E").unwrap();
+    /// let subtree: Vec<_> = tree.get_subtree(&sub_root.id)
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(subtree, vec!["E", "C", "D"])
+    /// ```
+    pub fn get_subtree(&self, root: &NodeId) -> Vec<NodeId> {
+        let mut indices = vec![*root];
+
+        for child in self.get(root).children.iter() {
+            indices.extend(self.get_subtree(child));
+        }
+
+        indices
+    }
+
+    /// Gets the node ids of all the nodes in the subtree rooted at the specified node, except the root
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// let sub_root = tree.get_by_name("E").unwrap();
+    /// let subtree: Vec<_> = tree.get_descendants(&sub_root.id)
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(subtree, vec!["C", "D"])
+    /// ```
+    pub fn get_descendants(&self, root: &NodeId) -> Vec<NodeId> {
+        let mut indices = vec![];
+
+        for child in self.get(root).children.iter() {
+            indices.extend(self.get_subtree(child));
+        }
+
+        indices
+    }
+
+    /// Gets the node ids of all the leaves in the subtree rooted at the specified node
     /// ```
     /// use phylotree::tree::Tree;
     ///
@@ -207,29 +295,145 @@ impl Tree {
     /// let sub_root = tree.get_by_name("E").unwrap();
     /// let sub_leaves: Vec<_> = tree.get_subtree_leaves(&sub_root.id)
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone().unwrap())
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
     ///     .collect();
     ///
-    /// assert_eq!(
-    ///     sub_leaves,
-    ///     vec![String::from("C"), String::from("D")]
-    /// )
+    /// assert_eq!(sub_leaves, vec!["C", "D"])
     /// ```
-    pub fn get_subtree_leaves(&self, index: &NodeId) -> Vec<NodeId> {
-        let mut indices = vec![];
-        if self.get(index).is_tip() {
-            return vec![*index];
+    pub fn get_subtree_leaves(&self, root: &NodeId) -> Vec<NodeId> {
+        self.get_subtree(root)
+            .into_iter()
+            .filter(|id| self.get(id).is_tip())
+            .collect()
+    }
+
+    // ###################
+    // # TREE TRAVERSALS #
+    // ###################
+
+    /// Returns a vector containing node ids in the same order as the
+    /// [preorder](https://en.wikipedia.org/wiki/Tree_traversal#Pre-order,_NLR) tree traversal
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let preorder: Vec<_> = tree.preorder(&tree.get_root().unwrap())
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(preorder, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
+    /// ```
+    pub fn preorder(&self, root: &NodeId) -> Vec<NodeId> {
+        let mut indices = vec![*root];
+        for child in self.get(root).children.iter() {
+            indices.extend(self.preorder(child))
         }
 
-        for &child_idx in self.get(index).children.iter() {
-            indices.extend(self.get_subtree_leaves(&child_idx))
+        indices
+    }
+
+    /// Returns a vector containing node ids in the same order as the
+    /// [postorder](https://en.wikipedia.org/wiki/Tree_traversal#Post-order,_LRN ) tree traversal
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let postorder: Vec<_> = tree.postorder(&tree.get_root().unwrap())
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(postorder, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
+    /// ```
+    pub fn postorder(&self, root: &NodeId) -> Vec<NodeId> {
+        let mut indices = vec![];
+        for child in self.get(root).children.iter() {
+            indices.extend(self.postorder(child))
+        }
+        indices.push(*root);
+
+        indices
+    }
+
+    /// Returns a vector containing node ids in the same order as the
+    /// [inorder](https://en.wikipedia.org/wiki/Tree_traversal#In-order,_LNR) tree traversal.
+    /// This assumes that the tree is binary.
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let inorder: Vec<_> = tree.inorder(&tree.get_root().unwrap())
+    ///     .unwrap()
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(inorder, vec!["A", "B", "C", "D", "E", "F", "H", "I", "G"])
+    /// ```
+    /// *N.B.: the resulting traversal in the example is different than the one in the
+    /// [wikipedia](https://en.wikipedia.org/wiki/Tree_traversal) page. That is because
+    /// the [`Node`] struct cannot have a right child only, so in our tree I is the left
+    /// child of G.*
+    pub fn inorder(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
+        let mut indices = vec![];
+        let children = &self.get(root).children;
+
+        // Tree is not binary
+        if children.len() > 2 {
+            return Err(TreeError::IsNotBinary);
+        }
+
+        // There is a left child
+        if !children.is_empty() {
+            indices.extend(self.inorder(&children[0])?)
+        }
+
+        indices.push(*root);
+
+        // There is a right child
+        if children.len() > 1 {
+            indices.extend(self.inorder(&children[1])?)
+        }
+
+        Ok(indices)
+    }
+
+    /// Returns a vector containing node ids in the same order as the
+    /// [levelorder](https://en.wikipedia.org/wiki/Tree_traversal#Breadth-first_search) tree traversal
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let levelorder: Vec<_> = tree.levelorder(&tree.get_root().unwrap())
+    ///     .iter()
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
+    ///     .collect();
+    ///
+    /// assert_eq!(levelorder, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
+    /// ```
+    pub fn levelorder(&self, root: &NodeId) -> Vec<NodeId> {
+        let mut indices = vec![];
+        let mut queue = VecDeque::new();
+        queue.push_back(root);
+        while !queue.is_empty() {
+            let root = queue.pop_front().unwrap();
+            indices.push(*root);
+            for child in self.get(root).children.iter() {
+                queue.push_back(child)
+            }
         }
 
         indices
     }
 
     // #######################################
-    // # getting characteristics of the tree #
+    // # GETTING CHARACTERISTICS OF THE TREE #
     // #######################################
 
     /// Check if the tree is Binary
@@ -251,6 +455,20 @@ impl Tree {
         let root_id = self.get_root()?;
 
         Ok(!self.nodes.is_empty() && self.get(&root_id).children.len() == 2)
+    }
+
+    /// Checks if all the tips have unique names (This check assumes that all tips have a name)
+    pub fn has_unique_tip_names(&self) -> Result<bool, TreeError> {
+        let mut names = HashSet::new();
+        for name in self.get_leaf_names() {
+            if let Some(name) = name {
+                names.insert(name);
+            } else {
+                return Err(TreeError::UnnamedLeaves);
+            }
+        }
+
+        Ok(names.len() == self.n_leaves())
     }
 
     /// Returns the number of nodes in the tree
@@ -448,8 +666,356 @@ impl Tree {
             .map(|i_n| i_n as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
     }
 
+    // #########################
+    // # GET EDGES IN THE TREE #
+    // #########################
+
+    /// Initializes the leaf index
+    fn init_leaf_index(&self) -> Result<(), TreeError> {
+        if self.nodes.is_empty() {
+            return Err(TreeError::IsEmpty);
+        }
+        if self.leaf_index.borrow().is_some() {
+            return Ok(());
+        }
+
+        let names = self.get_leaf_names();
+        if names.len() != self.n_leaves() {
+            return Err(TreeError::UnnamedLeaves);
+        }
+
+        if !self.has_unique_tip_names()? {
+            return Err(TreeError::DuplicateLeafNames);
+        }
+
+        (*self.leaf_index.borrow_mut()) = Some(names.into_iter().flatten().sorted().collect());
+
+        Ok(())
+    }
+
+    /// Get the partition corresponding to the branch associated to the node at index
+    fn get_partition(&self, index: &NodeId) -> Result<FixedBitSet, TreeError> {
+        self.init_leaf_index()?;
+
+        let subtree_leaves = self.get_subtree_leaves(index);
+        let indices = subtree_leaves
+            .iter()
+            .filter_map(|index| self.get(index).name.clone())
+            .map(|name| {
+                let v = self.leaf_index.borrow().clone();
+                v.map(|v| v.iter().position(|n| *n == name).unwrap())
+                    .unwrap()
+            });
+
+        let mut bitset = FixedBitSet::with_capacity(self.n_leaves());
+        for index in indices {
+            bitset.insert(index);
+        }
+
+        let mut toggled = bitset.clone();
+        toggled.toggle_range(..);
+
+        Ok(toggled.min(bitset))
+    }
+
+    /// Caches partitions for distance computation
+    fn init_partitions(&self) -> Result<(), TreeError> {
+        self.init_leaf_index()?;
+
+        if self.partitions.borrow().is_some() {
+            return Ok(());
+        }
+
+        let mut partitions: HashMap<FixedBitSet, Option<f64>> = HashMap::new();
+
+        for node in self
+            .nodes
+            .iter()
+            .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
+        {
+            let part = self.get_partition(&node.id)?;
+
+            if part.count_ones(..) == 1 {
+                continue;
+            }
+
+            let new_len = node.parent_edge;
+            let old_len = partitions.get(&part);
+
+            let len = match (new_len, old_len) {
+                (None, None) => None,
+                (Some(new_len), Some(old_len)) => old_len.map(|v| v + new_len),
+                (Some(new_len), None) => Some(new_len),
+                (None, Some(old_len)) => *old_len,
+            };
+
+            partitions.insert(part, len);
+        }
+
+        (*self.partitions.borrow_mut()) = Some(partitions);
+
+        Ok(())
+    }
+
+    /// Get all partitions of a tree
+    fn get_partitions(&self) -> Result<HashSet<FixedBitSet>, TreeError> {
+        self.init_leaf_index()?;
+        self.init_partitions()?;
+
+        Ok(HashSet::from_iter(
+            self.partitions
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|(k, _)| k.clone()),
+        ))
+    }
+
+    /// Get all partitions of a tree along with corresponding branch lengths
+    fn get_partitions_with_lengths(&self) -> Result<HashMap<FixedBitSet, f64>, TreeError> {
+        self.init_leaf_index()?;
+        self.init_partitions()?;
+
+        let mut partitions = HashMap::new();
+        for (bitset, len) in self.partitions.borrow().as_ref().unwrap().iter() {
+            if len.is_none() {
+                return Err(TreeError::MissingBranchLengths);
+            }
+            partitions.insert(bitset.clone(), len.unwrap());
+        }
+
+        Ok(partitions)
+    }
+
+    /// Empties the partitions cache
+    fn reset_partitions(&mut self) {
+        (*self.partitions.borrow_mut()) = None;
+    }
+
+    /// Empties the leaf index
+    fn reset_leaf_index(&mut self) {
+        (*self.leaf_index.borrow_mut()) = None
+    }
+
+    /// Resets the caches used when computing bipartitions 
+    /// *(i.e. with [`Tree::compare_topologies()`])*. 
+    /// You should call this if you have computed bipartitions in the tree 
+    /// and then changed the tree.
+    pub fn reset_bipartition_cache(&mut self) {
+        self.reset_leaf_index();
+        self.reset_partitions();
+    }
+
+    // #################
+    // # COMPARE TREES #
+    // #################
+
+    /// Computes the [Robinson Foulds distance](https://en.wikipedia.org/wiki/Robinson–Foulds_metric)
+    /// [(Robinson & Foulds, 1981)](https://doi.org/10.1016/0025-5564(81)90043-2)
+    /// between two trees. The RF distance is defined as the number of unique bipartitions for each tree:
+    /// $$
+    /// RF = |A\cup B| - |A\cap B|
+    /// $$
+    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.  
+    /// See also [Tree::compare_topologies()]
+    pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        let partitions_s = self.get_partitions()?;
+        let partitions_o = other.get_partitions()?;
+
+        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
+            return Err(TreeError::DifferentTipIndices);
+        }
+
+        let mut root_s = HashSet::new();
+        for i in self.get(&self.get_root()?).children.iter() {
+            root_s.insert(self.get_partition(i)?);
+        }
+        let mut root_o = HashSet::new();
+        for i in other.get(&other.get_root()?).children.iter() {
+            root_o.insert(other.get_partition(i)?);
+        }
+
+        let same_root = root_s == root_o;
+
+        let i = partitions_o.intersection(&partitions_s).count();
+        let rf = partitions_o.len() + partitions_s.len() - 2 * i;
+
+        // Hacky...
+        if self.is_rooted()? && rf != 0 && !same_root {
+            Ok(rf + 2)
+        } else {
+            Ok(rf)
+        }
+    }
+
+    /// Computes the normalized Robinson Foulds distance between two trees
+    /// [(Robinson & Foulds, 1981)](https://doi.org/10.1016/0025-5564(81)90043-2).
+    /// The RF distance is normalized by the maximum possible RF distance for both trees
+    /// *(i.e the number of bipartitions in both trees)* so that the resulting distance
+    /// is contained within [0, 1]:  
+    /// $$
+    /// RF_{norm} = \frac{RF}{|A| + |B|}
+    /// $$
+    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.  
+    /// See also [Tree::compare_topologies()]
+    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64, TreeError> {
+        let rf = self.robinson_foulds(other)?;
+
+        let partitions_s = self.get_partitions()?;
+        let partitions_o = other.get_partitions()?;
+
+        let tot = partitions_o.len() + partitions_s.len();
+
+        Ok((rf as f64) / (tot as f64))
+    }
+
+    /// Computes the weighted Robinson Foulds distance between two trees
+    /// [(Robinson & Foulds, 1979)](https://doi.org/10.1007/BFb0102690).
+    /// This distance is equal to the absolute difference of branch lengths for
+    /// matched bipartitions between the two trees, plus branch lenghts for unique bipartitions:  
+    /// $$
+    /// RF_{weighted} = \sum_{e \in A\cap B} |d_{(e,A)} - d_{(e,B)}| +
+    /// \sum_{e \in A\setminus B}d_{(e,A)} +
+    /// \sum_{e \in B\setminus A}d_{(e,B)}
+    /// $$
+    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees,
+    /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).  
+    /// See also [Tree::compare_topologies()]
+    pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
+
+        let mut dist = 0.;
+
+        for (edge, len_s) in partitions_s.iter() {
+            if let Some(len_o) = partitions_o.get(edge) {
+                dist += (len_s - len_o).abs()
+            } else {
+                dist += len_s
+            }
+        }
+
+        for (edge, len_o) in partitions_o.iter() {
+            if !partitions_s.contains_key(edge) {
+                dist += len_o
+            }
+        }
+
+        Ok(dist)
+    }
+
+    /// Computes the khuner felsenstein branch score between two trees,
+    /// [(Khuner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
+    /// The distance is computed by taking the squared difference of branch lengths for
+    /// matched bipartitions between the two trees, plus squared branch lenghts for unique bipartitions.
+    /// The branch score is then derived by taking the square root of that total sum:  
+    /// $$
+    /// KF = \sqrt{
+    ///     \sum_{e \in A\cap B} (d_{(e,A)} - d_{(e,B)})^2 +
+    ///     \sum_{e \in A\setminus B}d_{(e,A)}^2 +
+    ///     \sum_{e \in B\setminus A}d_{(e,B)}^2
+    /// }
+    /// $$
+    /// See also [Tree::compare_topologies()]
+    pub fn khuner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
+
+        let mut dist = 0.;
+
+        for (edge, len_s) in partitions_s.iter() {
+            if let Some(len_o) = partitions_o.get(edge) {
+                dist += f64::powi(len_s - len_o, 2)
+            } else {
+                dist += f64::powi(*len_s, 2)
+            }
+        }
+
+        for (edge, len_o) in partitions_o.iter() {
+            if !partitions_s.contains_key(edge) {
+                dist += f64::powi(*len_o, 2)
+            }
+        }
+
+        Ok(dist.sqrt())
+    }
+
+    /// Compute several the RF metric, the weighted and normalized RF metrics and
+    /// the KF branch score in one pass. This is more efficient than calling the
+    /// different functions separately.
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree1 = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// let tree2 = Tree::from_newick("(A:0.1,D:0.2,(C:0.3,B:0.4)E:0.5)F;").unwrap();
+    ///
+    /// let rf = tree1.robinson_foulds(&tree2).unwrap() as f64;
+    /// let norm_rf = tree1.robinson_foulds_norm(&tree2).unwrap();
+    /// let weighted_rf = tree1.weighted_robinson_foulds(&tree2).unwrap();
+    /// let branch_score = tree1.khuner_felsenstein(&tree2).unwrap();
+    ///
+    /// let comparison = tree1.compare_topologies(&tree2).unwrap();
+    ///
+    /// assert_eq!(rf, comparison.rf);
+    /// assert_eq!(norm_rf, comparison.norm_rf);
+    /// assert_eq!(weighted_rf, comparison.weighted_rf);
+    /// assert_eq!(branch_score, comparison.branch_score);
+    /// ```
+    pub fn compare_topologies(&self, other: &Self) -> Result<Comparison, TreeError> {
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
+
+        let tot = partitions_o.len() + partitions_s.len();
+
+        let mut intersection = 0.;
+        let mut rf_weight = 0.;
+        let mut kf = 0.;
+
+        for (edge, len_s) in partitions_s.iter() {
+            if let Some(len_o) = partitions_o.get(edge) {
+                rf_weight += (len_s - len_o).abs();
+                kf += f64::powi(len_s - len_o, 2);
+                intersection += 1.0;
+            } else {
+                rf_weight += len_s;
+                kf += f64::powi(*len_s, 2);
+            }
+        }
+
+        for (edge, len_o) in partitions_o.iter() {
+            if !partitions_s.contains_key(edge) {
+                rf_weight += len_o;
+                kf += f64::powi(*len_o, 2);
+            }
+        }
+
+        let mut rf = tot as f64 - 2.0 * intersection;
+
+        // Hacky...
+        let mut root_s = HashSet::new();
+        for i in self.get(&self.get_root()?).children.iter() {
+            root_s.insert(self.get_partition(i)?);
+        }
+        let mut root_o = HashSet::new();
+        for i in other.get(&other.get_root()?).children.iter() {
+            root_o.insert(other.get_partition(i)?);
+        }
+        let same_root = root_s == root_o;
+        if self.is_rooted()? && rf != 0.0 && !same_root {
+            rf += 2.0;
+        }
+
+        Ok(Comparison {
+            rf,
+            norm_rf: rf / tot as f64,
+            weighted_rf: rf_weight,
+            branch_score: kf.sqrt(),
+        })
+    }
+
     // ##########################
-    // # Find paths in the tree #
+    // # FIND PATHS IN THE TREE #
     // ##########################
 
     /// Returns the path from the node to the root
@@ -459,13 +1025,11 @@ impl Tree {
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let path: Vec<_> = tree.get_path_from_root(&5)
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone().unwrap())
+    ///     .map(|id| tree.get(id).name.clone())
+    ///     .flatten()
     ///     .collect();
     ///
-    /// assert_eq!(
-    ///     path,
-    ///     vec![String::from("F"), String::from("B"), String::from("D"), String::from("E")]
-    /// )
+    /// assert_eq!(path, vec!["F", "B", "D", "E"])
     /// ```
     pub fn get_path_from_root(&self, node: &NodeId) -> Vec<NodeId> {
         let mut path = vec![];
@@ -568,7 +1132,7 @@ impl Tree {
     }
 
     // ##################
-    // # alter the tree #
+    // # ALTER THE TREE #
     // ##################
 
     /// Prune the subtree starting at a given root node.
@@ -581,23 +1145,76 @@ impl Tree {
     ///
     /// tree.prune(&root_idx);
     ///
-    /// assert_eq!(tree.to_newick().unwrap(), String::from("((A,(C,E)D)B)F;"))
+    /// assert_eq!(tree.to_newick().unwrap(), "((A,(C,E)D)B)F;")
     /// ```
-    pub fn prune(&mut self, root: &NodeId) {
+    pub fn prune(&mut self, root: &NodeId) -> Result<(), TreeError> {
         for child in self.get(root).children.clone() {
-            self.prune(&child)
+            self.prune(&child)?
         }
 
         if let Some(parent) = self.get(root).parent {
-            self.get_mut(&parent).children.retain(|val| val != root);
+            self.get_mut(&parent).remove_child(root)?;
         }
 
         self.get_mut(root).delete();
+
+        Ok(())
+    }
+
+    // Removes a single node
+    fn compress_node(&mut self, id: &NodeId) -> Result<(), TreeError> {
+        let node = self.get(id);
+
+        if node.parent.is_none() || node.children.len() != 1 {
+            return Err(TreeError::CouldNotCompressNode(*id));
+        }
+
+        let parent = node.parent.unwrap();
+        let child = node.children[0];
+        let to_remove = node.id;
+
+        let parent_edge = node.parent_edge;
+        let child_edge = node.get_child_edge(&child);
+
+        let new_edge = match (parent_edge, child_edge) {
+            (Some(p), Some(c)) => Some(p + c),
+            (None, None) => None,
+            _ => return Err(TreeError::MissingBranchLengths),
+        };
+
+        self.get_mut(&child).set_parent(parent, new_edge);
+        self.get_mut(&parent).add_child(child, new_edge);
+        self.get_mut(&parent).remove_child(&to_remove)?;
+
+        self.get_mut(&to_remove).delete();
+
+        Ok(())
     }
 
     /// Compress the tree (i.e. remove nodes with exactly 1 parent and 1 child and fuse branches together)
-    pub fn compress(&mut self) {
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let mut tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// // Compress F->G->I->H to F->H
+    /// tree.compress().unwrap();
+    ///
+    /// assert_eq!(tree.to_newick().unwrap(), "((A,(C,E)D)B,H)F;")
+    /// ```
+    pub fn compress(&mut self) -> Result<(), TreeError> {
+        let to_compress: Vec<_> = self
+            .nodes
+            .iter()
+            .cloned()
+            .filter(|node| !node.deleted && node.parent.is_some() && node.children.len() == 1)
+            .map(|node| node.id)
+            .collect();
 
+        for id in to_compress {
+            self.compress_node(&id)?;
+        }
+
+        Ok(())
     }
 
     /// Rescale the branch lenghts of the tree
@@ -620,7 +1237,7 @@ impl Tree {
     }
 
     // ########################
-    // # read and write trees #
+    // # READ AND WRITE TREES #
     // ########################
 
     /// Generate newick representation of tree
@@ -904,33 +1521,33 @@ mod tests {
     /// https://en.wikipedia.org/wiki/Tree_traversal#Depth-first_search
     /// The difference is that I is the left child of G since this tree structure
     /// cannot represent a right child only.
-    fn build_simple_tree() -> Tree {
+    fn build_simple_tree() -> Result<Tree, TreeError> {
         let mut tree = Tree::new();
         tree.add(Node::new_named("F")); // 0
-        tree.add_child(Node::new_named("B"), 0, None); // 1
-        tree.add_child(Node::new_named("G"), 0, None); // 2
-        tree.add_child(Node::new_named("A"), 1, None); // 3
-        tree.add_child(Node::new_named("D"), 1, None); // 4
-        tree.add_child(Node::new_named("I"), 2, None); // 5
-        tree.add_child(Node::new_named("C"), 4, None); // 6
-        tree.add_child(Node::new_named("E"), 4, None); // 7
-        tree.add_child(Node::new_named("H"), 5, None); // 8
+        tree.add_child(Node::new_named("B"), 0, None)?; // 1
+        tree.add_child(Node::new_named("G"), 0, None)?; // 2
+        tree.add_child(Node::new_named("A"), 1, None)?; // 3
+        tree.add_child(Node::new_named("D"), 1, None)?; // 4
+        tree.add_child(Node::new_named("I"), 2, None)?; // 5
+        tree.add_child(Node::new_named("C"), 4, None)?; // 6
+        tree.add_child(Node::new_named("E"), 4, None)?; // 7
+        tree.add_child(Node::new_named("H"), 5, None)?; // 8
 
-        tree
+        Ok(tree)
     }
 
     /// Generates example tree from the newick format wikipedia page
     /// https://en.wikipedia.org/wiki/Newick_format#Examples
-    fn build_tree_with_lengths() -> Tree {
+    fn build_tree_with_lengths() -> Result<Tree, TreeError> {
         let mut tree = Tree::new();
-        tree.add_child(Node::new_named("F"), 0, None); // 1
-        tree.add_child(Node::new_named("A"), 0, Some(0.1)); // 1
-        tree.add_child(Node::new_named("B"), 0, Some(0.2)); // 2
-        tree.add_child(Node::new_named("E"), 0, Some(0.5)); // 3
-        tree.add_child(Node::new_named("C"), 3, Some(0.3)); // 4
-        tree.add_child(Node::new_named("D"), 3, Some(0.4)); // 5
+        tree.add(Node::new_named("F")); // 0
+        tree.add_child(Node::new_named("A"), 0, Some(0.1))?; // 1
+        tree.add_child(Node::new_named("B"), 0, Some(0.2))?; // 2
+        tree.add_child(Node::new_named("E"), 0, Some(0.5))?; // 3
+        tree.add_child(Node::new_named("C"), 3, Some(0.3))?; // 4
+        tree.add_child(Node::new_named("D"), 3, Some(0.4))?; // 5
 
-        tree
+        Ok(tree)
     }
 
     fn get_values(indices: &[usize], tree: &Tree) -> Vec<Option<String>> {
@@ -946,14 +1563,14 @@ mod tests {
         tree.add(Node::new_named("root"));
         assert_eq!(tree.get_leaves(), vec![0]);
 
-        tree.add_child(Node::new_named("A"), 0, Some(0.1)); // 1
-        tree.add_child(Node::new_named("B"), 0, Some(0.2)); // 2
-        tree.add_child(Node::new_named("E"), 0, Some(0.5)); // 3
+        tree.add_child(Node::new_named("A"), 0, Some(0.1)).unwrap(); // 1
+        tree.add_child(Node::new_named("B"), 0, Some(0.2)).unwrap(); // 2
+        tree.add_child(Node::new_named("E"), 0, Some(0.5)).unwrap(); // 3
 
         assert_eq!(tree.get_leaves(), vec![1, 2, 3]);
 
-        tree.add_child(Node::new_named("C"), 3, Some(0.3)); // 4
-        tree.add_child(Node::new_named("D"), 3, Some(0.4)); // 5
+        tree.add_child(Node::new_named("C"), 3, Some(0.3)).unwrap(); // 4
+        tree.add_child(Node::new_named("D"), 3, Some(0.4)).unwrap(); // 5
 
         assert_eq!(tree.get_leaves(), vec![1, 2, 4, 5]);
     }
@@ -963,21 +1580,21 @@ mod tests {
         let mut tree = Tree::new();
         tree.add(Node::new_named("root"));
 
-        tree.add_child(Node::new_named("0L"), 0, None); //1
-        tree.add_child(Node::new_named("0R"), 0, None); //2
+        tree.add_child(Node::new_named("0L"), 0, None).unwrap(); //1
+        tree.add_child(Node::new_named("0R"), 0, None).unwrap(); //2
 
         assert!(tree.is_binary());
 
-        tree.add_child(Node::new_named("1L"), 1, None); //3
-        tree.add_child(Node::new_named("1R"), 1, None); //4
+        tree.add_child(Node::new_named("1L"), 1, None).unwrap(); //3
+        tree.add_child(Node::new_named("1R"), 1, None).unwrap(); //4
 
         assert!(tree.is_binary());
 
-        tree.add_child(Node::new_named("3L"), 3, None); //5
-        tree.add_child(Node::new_named("3R"), 3, None); //6
+        tree.add_child(Node::new_named("3L"), 3, None).unwrap(); //5
+        tree.add_child(Node::new_named("3R"), 3, None).unwrap(); //6
         assert!(tree.is_binary());
 
-        tree.add_child(Node::new_named("3?"), 3, None); //7
+        tree.add_child(Node::new_named("3?"), 3, None).unwrap(); //7
         assert!(!tree.is_binary());
     }
 
@@ -992,7 +1609,7 @@ mod tests {
 
     // #[test]
     // fn traverse_preorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = get_values(&(tree.preorder(0).unwrap()), &tree)
     //         .into_iter()
     //         .flatten()
@@ -1002,7 +1619,7 @@ mod tests {
 
     // #[test]
     // fn iter_preorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = tree
     //         .iter_preorder()
     //         .flat_map(|node| node.name.clone())
@@ -1012,7 +1629,7 @@ mod tests {
 
     // #[test]
     // fn traverse_postorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = get_values(&(tree.postorder(0).unwrap()), &tree)
     //         .into_iter()
     //         .flatten()
@@ -1022,7 +1639,7 @@ mod tests {
 
     // #[test]
     // fn iter_postorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = tree
     //         .iter_postorder()
     //         .unwrap()
@@ -1033,7 +1650,7 @@ mod tests {
 
     // #[test]
     // fn traverse_inorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = get_values(&(tree.inorder(0).unwrap()), &tree)
     //         .into_iter()
     //         .flatten()
@@ -1043,7 +1660,7 @@ mod tests {
 
     // #[test]
     // fn traverse_levelorder() {
-    //     let tree = build_simple_tree();
+    //     let tree = build_simple_tree().unwrap();
     //     let values: Vec<_> = get_values(&(tree.levelorder(0).unwrap()), &tree)
     //         .into_iter()
     //         .flatten()
@@ -1051,20 +1668,17 @@ mod tests {
     //     assert_eq!(values, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
     // }
 
-    // #[test]
-    // fn prune_tree() {
-    //     let mut tree = build_simple_tree();
-    //     tree.prune(4); // prune D subtree
-    //     let values: Vec<_> = get_values(&(tree.preorder(0).unwrap()), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-    //     assert_eq!(values, vec!["F", "B", "A", "G", "I", "H"]);
-    // }
+    #[test]
+    fn prune_tree() {
+        let mut tree = build_simple_tree().unwrap();
+        tree.prune(&4).unwrap(); // prune D subtree
+
+        assert_eq!(tree.to_newick().unwrap(), "((A)B,((H)I)G)F;");
+    }
 
     #[test]
     fn path_from_root() {
-        let tree = build_simple_tree();
+        let tree = build_simple_tree().unwrap();
         let values: Vec<_> = get_values(&(tree.get_path_from_root(&7)), &tree)
             .into_iter()
             .flatten()
@@ -1081,7 +1695,7 @@ mod tests {
             ((8, 5), 5), // (H,I) -> I
             ((4, 7), 4), // (D,E) -> D
         ];
-        let tree = build_simple_tree();
+        let tree = build_simple_tree().unwrap();
         for ((source, target), ancestor) in test_cases {
             println!(
                 "Testing: ({:?}, {:?}) -> {:?}",
@@ -1104,7 +1718,7 @@ mod tests {
             ((0, 2), (Some(0.2), 1)), // (F,B)
             ((1, 1), (None, 0)),      // (A,A)
         ];
-        let tree = build_tree_with_lengths();
+        let tree = build_tree_with_lengths().unwrap();
 
         for ((idx_s, idx_t), (dist, branches)) in test_cases {
             let (d_pred, b_pred) = tree.get_distance(&idx_s, &idx_t);
@@ -1121,7 +1735,7 @@ mod tests {
 
     #[test]
     fn get_correct_leaves() {
-        let tree = build_simple_tree();
+        let tree = build_simple_tree().unwrap();
         let values: Vec<_> = get_values(&(tree.get_leaves()), &tree)
             .into_iter()
             .flatten()
@@ -1156,7 +1770,8 @@ mod tests {
 
     #[test]
     fn to_newick() {
-        let tree = build_tree_with_lengths();
+        let tree = build_tree_with_lengths().unwrap();
+        dbg!(&tree);
         assert_eq!(
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             tree.to_newick().unwrap()
@@ -1198,6 +1813,37 @@ mod tests {
         for (newick, _error) in newick_strings {
             let tree = Tree::from_newick(newick);
             assert!(tree.is_err());
+        }
+    }
+
+    #[test]
+    fn test_subtree_leaves() {
+        let test_cases = vec![
+            (
+                "((T0,T1)I1,(T2,T3)I2,((T4,T5)I4,(T6,T7)I4)I3)I0;",
+                7,
+                vec!["T4", "T5", "T6", "T7"],
+            ),
+            (
+                "((T0,T1)I1,(T2,T3)I2,((T4,T5)I4,(T6,T7)I4)I3)I0;",
+                1,
+                vec!["T0", "T1"],
+            ),
+            (
+                "((((((((T9,T8)I7,T7)I6,T6)I5,T5)I4,T4)I3,T3)I2,T2)I1,T0,T1)I0;",
+                5,
+                vec!["T9", "T8", "T7", "T6"],
+            ),
+        ];
+
+        for (newick, root, leaves) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let sub_leaves: Vec<String> = get_values(&tree.get_subtree_leaves(&root), &tree)
+                .iter()
+                .map(|v| v.clone().unwrap())
+                .collect();
+
+            assert_eq!(sub_leaves, leaves);
         }
     }
 
@@ -1253,6 +1899,40 @@ mod tests {
             assert!(cherries.is_ok());
             assert_eq!(cherries.unwrap(), true_cherries);
         }
+    }
+
+    #[test]
+    fn manual_colless() {
+        let newick = "(((((((((T8,T9)I8,T7)I7,T6)I6,T5)I5,T4)I4,T3)I3,T2)I2,T1)I1,T0)I0;";
+        let tree = Tree::from_newick(newick).unwrap();
+
+        let mut colless = 0;
+
+        dbg!(&tree);
+
+        for node in tree.nodes.iter().filter(|node| !node.is_tip()) {
+            let left = tree.get_subtree_leaves(&node.children[0]);
+            let right = tree.get_subtree_leaves(&node.children[1]);
+            eprintln!("Node {:?}:", node.name.clone().unwrap());
+            eprintln!(
+                "\tLeft: {:?}",
+                get_values(&left, &tree)
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+            );
+            eprintln!(
+                "\tRight: {:?}",
+                get_values(&right, &tree)
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+            );
+            colless += left.len().abs_diff(right.len());
+            eprintln!("Colless: {colless}\n")
+        }
+
+        assert_eq!(colless, 36)
     }
 
     #[test]
@@ -1329,7 +2009,9 @@ mod tests {
             let mut tree = Tree::from_newick(orig).unwrap();
             let rescaled = Tree::from_newick(rescaled).unwrap();
 
-            tree.rescale(scale);
+            let diam = tree.diameter().unwrap();
+
+            tree.rescale(scale / diam);
 
             println!("Dealing with tree: {} and scale {}", orig, scale);
             for (n1, n2) in zip(tree.nodes, rescaled.nodes) {
@@ -1350,755 +2032,622 @@ mod tests {
         assert_eq!(tree.height().unwrap(), 0.9);
     }
 
-    // #[test]
-    // fn test_unique_tip_names() {
-    //     let test_cases = vec![
-    //         ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",true),
-    //         ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", true),
-    //         ("(((((((((,),),),),),),),),);",false),
-    //         ("(((((((((Tip8,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",false),
-    //     ];
+    #[test]
+    fn test_unique_tip_names() {
+        let test_cases = vec![
+            ("(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",true),
+            ("(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", true),
+            ("(((((((((Tip8,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",false),
+        ];
 
-    //     for (newick, is_unique) in test_cases {
-    //         assert_eq!(
-    //             Tree::from_newick(newick).unwrap().are_tip_names_unique(),
-    //             is_unique,
-    //             "Failed on: {newick}"
-    //         )
-    //     }
-    // }
+        for (newick, is_unique) in test_cases {
+            assert_eq!(
+                Tree::from_newick(newick)
+                    .unwrap()
+                    .has_unique_tip_names()
+                    .unwrap(),
+                is_unique,
+                "Failed on: {newick}"
+            )
+        }
 
-    // #[test]
-    // fn test_descendants() {
-    //     let tree = build_simple_tree();
-    //     let descendants_b: Vec<_> = get_values(&tree.get_descendants(1), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .sorted()
-    //         .collect();
-    //     let descendants_g: Vec<_> = get_values(&tree.get_descendants(2), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .sorted()
-    //         .collect();
+        assert!(Tree::from_newick("(((((((((,),),),),),),),),);")
+            .unwrap()
+            .has_unique_tip_names()
+            .is_err())
+    }
 
-    //     assert_eq!(descendants_b, vec!["A", "C", "D", "E"]);
-    //     assert_eq!(descendants_g, vec!["H", "I"]);
-    // }
+    #[test]
+    fn test_descendants() {
+        let tree = build_simple_tree().unwrap();
+        eprintln!("{}", tree.to_newick().unwrap());
+        dbg!(&tree);
+        let descendants_b: Vec<_> = get_values(&tree.get_descendants(&1), &tree)
+            .into_iter()
+            .flatten()
+            .sorted()
+            .collect();
+        let descendants_g: Vec<_> = get_values(&tree.get_descendants(&2), &tree)
+            .into_iter()
+            .flatten()
+            .sorted()
+            .collect();
 
-    // #[test]
-    // fn test_compress() {
-    //     let mut tree = Tree::new(Some("root"));
-    //     tree.add_child_with_len(Some("tip_A"), 0, Some(1.0));
-    //     tree.add_child_with_len(Some("in_B"), 0, Some(1.0));
-    //     tree.add_child_with_len(Some("in_C"), 2, Some(1.0));
-    //     tree.add_child_with_len(Some("tip_D"), 3, Some(1.0));
+        assert_eq!(descendants_b, vec!["A", "C", "D", "E"]);
+        assert_eq!(descendants_g, vec!["H", "I"]);
+    }
 
-    //     tree.compress().unwrap();
+    #[test]
+    fn test_compress() {
+        let mut tree = Tree::new();
+        tree.add(Node::new_named("root"));
+        tree.add_child(Node::new_named("tip_A"), 0, Some(1.0))
+            .unwrap();
+        tree.add_child(Node::new_named("in_B"), 0, Some(1.0))
+            .unwrap();
+        tree.add_child(Node::new_named("in_C"), 2, Some(1.0))
+            .unwrap();
+        tree.add_child(Node::new_named("tip_D"), 3, Some(1.0))
+            .unwrap();
 
-    //     assert_eq!(tree.to_newick(), "(tip_A:1,tip_D:3)root;");
-    // }
+        tree.compress().unwrap();
 
-    // #[test]
-    // fn test_get_partitions() {
-    //     let test_cases = vec![
-    //         (
-    //             "(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 
-    //             "(Tip0,((Tip2,(Tip3,(Tip4,(Tip5,(Tip6,((Tip8,Tip9),Tip7)))))),Tip1));",
-    //         ),
-    //         (
-    //             "(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 
-    //             "(((c:0.1,d:0.1):0.1,((g:0.1,h:0.1):0.1,(f:0.1,e:0.1):0.1):0.1):0.1,((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1);",
-    //         ),
-    //         (
-    //             "((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 
-    //             "((((e:0.2,f:0.2):0.2,((i:0.2,j:0.2):0.2,(g:0.2,h:0.2):0.2):0.2):0.2,(d:0.2,c:0.2):0.2):0.2,(b:0.2,a:0.2):0.2);",
-    //         ),
-    //         (
-    //             "(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 
-    //             "((((g:0.3,f:0.3):0.3,((i:0.3,j:0.3):0.3,h:0.3):0.3):0.3,(d:0.3,e:0.3):0.3):0.3,((b:0.3,c:0.3):0.3,a:0.3):0.3);",
-    //         ),
-    //     ];
+        assert_eq!(tree.to_newick().unwrap(), "(tip_A:1,tip_D:3)root;");
+    }
 
-    //     for (newick, rot_newick) in test_cases {
-    //         let tree = Tree::from_newick(newick).unwrap();
-    //         let rota = Tree::from_newick(rot_newick).unwrap();
+    #[test]
+    fn test_get_partitions() {
+        let test_cases = vec![
+            (
+                "(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",
+                "(Tip0,((Tip2,(Tip3,(Tip4,(Tip5,(Tip6,((Tip8,Tip9),Tip7)))))),Tip1));",
+            ),
+            (
+                "(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);",
+                "(((c:0.1,d:0.1):0.1,((g:0.1,h:0.1):0.1,(f:0.1,e:0.1):0.1):0.1):0.1,((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1);",
+            ),
+            (
+                "((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);",
+                "((((e:0.2,f:0.2):0.2,((i:0.2,j:0.2):0.2,(g:0.2,h:0.2):0.2):0.2):0.2,(d:0.2,c:0.2):0.2):0.2,(b:0.2,a:0.2):0.2);",
+            ),
+            (
+                "(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);",
+                "((((g:0.3,f:0.3):0.3,((i:0.3,j:0.3):0.3,h:0.3):0.3):0.3,(d:0.3,e:0.3):0.3):0.3,((b:0.3,c:0.3):0.3,a:0.3):0.3);",
+            ),
+        ];
 
-    //         let ps_orig: HashSet<_> = HashSet::from_iter(tree.get_partitions().unwrap());
-    //         let ps_rota: HashSet<_> = HashSet::from_iter(rota.get_partitions().unwrap());
+        for (newick, rot_newick) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let rota = Tree::from_newick(rot_newick).unwrap();
 
-    //         assert_eq!(ps_orig, ps_rota);
-    //     }
-    // }
+            let ps_orig: HashSet<_> = HashSet::from_iter(tree.get_partitions().unwrap());
+            let ps_rota: HashSet<_> = HashSet::from_iter(rota.get_partitions().unwrap());
 
-    // #[test]
-    // fn self_rf() {
-    //     let test_cases = vec![
-    //         (
-    //             "(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);", 
-    //             "(Tip0,((Tip2,(Tip3,(Tip4,(Tip5,(Tip6,((Tip8,Tip9),Tip7)))))),Tip1));",
-    //         ),
-    //         (
-    //             "(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);", 
-    //             "(((c:0.1,d:0.1):0.1,((g:0.1,h:0.1):0.1,(f:0.1,e:0.1):0.1):0.1):0.1,((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1);",
-    //         ),
-    //         (
-    //             "((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);", 
-    //             "((((e:0.2,f:0.2):0.2,((i:0.2,j:0.2):0.2,(g:0.2,h:0.2):0.2):0.2):0.2,(d:0.2,c:0.2):0.2):0.2,(b:0.2,a:0.2):0.2);",
-    //         ),
-    //         (
-    //             "(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);", 
-    //             "((((g:0.3,f:0.3):0.3,((i:0.3,j:0.3):0.3,h:0.3):0.3):0.3,(d:0.3,e:0.3):0.3):0.3,((b:0.3,c:0.3):0.3,a:0.3):0.3);",
-    //         ),
-    //     ];
+            assert_eq!(ps_orig, ps_rota);
+        }
+    }
 
-    //     for (newick, rot_newick) in test_cases {
-    //         let tree = Tree::from_newick(newick).unwrap();
-    //         let rota = Tree::from_newick(rot_newick).unwrap();
+    #[test]
+    fn self_rf() {
+        let test_cases = vec![
+            (
+                "(((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1),Tip0);",
+                "(Tip0,((Tip2,(Tip3,(Tip4,(Tip5,(Tip6,((Tip8,Tip9),Tip7)))))),Tip1));",
+            ),
+            (
+                "(((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1,((c:0.1,d:0.1):0.1,((e:0.1,f:0.1):0.1,(g:0.1,h:0.1):0.1):0.1):0.1);",
+                "(((c:0.1,d:0.1):0.1,((g:0.1,h:0.1):0.1,(f:0.1,e:0.1):0.1):0.1):0.1,((i:0.1,j:0.1):0.1,(a:0.1,b:0.1):0.1):0.1);",
+            ),
+            (
+                "((a:0.2,b:0.2):0.2,((c:0.2,d:0.2):0.2,((e:0.2,f:0.2):0.2,((g:0.2,h:0.2):0.2,(i:0.2,j:0.2):0.2):0.2):0.2):0.2);",
+                "((((e:0.2,f:0.2):0.2,((i:0.2,j:0.2):0.2,(g:0.2,h:0.2):0.2):0.2):0.2,(d:0.2,c:0.2):0.2):0.2,(b:0.2,a:0.2):0.2);",
+            ),
+            (
+                "(((d:0.3,e:0.3):0.3,((f:0.3,g:0.3):0.3,(h:0.3,(i:0.3,j:0.3):0.3):0.3):0.3):0.3,(a:0.3,(b:0.3,c:0.3):0.3):0.3);",
+                "((((g:0.3,f:0.3):0.3,((i:0.3,j:0.3):0.3,h:0.3):0.3):0.3,(d:0.3,e:0.3):0.3):0.3,((b:0.3,c:0.3):0.3,a:0.3):0.3);",
+            ),
+        ];
 
-    //         tree.init_leaf_index().unwrap();
-    //         rota.init_leaf_index().unwrap();
+        for (newick, rot_newick) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            let rota = Tree::from_newick(rot_newick).unwrap();
 
-    //         assert_eq!(
-    //             tree.robinson_foulds(&rota).unwrap(),
-    //             0,
-    //             "Ref{:#?}\nRot:{:#?}",
-    //             tree.leaf_index,
-    //             rota.leaf_index
-    //         );
-    //     }
-    // }
+            tree.init_leaf_index().unwrap();
+            rota.init_leaf_index().unwrap();
 
-    // #[test]
-    // // Robinson foulds distances according to
-    // // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    // fn robinson_foulds_treedist() {
-    //     let trees = vec![
-    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //     ];
-    //     let rfs = vec![
-    //         vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
-    //         vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
-    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-    //         vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
-    //         vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
-    //         vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
-    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-    //         vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
-    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-    //     ];
+            assert_eq!(
+                tree.robinson_foulds(&rota).unwrap(),
+                0,
+                "Ref{:#?}\nRot:{:#?}",
+                tree.leaf_index,
+                rota.leaf_index
+            );
+        }
+    }
 
-    //     for indices in (0..trees.len()).combinations(2) {
-    //         let (i0, i1) = (indices[0], indices[1]);
+    #[test]
+    // Robinson foulds distances according to
+    // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
+    fn robinson_foulds_treedist() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
+        let rfs = vec![
+            vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
+            vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
+            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+            vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
+            vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
+            vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
+            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+            vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
+            vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
+            vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
+            vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
+        ];
 
-    //         let t0 = Tree::from_newick(trees[i0]).unwrap();
-    //         let t1 = Tree::from_newick(trees[i1]).unwrap();
+        for indices in (0..trees.len()).combinations(2) {
+            let (i0, i1) = (indices[0], indices[1]);
 
-    //         assert_eq!(t0.robinson_foulds(&t1).unwrap(), rfs[i0][i1])
-    //     }
-    // }
+            let t0 = Tree::from_newick(trees[i0]).unwrap();
+            let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-    // #[test]
-    // // Robinson foulds distances according to
-    // // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    // fn weighted_robinson_foulds_treedist() {
-    //     let trees = vec![
-    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //     ];
-    //     let rfs = vec![
-    //         vec![
-    //             0.,
-    //             0.4,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.9999999999999999,
-    //         ],
-    //         vec![
-    //             0.4,
-    //             0.,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.9999999999999999,
-    //         ],
-    //         vec![
-    //             0.2,
-    //             0.2,
-    //             0.,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.,
-    //             0.9999999999999999,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.,
-    //             0.2,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.,
-    //             0.9999999999999999,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.4,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.4,
-    //             0.,
-    //             0.2,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.4,
-    //             0.2,
-    //             0.2,
-    //             0.,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.9999999999999999,
-    //             0.4,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.,
-    //             0.2,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.7999999999999999,
-    //             0.9999999999999999,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.2,
-    //             0.,
-    //             0.4,
-    //             0.9999999999999999,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.,
-    //             0.2,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.,
-    //             0.9999999999999999,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.2,
-    //             0.2,
-    //             0.,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.,
-    //             0.9999999999999999,
-    //         ],
-    //         vec![
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.9999999999999999,
-    //             0.2,
-    //             0.4,
-    //             0.2,
-    //             0.4,
-    //             0.,
-    //             0.2,
-    //             0.2,
-    //             0.9999999999999999,
-    //             0.,
-    //         ],
-    //     ];
+            assert_eq!(t0.robinson_foulds(&t1).unwrap(), rfs[i0][i1])
+        }
+    }
 
-    //     for indices in (0..trees.len()).combinations(2) {
-    //         let (i0, i1) = (indices[0], indices[1]);
-    //         let t0 = Tree::from_newick(trees[i0]).unwrap();
-    //         let t1 = Tree::from_newick(trees[i1]).unwrap();
+    #[test]
+    // Robinson foulds distances according to
+    // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
+    fn weighted_robinson_foulds_treedist() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
+        let rfs = vec![
+            vec![
+                0.,
+                0.4,
+                0.2,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.9999999999999999,
+            ],
+            vec![
+                0.4,
+                0.,
+                0.2,
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.9999999999999999,
+            ],
+            vec![
+                0.2,
+                0.2,
+                0.,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.,
+                0.9999999999999999,
+            ],
+            vec![
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.,
+                0.2,
+                0.2,
+                0.4,
+                0.2,
+                0.4,
+                0.,
+                0.9999999999999999,
+                0.2,
+            ],
+            vec![
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.,
+                0.4,
+                0.2,
+                0.4,
+                0.2,
+                0.2,
+                0.9999999999999999,
+                0.4,
+            ],
+            vec![
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.4,
+                0.,
+                0.2,
+                0.2,
+                0.4,
+                0.2,
+                0.9999999999999999,
+                0.2,
+            ],
+            vec![
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.4,
+                0.2,
+                0.2,
+                0.,
+                0.4,
+                0.2,
+                0.4,
+                0.9999999999999999,
+                0.4,
+            ],
+            vec![
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.4,
+                0.2,
+                0.4,
+                0.,
+                0.2,
+                0.2,
+                0.9999999999999999,
+                0.,
+            ],
+            vec![
+                0.9999999999999999,
+                0.7999999999999999,
+                0.9999999999999999,
+                0.4,
+                0.2,
+                0.4,
+                0.2,
+                0.2,
+                0.,
+                0.4,
+                0.9999999999999999,
+                0.2,
+            ],
+            vec![
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.,
+                0.2,
+                0.2,
+                0.4,
+                0.2,
+                0.4,
+                0.,
+                0.9999999999999999,
+                0.2,
+            ],
+            vec![
+                0.2,
+                0.2,
+                0.,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.,
+                0.9999999999999999,
+            ],
+            vec![
+                0.9999999999999999,
+                0.9999999999999999,
+                0.9999999999999999,
+                0.2,
+                0.4,
+                0.2,
+                0.4,
+                0.,
+                0.2,
+                0.2,
+                0.9999999999999999,
+                0.,
+            ],
+        ];
 
-    //         assert!((t0.weighted_robinson_foulds(&t1).unwrap() - rfs[i0][i1]).abs() <= f64::EPSILON)
-    //     }
-    // }
+        for indices in (0..trees.len()).combinations(2) {
+            let (i0, i1) = (indices[0], indices[1]);
+            let t0 = Tree::from_newick(trees[i0]).unwrap();
+            let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-    // #[test]
-    // // Branch score distances according to
-    // // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    // fn khuner_felsenstein_treedist() {
-    //     let trees = vec![
-    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //     ];
-    //     let rfs: Vec<Vec<f64>> = vec![
-    //         vec![
-    //             0.,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //         ],
-    //         vec![
-    //             0.2,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //         ],
-    //         vec![
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.,
-    //             0.316227766016838,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.316227766016838,
-    //             0.2,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.28284271247461906,
-    //             0.316227766016838,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.,
-    //             0.2,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //         ],
-    //         vec![
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.,
-    //             0.316227766016838,
-    //         ],
-    //         vec![
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.316227766016838,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.14142135623730953,
-    //             0.2,
-    //             0.,
-    //             0.14142135623730953,
-    //             0.14142135623730953,
-    //             0.316227766016838,
-    //             0.,
-    //         ],
-    //     ];
+            assert!((t0.weighted_robinson_foulds(&t1).unwrap() - rfs[i0][i1]).abs() <= f64::EPSILON)
+        }
+    }
 
-    //     for indices in (0..trees.len()).combinations(2) {
-    //         let (i0, i1) = (indices[0], indices[1]);
-    //         let t0 = Tree::from_newick(trees[i0]).unwrap();
-    //         let t1 = Tree::from_newick(trees[i1]).unwrap();
+    #[test]
+    // Branch score distances according to
+    // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
+    fn khuner_felsenstein_treedist() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
+        let rfs: Vec<Vec<f64>> = vec![
+            vec![
+                0.,
+                0.2,
+                0.14142135623730953,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.14142135623730953,
+                0.316227766016838,
+            ],
+            vec![
+                0.2,
+                0.,
+                0.14142135623730953,
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.14142135623730953,
+                0.316227766016838,
+            ],
+            vec![
+                0.14142135623730953,
+                0.14142135623730953,
+                0.,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.,
+                0.316227766016838,
+            ],
+            vec![
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.,
+                0.316227766016838,
+                0.14142135623730953,
+            ],
+            vec![
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.14142135623730953,
+                0.,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.316227766016838,
+                0.2,
+            ],
+            vec![
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.14142135623730953,
+                0.2,
+                0.,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.316227766016838,
+                0.14142135623730953,
+            ],
+            vec![
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.2,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.316227766016838,
+                0.2,
+            ],
+            vec![
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.316227766016838,
+                0.,
+            ],
+            vec![
+                0.316227766016838,
+                0.28284271247461906,
+                0.316227766016838,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.,
+                0.2,
+                0.316227766016838,
+                0.14142135623730953,
+            ],
+            vec![
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.,
+                0.316227766016838,
+                0.14142135623730953,
+            ],
+            vec![
+                0.14142135623730953,
+                0.14142135623730953,
+                0.,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.,
+                0.316227766016838,
+            ],
+            vec![
+                0.316227766016838,
+                0.316227766016838,
+                0.316227766016838,
+                0.14142135623730953,
+                0.2,
+                0.14142135623730953,
+                0.2,
+                0.,
+                0.14142135623730953,
+                0.14142135623730953,
+                0.316227766016838,
+                0.,
+            ],
+        ];
 
-    //         println!(
-    //             "[{i0}, {i1}] c:{:?} ==? t:{}",
-    //             t0.khuner_felsenstein(&t1).unwrap(),
-    //             rfs[i0][i1]
-    //         );
+        for indices in (0..trees.len()).combinations(2) {
+            let (i0, i1) = (indices[0], indices[1]);
+            let t0 = Tree::from_newick(trees[i0]).unwrap();
+            let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-    //         assert_eq!(t0.khuner_felsenstein(&t1).unwrap(), rfs[i0][i1])
-    //     }
-    // }
+            println!(
+                "[{i0}, {i1}] c:{:?} ==? t:{}",
+                t0.khuner_felsenstein(&t1).unwrap(),
+                rfs[i0][i1]
+            );
 
-    // #[test]
-    // fn test_rf_unrooted() {
-    //     let ref_s = "(((aaaaaaaaad:0.18749,aaaaaaaaae:0.18749):0.18749,((aaaaaaaaaf:0.18749,(aaaaaaaaag:0.18749,(aaaaaaaaah:0.18749,(aaaaaaaaai:0.18749,aaaaaaaaaj:0.18749):0.18749):0.18749):0.18749):0.18749,(aaaaaaaaak:0.18749,(aaaaaaaaal:0.18749,aaaaaaaaam:0.18749):0.18749):0.18749):0.18749):0.18749,((aaaaaaaaan:0.18749,aaaaaaaaao:0.18749):0.18749,(aaaaaaaaaa:0.18749,(aaaaaaaaab:0.18749,aaaaaaaaac:0.18749):0.18749):0.18749):0.18749);";
-    //     let prd_s = "(aaaaaaaaag:0.24068,(aaaaaaaaah:0.21046,(aaaaaaaaai:0.15487,aaaaaaaaaj:0.17073)1.000:0.22813)0.999:0.26655,(aaaaaaaaaf:0.27459,((((aaaaaaaaan:0.17964,aaaaaaaaao:0.13686)0.994:0.18171,(aaaaaaaaaa:0.19386,(aaaaaaaaab:0.15663,aaaaaaaaac:0.20015)1.000:0.26799)0.981:0.15442)0.999:0.38320,(aaaaaaaaad:0.18133,aaaaaaaaae:0.17164)0.990:0.18734)0.994:0.18560,(aaaaaaaaak:0.24485,(aaaaaaaaal:0.17930,aaaaaaaaam:0.22072)1.000:0.22274)0.307:0.05569)1.000:0.22736)0.945:0.12401);";
+            assert_eq!(t0.khuner_felsenstein(&t1).unwrap(), rfs[i0][i1])
+        }
+    }
 
-    //     let ref_tree = Tree::from_newick(ref_s).unwrap();
-    //     let prd_tree = Tree::from_newick(prd_s).unwrap();
+    #[test]
+    fn rooted_vs_unrooted_partitions() {
+        let rooted = Tree::from_newick("((Tip_3,Tip_4),(Tip_0,(Tip_1,Tip_2)));").unwrap();
+        let unrooted = Tree::from_newick("(Tip_3,Tip_4,(Tip_0,(Tip_1,Tip_2)));").unwrap();
 
-    //     let ref_parts: HashSet<_> = HashSet::from_iter(ref_tree.get_partitions().unwrap());
-    //     let prd_parts: HashSet<_> = HashSet::from_iter(prd_tree.get_partitions().unwrap());
+        let parts_rooted = rooted.get_partitions().unwrap();
+        let parts_unrooted = unrooted.get_partitions().unwrap();
 
-    //     // let common = ref_parts.intersection(&prd_parts).count();
+        assert_eq!(parts_rooted, parts_unrooted);
+    }
 
-    //     println!("Leaf indices:");
-    //     println!("Ref: {:#?}", ref_tree.leaf_index);
+    #[test]
+    fn new_vs_old() {
+        let trees = vec![
+            "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
+            "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
+        ];
 
-    //     println!("\nPartitions: ");
-    //     println!("Ref: ");
-    //     for i in ref_parts.iter().sorted() {
-    //         println!("\t{i:#018b}");
-    //     }
-    //     println!("\nPrd: ");
-    //     for i in prd_parts.iter().sorted() {
-    //         println!("\t{i:#018b}");
-    //     }
+        for newicks in trees.iter().combinations(2) {
+            let t1 = Tree::from_newick(newicks[0]).unwrap();
+            let t2 = Tree::from_newick(newicks[1]).unwrap();
 
-    //     // println!("tree\treference\tcommon\tcompared\trf\trf_comp");
-    //     // println!(
-    //     //     "0\t{}\t{}\t{}\t{}\t{}",
-    //     //     ref_parts.len() - common,
-    //     //     common,
-    //     //     prd_parts.len() - common,
-    //     //     rf,
-    //     //     ref_parts.len() + prd_parts.len() - 2*common,
-    //     // );
-
-    //     // panic!()
-    // }
-
-    // #[test]
-    // fn rooted_vs_unrooted_partitions() {
-    //     let rooted = Tree::from_newick("((Tip_3,Tip_4),(Tip_0,(Tip_1,Tip_2)));").unwrap();
-    //     let unrooted = Tree::from_newick("(Tip_3,Tip_4,(Tip_0,(Tip_1,Tip_2)));").unwrap();
-
-    //     let parts_rooted = rooted.get_partitions().unwrap();
-    //     let parts_unrooted = unrooted.get_partitions().unwrap();
-
-    //     assert_eq!(parts_rooted, parts_unrooted);
-    // }
-
-    // #[test]
-    // fn new_vs_old() {
-    //     let trees = vec![
-    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //     ];
-
-    //     for newicks in trees.iter().combinations(2) {
-    //         let t1 = Tree::from_newick(newicks[0]).unwrap();
-    //         let t2 = Tree::from_newick(newicks[1]).unwrap();
-
-    //         assert_eq!(
-    //             t1.robinson_foulds(&t2).unwrap(),
-    //             t1.robinson_foulds(&t2).unwrap()
-    //         )
-    //     }
-    // }
-
-    // #[test]
-    // fn medium() {
-    //     fn get_bitset(hash: usize, len: usize) -> FixedBitSet {
-    //         // eprintln!("Converting : {hash}");
-    //         let mut set = FixedBitSet::with_capacity(len);
-    //         let mut hash = hash;
-    //         for i in 0..len {
-    //             // eprintln!("\t{hash:#0len$b}", len = len);
-    //             if hash & 1 == 1 {
-    //                 set.insert(i)
-    //             }
-    //             hash >>= 1
-    //         }
-    //         let mut toggled = set.clone();
-    //         toggled.toggle_range(..);
-
-    //         // println!("Done\n");
-
-    //         set.min(toggled)
-    //     }
-
-    //     let n1 = "((((Tip_13,Tip_14),(Tip_15,(Tip_16,Tip_17))),(((Tip_18,Tip_19),Tip_0),(Tip_1,Tip_2))),((Tip_3,(Tip_4,Tip_5)),(Tip_6,(Tip_7,(Tip_8,(Tip_9,(Tip_10,(Tip_11,Tip_12))))))));";
-    //     let n2 = "(((Tip_7,(Tip_8,Tip_9)),((Tip_10,(Tip_11,Tip_12)),((Tip_13,(Tip_14,Tip_15)),(Tip_16,Tip_17)))),((Tip_18,Tip_19),(Tip_0,(Tip_1,(Tip_2,(Tip_3,(Tip_4,(Tip_5,Tip_6))))))));";
-    //     let rf_true = 26;
-
-    //     let reftree = Tree::from_newick(n1).unwrap();
-    //     let compare = Tree::from_newick(n2).unwrap();
-
-    //     let index: Vec<_> = reftree.get_leaf_names().into_iter().sorted().collect();
-    //     let index2: Vec<_> = compare.get_leaf_names().into_iter().sorted().collect();
-
-    //     let p1 = reftree.get_partitions().unwrap();
-    //     println!("REF: [");
-    //     for p in p1 {
-    //         print!("(");
-    //         for b in p.ones() {
-    //             print!("{:?}, ", index[b]);
-    //         }
-    //         println!("),");
-    //     }
-    //     println!("]\n");
-
-    //     let p2 = compare.get_partitions().unwrap();
-    //     println!("COMP: [");
-    //     for p in p2 {
-    //         print!("(");
-    //         for b in p.ones() {
-    //             print!("{:?}, ", index2[b]);
-    //         }
-    //         println!("),");
-    //     }
-    //     println!("]\n");
-
-    //     for node in compare.nodes.iter() {
-    //         if node.is_tip() {
-    //             println!("COMP TIP: {node:?}")
-    //         }
-    //     }
-
-    //     // dbg!(&reftree);
-    //     // dbg!(&compare);
-
-    //     assert_eq!(reftree.robinson_foulds(&compare).unwrap(), rf_true)
-    // }
-
-    // #[test]
-    // // Robinson foulds distances according to
-    // // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    // fn robinson_foulds_treedist_new() {
-    //     let trees = vec![
-    //         "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((F:0.1,I:0.1):0.1,(G:0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,(((J:0.1,H:0.1):0.1,D:0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,(G:0.1,((F:0.1,I:0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(D:0.1,(H:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
-    //         "(A:0.1,(B:0.1,(E:0.1,((G:0.1,(F:0.1,I:0.1):0.1):0.1,((J:0.1,(H:0.1,D:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
-    //     ];
-    //     let rfs = vec![
-    //         vec![0, 4, 2, 10, 10, 10, 10, 10, 10, 10, 2, 10],
-    //         vec![4, 0, 2, 10, 8, 10, 8, 10, 8, 10, 2, 10],
-    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-    //         vec![10, 8, 10, 2, 0, 4, 2, 4, 2, 2, 10, 4],
-    //         vec![10, 10, 10, 2, 4, 0, 2, 2, 4, 2, 10, 2],
-    //         vec![10, 8, 10, 4, 2, 2, 0, 4, 2, 4, 10, 4],
-    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-    //         vec![10, 8, 10, 4, 2, 4, 2, 2, 0, 4, 10, 2],
-    //         vec![10, 10, 10, 0, 2, 2, 4, 2, 4, 0, 10, 2],
-    //         vec![2, 2, 0, 10, 10, 10, 10, 10, 10, 10, 0, 10],
-    //         vec![10, 10, 10, 2, 4, 2, 4, 0, 2, 2, 10, 0],
-    //     ];
-
-    //     for indices in (0..trees.len()).combinations(2) {
-    //         let (i0, i1) = (indices[0], indices[1]);
-
-    //         let t0 = Tree::from_newick(trees[i0]).unwrap();
-    //         let t1 = Tree::from_newick(trees[i1]).unwrap();
-
-    //         assert_eq!(t0.robinson_foulds_new(&t1).unwrap(), rfs[i0][i1])
-    //     }
-    // }
+            assert_eq!(
+                t1.robinson_foulds(&t2).unwrap(),
+                t1.robinson_foulds(&t2).unwrap()
+            )
+        }
+    }
 
     // the reference distance matrix was computed with ete3
     // #[test]
