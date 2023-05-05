@@ -7,10 +7,17 @@ use thiserror::Error;
 
 use super::{Edge, NodeId};
 
+/// Errors that can occur when manipulating [`Node`] structs.
 #[derive(Error, Debug)]
 pub enum NodeError {
+    /// We are trying to access the an unexisting child of the node
     #[error("Node {parent} does not have child {child}.")]
-    HasNoChild { parent: NodeId, child: NodeId },
+    HasNoChild { 
+        /// Id of the parent the parent node
+        parent: NodeId, 
+        /// Id of the inexistant child node
+        child: NodeId 
+    },
 }
 
 #[derive(Clone)]
@@ -26,12 +33,12 @@ pub struct Node {
     pub children: Vec<NodeId>,
     /// length of branch between parent and node
     pub parent_edge: Option<Edge>,
-    /// lenght of branches between node and children
-    pub child_edges: Option<HashMap<NodeId, Edge>>,
     /// Optional comment attached to node
     pub comment: Option<String>,
+    /// lenght of branches between node and children
+    pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
     /// Number of edges to root
-    pub depth: usize,
+    pub(crate) depth: usize,
     // Whether the node is deleted or not
     pub(crate) deleted: bool,
 }
@@ -87,6 +94,11 @@ impl Node {
     /// Sets the depth of the node
     pub fn set_depth(&mut self, depth: usize) {
         self.depth = depth;
+    }
+
+    /// Gets the depth of the node
+    pub fn get_depth(&self) -> usize {
+        self.depth
     }
 
     /// Empties the node and sets it as deleted
@@ -230,7 +242,7 @@ impl Eq for Node {}
 impl Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.parent_edge {
-            Some(l) => write!(f, "{:?} ({:.3})", self.name, l),
+            Some(l) => write!(f, "({l:.3}) {:?}", self.name),
             None => write!(f, "{:?}", self.name),
         }
     }
@@ -240,8 +252,8 @@ impl Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?} <I:{}> (L: {:?})[P: {:?}][Root: {:?}] (C: {:?})",
-            self.name, self.id, self.parent_edge, self.parent, self.depth, self.children,
+            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Children({:?})",
+            self.parent_edge, self.name, self.id, self.parent, self.depth, self.children,
         )
     }
 }

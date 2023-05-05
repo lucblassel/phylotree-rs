@@ -1,3 +1,6 @@
+//! Distributions to generate branch lengths inb random trees
+//! 
+
 use std::fmt::{Debug, Display};
 
 use clap::ValueEnum;
@@ -7,17 +10,27 @@ use rand_distr::{uniform::SampleUniform, Distribution, Exp, Gamma, Uniform};
 use trait_set::trait_set;
 
 trait_set! {
+    /// Trait describing objects that can be used as branch lengths 
+    /// in phylogenetic trees.
     pub trait BranchLength = Debug + Display + Float + Zero + SampleUniform;
 }
 
+
+/// Available branch length distributions
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Distr {
+    /// A [uniform](https://en.wikipedia.org/wiki/Continuous_uniform_distribution) 
+    /// distribution over $[0.002, 1.0)$
     Uniform,
+    /// An [exponential](https://en.wikipedia.org/wiki/Exponential_distribution) 
+    /// distribution with rate $\lambda=0.15$
     Exponential,
+    /// A [gamma](https://en.wikipedia.org/wiki/Gamma_distribution) distribution 
+    /// with a shape $k=4$ and scale $\theta=1.0$.
     Gamma,
 }
 
-pub enum Sampler<T>
+pub(crate) enum Sampler<T>
 where
     T: BranchLength,
     rand_distr::StandardNormal: rand_distr::Distribution<T>,
@@ -37,7 +50,7 @@ where
     rand_distr::Open01: rand_distr::Distribution<T>,
 {
     #[replace_numeric_literals(T::from(literal).unwrap())]
-    pub fn new(v: Distr) -> Self {
+    pub(crate) fn new(v: Distr) -> Self {
         match v {
             Distr::Uniform => Self::Uniform(Uniform::<T>::new(0.002, 1.0)),
             Distr::Exponential => Self::Exponential(Exp::new(0.15).unwrap()),
@@ -61,30 +74,3 @@ where
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-
-//     use super::*;
-
-//     #[test]
-//     fn sample() {
-//         let mut sampler = Sampler::new(Distr::Uniform);
-//         let mut rng = rand::thread_rng();
-//         for _ in 0..=10 {
-//             print!(" {}", sampler.sample(&mut rng))
-//         }
-//         println!();
-//         sampler = Sampler::new(Distr::Exponential);
-//         for _ in 0..=10 {
-//             print!(" {}", sampler.sample(&mut rng))
-//         }
-//         println!();
-//         sampler = Sampler::new(Distr::Gamma);
-//         for _ in 0..=10 {
-//             print!(" {}", sampler.sample(&mut rng))
-//         }
-//         println!();
-//         panic!()
-//     }
-// }

@@ -1,5 +1,6 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use ptree::{print_tree, TreeBuilder};
 use std::collections::VecDeque;
 use std::iter::zip;
 use std::{
@@ -14,54 +15,80 @@ use thiserror::Error;
 use super::node::{Node, NodeError};
 use super::{Edge, NodeId};
 
-use crate::distance::DistanceMatrix;
+use crate::distance::{DistanceMatrix, MatrixError};
 
+/// Errors that can occur when reading, writing and manipulating [`Tree`] structs.
 #[derive(Error, Debug)]
 pub enum TreeError {
+    /// The tree is not binary and we are trying to do something 
+    /// only possible on binary trees
     #[error("This tree is not Binary.")]
     IsNotBinary,
+    /// The tree is not rooted and we are trying to do something 
+    /// only possible on rooted trees
     #[error("This tree is not rooted.")]
     IsNotRooted,
+    /// The tree is empty and we are trying to do something that require at least one node
     #[error("This tree is empty.")]
     IsEmpty,
-    #[error("All your leaf nodes must ne named.")]
-    UnnamedLeaves,
-    #[error("Your leaf names must be unique.")]
-    DuplicateLeafNames,
-    #[error("The leaf index of the tree is not initialized.")]
-    LeafIndexNotInitialized,
-    #[error("The tree must have all branch lengths.")]
-    MissingBranchLengths,
-    #[error("The trees have different tips indices.")]
-    DifferentTipIndices,
-    #[error("There is no node with index: {0}")]
-    NodeNotFound(NodeId),
+    /// No root node was found in the tree and we are trying to do something 
+    /// that requires a root node
     #[error("No root node found")]
     RootNotFound,
-    #[error("Error writing tree to file")]
-    IoError(#[from] std::io::Error),
+    /// Some of the leaves in the tree have no name
+    #[error("All your leaf nodes must ne named.")]
+    UnnamedLeaves,
+    /// Some of the leaves in the tree share the same name
+    #[error("Your leaf names must be unique.")]
+    DuplicateLeafNames,
+    /// The leaf index is not initialized *(the leaf index is used when comparing tree topologies)*
+    #[error("The leaf index of the tree is not initialized.")]
+    LeafIndexNotInitialized,
+    /// Some branches of the tree have no length
+    #[error("The tree must have all branch lengths.")]
+    MissingBranchLengths,
+    /// The trees we want to compare have different tips
+    #[error("The trees have different tips indices.")]
+    DifferentTipIndices,
+    /// The requested node with index [`NodeId`] does not exist in the tree
+    #[error("There is no node with index: {0}")]
+    NodeNotFound(NodeId),
+    /// The node with index [`NodeId`] could not be compressed
     #[error("Could not compress node {0}, it does not have exactly one parent and one child")]
     CouldNotCompressNode(NodeId),
+    /// There was a [`std::io::Error`] when writin the tree to a file
+    #[error("Error writing tree to file")]
+    IoError(#[from] std::io::Error),
+    /// There was a [`NodeError`] when operating on a node
     #[error("Could operate on Node")]
     NodeError(#[from] NodeError),
+    /// There was a [`MatrixError`] when extracting distance matrix
     #[error("Could not convert to matrix")]
-    MatrixError(#[from] crate::distance::Error),
+    MatrixError(#[from] MatrixError),
 }
 
+/// Errors that can occur when parsing newick files.
 #[derive(Error, Debug)]
-pub enum ParseError {
+pub enum NewickParseError {
+    /// There is whitespace in one of the branch lengths
     #[error("Cannot have whitespace in number field.")]
     WhiteSpaceInNumber,
+    /// There is an unclosed bracket in the newick String
     #[error("Missing a closing bracket.")]
     UnclosedBracket,
+    /// The newick string is missing a final semi-colon
     #[error("The tree is missin a semi colon at the end.")]
     NoClosingSemicolon,
-    #[error("Problem with building the tree.")]
-    TreeError(#[from] TreeError),
-    #[error("Could not parse a branch length")]
-    FloatError(#[from] std::num::ParseFloatError),
+    /// We are trying to close a subtre but have no parent node.
     #[error("Parent node of subtree not found")]
     NoSubtreeParent,
+    /// There was a [`TreeError`] when building a tree fromthe newick string
+    #[error("Problem with building the tree.")]
+    TreeError(#[from] TreeError),
+    /// There was a [`std::num::ParseFloatError`] when parsing branch lengths
+    #[error("Could not parse a branch length")]
+    FloatError(#[from] std::num::ParseFloatError),
+    /// There was a [`std::io::Error`] when reading a newick file
     #[error("Problem reading file")]
     IoError(#[from] std::io::Error),
 }
@@ -79,7 +106,7 @@ pub struct Comparison {
     pub branch_score: f64,
 }
 
-/// A Vector backed Tree structure
+/// A Phylogenetic tree
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
@@ -87,6 +114,10 @@ pub struct Tree {
     partitions: RefCell<Option<HashMap<FixedBitSet, Option<Edge>>>>,
 }
 
+/// Base methods to add and get [`Node`] objects to and from the [`Tree`].
+///   
+/// ----
+/// ----
 impl Tree {
     /// Create a new empty Tree object
     pub fn new() -> Self {
@@ -128,8 +159,8 @@ impl Tree {
     /// assert_eq!(tree.get(&root_id).unwrap().children.len(), 2);
     ///
     /// // The depths of child nodes are derived from the parent node
-    /// assert_eq!(tree.get(&left).unwrap().depth, 1);
-    /// assert_eq!(tree.get(&right).unwrap().depth, 1);
+    /// assert_eq!(tree.get(&left).unwrap().get_depth(), 1);
+    /// assert_eq!(tree.get(&right).unwrap().get_depth(), 1);
     ///
     /// // If an edge length is specified then it is set in both child and parent
     /// assert_eq!(tree.get(&right).unwrap().parent_edge, Some(0.1));
@@ -331,7 +362,13 @@ impl Tree {
             .filter(|id| self.get(id).unwrap().is_tip())
             .collect())
     }
+}
 
+/// Methods to traverse the [`Tree`]
+///   
+/// ----
+/// ----
+impl Tree {
     // ###################
     // # TREE TRAVERSALS #
     // ###################
@@ -458,7 +495,13 @@ impl Tree {
 
         Ok(indices)
     }
+}
 
+/// Methods that compute characteristics and measures to describe the [`Tree`]
+///   
+/// ----
+/// ----
+impl Tree {
     // #######################################
     // # GETTING CHARACTERISTICS OF THE TREE #
     // #######################################
@@ -686,7 +729,13 @@ impl Tree {
         self.sackin()
             .map(|i_n| i_n as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
     }
+}
 
+/// Methods that compute edge bipartitions and compare [`Tree`] objects with each other.
+///   
+/// ----
+/// ----
+impl Tree {
     // #########################
     // # GET EDGES IN THE TREE #
     // #########################
@@ -1036,7 +1085,13 @@ impl Tree {
             branch_score: kf.sqrt(),
         })
     }
+}
 
+/// Methods to find paths in a [`Tree`] as well as measure distances between [`Node`] objects.
+///   
+/// ----
+/// ----
+impl Tree {
     // ##########################
     // # FIND PATHS IN THE TREE #
     // ##########################
@@ -1276,7 +1331,13 @@ impl Tree {
 
         Ok(matrix)
     }
+}
 
+/// Methods to manipulate and alter the [`Tree`] object.
+///   
+/// ----
+/// ----
+impl Tree {
     // ##################
     // # ALTER THE TREE #
     // ##################
@@ -1381,7 +1442,13 @@ impl Tree {
             node.rescale_edges(factor)
         }
     }
+}
 
+/// Methods to read and write [`Tree`] objects to and from files or [`String`] objects.
+///   
+/// ----
+/// ----
+impl Tree {
     // ########################
     // # READ AND WRITE TREES #
     // ########################
@@ -1433,7 +1500,7 @@ impl Tree {
     /// assert_eq!(tree.n_leaves(), 4);
     /// assert_eq!(tree.is_rooted().unwrap(), false);
     /// ```
-    pub fn from_newick(newick: &str) -> Result<Self, ParseError> {
+    pub fn from_newick(newick: &str) -> Result<Self, NewickParseError> {
         #[derive(Debug, PartialEq)]
         enum Field {
             Name,
@@ -1580,13 +1647,13 @@ impl Tree {
                     if let Some(parent) = parent_stack.pop() {
                         current_index = Some(parent)
                     } else {
-                        return Err(ParseError::NoSubtreeParent);
+                        return Err(NewickParseError::NoSubtreeParent);
                     }
                 }
                 ';' => {
                     // Finish parsing the Tree
                     if !open_delimiters.is_empty() {
-                        return Err(ParseError::UnclosedBracket);
+                        return Err(NewickParseError::UnclosedBracket);
                     }
                     let node = tree.get_mut(current_index.as_ref().unwrap())?;
                     node.name = current_name;
@@ -1619,7 +1686,7 @@ impl Tree {
                         }
                         Field::Length => {
                             if c.is_whitespace() {
-                                return Err(ParseError::WhiteSpaceInNumber);
+                                return Err(NewickParseError::WhiteSpaceInNumber);
                             }
                             if let Some(length) = current_length.as_mut() {
                                 length.push(c)
@@ -1633,7 +1700,7 @@ impl Tree {
             }
         }
 
-        Err(ParseError::NoClosingSemicolon)
+        Err(NewickParseError::NoClosingSemicolon)
     }
 
     /// Writes the tree to a newick file
@@ -1645,9 +1712,60 @@ impl Tree {
     }
 
     /// Creates a tree from a newick file
-    pub fn from_file(path: &Path) -> Result<Self, ParseError> {
+    pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
         let newick_string = fs::read_to_string(path)?;
         Self::from_newick(&newick_string)
+    }
+
+    /// Recursive function that adds node representation to a printable tree builder
+    fn print_nodes(
+        &self,
+        root_idx: &NodeId,
+        output_tree: &mut TreeBuilder,
+        debug: bool,
+    ) -> Result<(), TreeError> {
+        let root = self.get(root_idx)?;
+        let label = if debug {
+            format!("{root:?}")
+        } else {
+            format!("{root}")
+        };
+
+        if root.children.is_empty() {
+            output_tree.add_empty_child(label);
+        } else {
+            output_tree.begin_child(label);
+            for child_idx in root.children.iter() {
+                self.print_nodes(child_idx, output_tree, debug)?;
+            }
+            output_tree.end_child();
+        }
+
+        Ok(())
+    }
+
+    /// Print a debug view of the tree to the console
+    pub fn print_debug(&self) -> Result<(), TreeError> {
+        let root = self.get_root()?;
+        let mut builder = TreeBuilder::new(format!("{:?}", root));
+        for child_idx in self.get(&root)?.children.iter() {
+            self.print_nodes(child_idx, &mut builder, true)?;
+        }
+        let tree = builder.build();
+        print_tree(&tree)?;
+        Ok(())
+    }
+
+    /// Print the tree to the console
+    pub fn print(&self) -> Result<(), TreeError> {
+        let root = self.get_root()?;
+        let mut builder = TreeBuilder::new(format!("{:?}", root));
+        for child_idx in self.get(&root)?.children.iter() {
+            self.print_nodes(child_idx, &mut builder, false)?;
+        }
+        let tree = builder.build();
+        print_tree(&tree)?;
+        Ok(())
     }
 }
 
@@ -1870,8 +1988,8 @@ mod tests {
     #[test]
     fn read_newick_fails() {
         let newick_strings = vec![
-            ("((D,E)B,(F,G,C)A;", ParseError::UnclosedBracket),
-            ("((D,E)B,(F,G)C)A", ParseError::NoClosingSemicolon),
+            ("((D,E)B,(F,G,C)A;", NewickParseError::UnclosedBracket),
+            ("((D,E)B,(F,G)C)A", NewickParseError::NoClosingSemicolon),
         ];
         for (newick, _error) in newick_strings {
             let tree = Tree::from_newick(newick);
