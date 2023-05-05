@@ -8,7 +8,6 @@ readme = "README.md"
 homepage = "https://github.com/lucblassel/phylotree-rs"
 repository = "https://github.com/lucblassel/phylotree-rs"
 license = "GPL-3.0"
-license-file = "LICENSE"
 keywords = [
     "phylogenetics",
     "bioinformatics",
