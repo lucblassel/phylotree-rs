@@ -4,6 +4,8 @@ use std::path::Path;
 
 mod cli;
 
+use crate::tree::Tree;
+
 fn print_stats_header() {
     println!("height\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
 }
@@ -42,15 +44,15 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate_tree(tips, branch_lengths, distribution);
+                    let random = generate_tree(tips, branch_lengths, distribution).unwrap();
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate_tree(tips, branch_lengths, distribution);
+                let random = generate_tree(tips, branch_lengths, distribution).unwrap();
                 if let Some(output) = output {
                     random.to_file(&output).unwrap()
                 } else {
-                    println!("{}", random.to_newick())
+                    println!("{}", random.to_newick().unwrap())
                 }
             }
         }

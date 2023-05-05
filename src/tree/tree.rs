@@ -779,7 +779,7 @@ impl Tree {
     }
 
     /// Get all partitions of a tree
-    fn get_partitions(&self) -> Result<HashSet<FixedBitSet>, TreeError> {
+    pub fn get_partitions(&self) -> Result<HashSet<FixedBitSet>, TreeError> {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
@@ -794,7 +794,9 @@ impl Tree {
     }
 
     /// Get all partitions of a tree along with corresponding branch lengths
-    fn get_partitions_with_lengths(&self) -> Result<HashMap<FixedBitSet, f64>, TreeError> {
+    pub(crate) fn get_partitions_with_lengths(
+        &self,
+    ) -> Result<HashMap<FixedBitSet, f64>, TreeError> {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
@@ -1161,13 +1163,54 @@ impl Tree {
         }
     }
 
-    /// Computes the distance matrix of the tree. 
+    // Implementation of recursive distance matrix computation
+    fn distance_matrix_recursive_impl(
+        &self,
+        current: &NodeId,
+        prev: Option<&NodeId>,
+        lengths: &mut [f64],
+        currlength: f64,
+    ) -> Result<(), TreeError> {
+        if prev.is_some() && self.get(current)?.is_tip() {
+            lengths[*current] = currlength;
+            return Ok(());
+        }
+
+        let children = self.get(current)?.children.clone();
+        let mut neighbors: Vec<_> = children
+            .iter()
+            .map(|idx| (*idx, self.get(idx).unwrap().parent_edge))
+            .collect();
+
+        if let Some(parent) = self.get(current)?.parent {
+            neighbors.push((parent, self.get(current).unwrap().parent_edge))
+        }
+
+        for (neighbor, brlen) in neighbors {
+            if Some(&neighbor) != prev {
+                if let Some(brlen) = brlen {
+                    self.distance_matrix_recursive_impl(
+                        &neighbor,
+                        Some(current),
+                        lengths,
+                        currlength + brlen,
+                    )?
+                } else {
+                    return Err(TreeError::MissingBranchLengths);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Computes the distance matrix of the tree, implemented in a recursive manner.
     /// ```
     /// use phylotree::tree::Tree;
-    /// 
+    ///
     /// let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
-    /// let matrix = tree.distance_matrix().unwrap();
-    /// 
+    /// let matrix = tree.distance_matrix_recursive().unwrap();
+    ///
     /// let phylip="\
     /// 4
     /// T0    0  1.6  0.9  1.6
@@ -1175,7 +1218,45 @@ impl Tree {
     /// T2    0.9  1.5  0  1.5
     /// T3    1.6  0.4  1.5  0
     /// ";
-    /// 
+    ///
+    /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
+    /// ```
+    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<Edge>, TreeError> {
+        let size = self.nodes.len();
+        let mut matrix = DistanceMatrix::new(self.n_leaves());
+        let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
+
+        for tip in self.get_leaves().iter() {
+            self.distance_matrix_recursive_impl(tip, None, &mut cache[*tip], 0.0)?
+        }
+
+        for pair in self.get_leaves().iter().combinations(2) {
+            let (i1, i2) = (pair[0], pair[1]);
+            let d = cache[*i1][*i2];
+            let name1 = self.get(i1)?.name.clone().unwrap();
+            let name2 = self.get(i2)?.name.clone().unwrap();
+
+            matrix.set(&name1, &name2, d, false)?;
+        }
+
+        Ok(matrix)
+    }
+
+    /// Computes the distance matrix of the tree.
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
+    /// let matrix = tree.distance_matrix().unwrap();
+    ///
+    /// let phylip="\
+    /// 4
+    /// T0    0  1.6  0.9  1.6
+    /// T1    1.6  0  1.5  0.4
+    /// T2    0.9  1.5  0  1.5
+    /// T3    1.6  0.4  1.5  0
+    /// ";
+    ///
     /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
     /// ```
     pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>, TreeError> {
@@ -1577,7 +1658,7 @@ impl Default for Tree {
 }
 
 #[cfg(test)]
-#[allow(clippy::excessive_precision)]
+// #[allow(clippy::excessive_precision)]
 mod tests {
 
     use super::*;

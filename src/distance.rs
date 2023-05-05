@@ -94,7 +94,7 @@ where
     }
 
     /// Set an entry in the distance matrix, if overwriting is permitted and the key
-    /// exists it returns the old value as Some<old>
+    /// exists it returns the old value as `Some(old)`
     pub fn set(
         &mut self,
         id_1: &str,
@@ -169,7 +169,7 @@ where
         Ok(output)
     }
 
-    /// Outputs the matrix in phylip format to a String
+    /// Outputs the matrix as a phylip formatted string
     pub fn to_phylip(&self, square: bool) -> Result<String, Error> {
         if square {
             self.to_phylip_square()
@@ -178,7 +178,7 @@ where
         }
     }
 
-    /// Saves the tree to a newick file
+    /// Writes the matrix to a phylip file
     pub fn to_file(&self, path: &Path, square: bool) -> Result<(), Error> {
         match fs::write(path, self.to_phylip(square)?) {
             Ok(_) => Ok(()),
@@ -234,7 +234,7 @@ where
         Ok(matrix)
     }
 
-    /// Loads a tree from a newick file
+    /// Reads the matrix from a phylip file
     pub fn from_file(path: &Path, square: bool) -> Result<Self, ParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip(&newick_string, square)
