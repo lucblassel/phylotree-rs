@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},
-    ops::Index,
 };
 
 use thiserror::Error;

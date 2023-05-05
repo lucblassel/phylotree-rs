@@ -121,15 +121,15 @@ impl Tree {
     /// let left = tree.add_child(Node::new(), root_id, None).unwrap();
     /// let right = tree.add_child(Node::new(), root_id, Some(0.1)).unwrap();
     ///
-    /// assert_eq!(tree.get(&root_id).children.len(), 2);
+    /// assert_eq!(tree.get(&root_id).unwrap().children.len(), 2);
     ///
     /// // The depths of child nodes are derived from the parent node
-    /// assert_eq!(tree.get(&left).depth, 1);
-    /// assert_eq!(tree.get(&right).depth, 1);
+    /// assert_eq!(tree.get(&left).unwrap().depth, 1);
+    /// assert_eq!(tree.get(&right).unwrap().depth, 1);
     ///
     /// // If an edge length is specified then it is set in both child and parent
-    /// assert_eq!(tree.get(&right).parent_edge, Some(0.1));
-    /// assert_eq!(tree.get(&root_id).get_child_edge(&right), Some(0.1));
+    /// assert_eq!(tree.get(&right).unwrap().parent_edge, Some(0.1));
+    /// assert_eq!(tree.get(&root_id).unwrap().get_child_edge(&right), Some(0.1));
     /// ```
     pub fn add_child(
         &mut self,
@@ -144,24 +144,40 @@ impl Tree {
         let mut node = node;
 
         node.set_parent(parent, edge);
-        node.set_depth(self.get(&parent).depth + 1);
+        node.set_depth(self.get(&parent)?.depth + 1);
 
         let id = self.add(node);
 
-        self.get_mut(&id).set_id(id);
-        self.get_mut(&parent).add_child(id, edge);
+        self.get_mut(&id)?.set_id(id);
+        self.get_mut(&parent)?.add_child(id, edge);
 
         Ok(id)
     }
 
     /// Get a reference to a specific Node of the tree
-    pub fn get(&self, id: &NodeId) -> &Node {
-        &self.nodes[*id]
+    pub fn get(&self, id: &NodeId) -> Result<&Node, TreeError> {
+        if *id >= self.nodes.len() {
+            return Err(TreeError::NodeNotFound(*id));
+        }
+        let node = &self.nodes[*id];
+        if node.deleted {
+            return Err(TreeError::NodeNotFound(*id));
+        }
+
+        Ok(node)
     }
 
     /// Get a mutable reference to a specific Node of the tree
-    pub fn get_mut(&mut self, id: &NodeId) -> &mut Node {
-        &mut self.nodes[*id]
+    pub fn get_mut(&mut self, id: &NodeId) -> Result<&mut Node, TreeError> {
+        if *id >= self.nodes.len() {
+            return Err(TreeError::NodeNotFound(*id));
+        }
+        let node = &mut self.nodes[*id];
+        if node.deleted {
+            return Err(TreeError::NodeNotFound(*id));
+        }
+
+        Ok(node)
     }
 
     /// Get a reference to a node in the tree by name
@@ -172,7 +188,7 @@ impl Tree {
     /// let root_idx = tree.add(Node::new_named("root"));
     /// let child_idx = tree.add_child(Node::new_named("child"), root_idx, None).unwrap();
     ///
-    /// assert_eq!(tree.get_by_name("child"), Some(tree.get(&child_idx)));
+    /// assert_eq!(tree.get_by_name("child"), Some(tree.get(&child_idx).unwrap()));
     /// ```
     pub fn get_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
@@ -235,7 +251,7 @@ impl Tree {
     pub fn get_leaf_names(&self) -> Vec<Option<String>> {
         self.get_leaves()
             .iter()
-            .map(|leaf_id| self.get(leaf_id).name.clone())
+            .map(|leaf_id| self.get(leaf_id).unwrap().name.clone())
             .collect()
     }
 
@@ -246,21 +262,22 @@ impl Tree {
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
     /// let subtree: Vec<_> = tree.get_subtree(&sub_root.id)
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(subtree, vec!["E", "C", "D"])
     /// ```
-    pub fn get_subtree(&self, root: &NodeId) -> Vec<NodeId> {
+    pub fn get_subtree(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![*root];
 
-        for child in self.get(root).children.iter() {
-            indices.extend(self.get_subtree(child));
+        for child in self.get(root)?.children.iter() {
+            indices.extend(self.get_subtree(child)?);
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Gets the node ids of all the nodes in the subtree rooted at the specified node, except the root
@@ -270,21 +287,22 @@ impl Tree {
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
     /// let subtree: Vec<_> = tree.get_descendants(&sub_root.id)
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(subtree, vec!["C", "D"])
     /// ```
-    pub fn get_descendants(&self, root: &NodeId) -> Vec<NodeId> {
+    pub fn get_descendants(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![];
 
-        for child in self.get(root).children.iter() {
-            indices.extend(self.get_subtree(child));
+        for child in self.get(root)?.children.iter() {
+            indices.extend(self.get_subtree(child)?);
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Gets the node ids of all the leaves in the subtree rooted at the specified node
@@ -294,18 +312,20 @@ impl Tree {
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
     /// let sub_leaves: Vec<_> = tree.get_subtree_leaves(&sub_root.id)
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(sub_leaves, vec!["C", "D"])
     /// ```
-    pub fn get_subtree_leaves(&self, root: &NodeId) -> Vec<NodeId> {
-        self.get_subtree(root)
+    pub fn get_subtree_leaves(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
+        Ok(self
+            .get_subtree(root)?
             .into_iter()
-            .filter(|id| self.get(id).is_tip())
-            .collect()
+            .filter(|id| self.get(id).unwrap().is_tip())
+            .collect())
     }
 
     // ###################
@@ -319,20 +339,21 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let preorder: Vec<_> = tree.preorder(&tree.get_root().unwrap())
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(preorder, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
     /// ```
-    pub fn preorder(&self, root: &NodeId) -> Vec<NodeId> {
+    pub fn preorder(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![*root];
-        for child in self.get(root).children.iter() {
-            indices.extend(self.preorder(child))
+        for child in self.get(root)?.children.iter() {
+            indices.extend(self.preorder(child)?)
         }
 
-        indices
+        Ok(indices)
     }
 
     /// Returns a vector containing node ids in the same order as the
@@ -342,21 +363,22 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let postorder: Vec<_> = tree.postorder(&tree.get_root().unwrap())
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(postorder, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     /// ```
-    pub fn postorder(&self, root: &NodeId) -> Vec<NodeId> {
+    pub fn postorder(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![];
-        for child in self.get(root).children.iter() {
-            indices.extend(self.postorder(child))
+        for child in self.get(root)?.children.iter() {
+            indices.extend(self.postorder(child)?)
         }
         indices.push(*root);
 
-        indices
+        Ok(indices)
     }
 
     /// Returns a vector containing node ids in the same order as the
@@ -369,7 +391,7 @@ impl Tree {
     /// let inorder: Vec<_> = tree.inorder(&tree.get_root().unwrap())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -381,7 +403,7 @@ impl Tree {
     /// child of G.*
     pub fn inorder(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![];
-        let children = &self.get(root).children;
+        let children = &self.get(root)?.children;
 
         // Tree is not binary
         if children.len() > 2 {
@@ -410,26 +432,27 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let levelorder: Vec<_> = tree.levelorder(&tree.get_root().unwrap())
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(levelorder, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
     /// ```
-    pub fn levelorder(&self, root: &NodeId) -> Vec<NodeId> {
+    pub fn levelorder(&self, root: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![];
         let mut queue = VecDeque::new();
         queue.push_back(root);
         while !queue.is_empty() {
             let root = queue.pop_front().unwrap();
             indices.push(*root);
-            for child in self.get(root).children.iter() {
+            for child in self.get(root)?.children.iter() {
                 queue.push_back(child)
             }
         }
 
-        indices
+        Ok(indices)
     }
 
     // #######################################
@@ -454,7 +477,7 @@ impl Tree {
     pub fn is_rooted(&self) -> Result<bool, TreeError> {
         let root_id = self.get_root()?;
 
-        Ok(!self.nodes.is_empty() && self.get(&root_id).children.len() == 2)
+        Ok(!self.nodes.is_empty() && self.get(&root_id)?.children.len() == 2)
     }
 
     /// Checks if all the tips have unique names (This check assumes that all tips have a name)
@@ -498,7 +521,7 @@ impl Tree {
         self.get_leaves()
             .iter()
             .map(|leaf| {
-                let (edge_sum, num_edges) = self.get_distance(&root, leaf);
+                let (edge_sum, num_edges) = self.get_distance(&root, leaf).unwrap();
                 match edge_sum {
                     Some(height) => height,
                     None => num_edges as f64,
@@ -523,7 +546,7 @@ impl Tree {
             .iter()
             .combinations(2)
             .map(|pair| {
-                let (edge_sum, num_edges) = self.get_distance(pair[0], pair[1]);
+                let (edge_sum, num_edges) = self.get_distance(pair[0], pair[1]).unwrap();
                 match edge_sum {
                     Some(height) => height,
                     None => num_edges as f64,
@@ -550,8 +573,8 @@ impl Tree {
             let mut n = 0;
             for node in self.nodes.iter() {
                 if node.children.len() == 2
-                    && self.get(&node.children[0]).is_tip()
-                    && self.get(&node.children[1]).is_tip()
+                    && self.get(&node.children[0])?.is_tip()
+                    && self.get(&node.children[1])?.is_tip()
                 {
                     n += 1;
                 }
@@ -574,24 +597,18 @@ impl Tree {
     pub fn colless(&self) -> Result<usize, TreeError> {
         self.check_rooted_binary()?;
 
-        let colless = self
-            .nodes
-            .iter()
-            .filter(|node| !node.is_tip())
-            .map(|node| {
-                if node.children.is_empty() {
-                    return 0;
-                }
-                let left = self.get_subtree_leaves(&node.children[0]).len();
-                let right = if node.children.len() > 1 {
-                    self.get_subtree_leaves(&node.children[1]).len()
-                } else {
-                    0
-                };
+        let mut colless = 0;
 
-                left.abs_diff(right)
-            })
-            .sum();
+        for node in self.nodes.iter().filter(|node| !node.is_tip()) {
+            let left = self.get_subtree_leaves(&node.children[0])?.len();
+            let right = if node.children.len() > 1 {
+                self.get_subtree_leaves(&node.children[1])?.len()
+            } else {
+                0
+            };
+
+            colless += left.abs_diff(right);
+        }
 
         Ok(colless)
     }
@@ -634,7 +651,7 @@ impl Tree {
         Ok(self
             .get_leaves()
             .iter()
-            .map(|tip_idx| self.get(tip_idx).depth)
+            .map(|tip_idx| self.get(tip_idx).unwrap().depth)
             .sum())
     }
 
@@ -697,10 +714,10 @@ impl Tree {
     fn get_partition(&self, index: &NodeId) -> Result<FixedBitSet, TreeError> {
         self.init_leaf_index()?;
 
-        let subtree_leaves = self.get_subtree_leaves(index);
+        let subtree_leaves = self.get_subtree_leaves(index)?;
         let indices = subtree_leaves
             .iter()
-            .filter_map(|index| self.get(index).name.clone())
+            .filter_map(|index| self.get(index).as_ref().unwrap().name.clone())
             .map(|name| {
                 let v = self.leaf_index.borrow().clone();
                 v.map(|v| v.iter().position(|n| *n == name).unwrap())
@@ -798,9 +815,9 @@ impl Tree {
         (*self.leaf_index.borrow_mut()) = None
     }
 
-    /// Resets the caches used when computing bipartitions 
-    /// *(i.e. with [`Tree::compare_topologies()`])*. 
-    /// You should call this if you have computed bipartitions in the tree 
+    /// Resets the caches used when computing bipartitions
+    /// *(i.e. with [`Tree::compare_topologies()`])*.
+    /// You should call this if you have computed bipartitions in the tree
     /// and then changed the tree.
     pub fn reset_bipartition_cache(&mut self) {
         self.reset_leaf_index();
@@ -828,11 +845,11 @@ impl Tree {
         }
 
         let mut root_s = HashSet::new();
-        for i in self.get(&self.get_root()?).children.iter() {
+        for i in self.get(&self.get_root()?)?.children.iter() {
             root_s.insert(self.get_partition(i)?);
         }
         let mut root_o = HashSet::new();
-        for i in other.get(&other.get_root()?).children.iter() {
+        for i in other.get(&other.get_root()?)?.children.iter() {
             root_o.insert(other.get_partition(i)?);
         }
 
@@ -994,11 +1011,11 @@ impl Tree {
 
         // Hacky...
         let mut root_s = HashSet::new();
-        for i in self.get(&self.get_root()?).children.iter() {
+        for i in self.get(&self.get_root()?)?.children.iter() {
             root_s.insert(self.get_partition(i)?);
         }
         let mut root_o = HashSet::new();
-        for i in other.get(&other.get_root()?).children.iter() {
+        for i in other.get(&other.get_root()?)?.children.iter() {
             root_o.insert(other.get_partition(i)?);
         }
         let same_root = root_s == root_o;
@@ -1024,25 +1041,26 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let path: Vec<_> = tree.get_path_from_root(&5)
+    ///     .unwrap()
     ///     .iter()
-    ///     .map(|id| tree.get(id).name.clone())
+    ///     .map(|id| tree.get(id).unwrap().name.clone())
     ///     .flatten()
     ///     .collect();
     ///
     /// assert_eq!(path, vec!["F", "B", "D", "E"])
     /// ```
-    pub fn get_path_from_root(&self, node: &NodeId) -> Vec<NodeId> {
+    pub fn get_path_from_root(&self, node: &NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut path = vec![];
         let mut current_node = *node;
         loop {
             path.push(current_node);
-            match self.get(&current_node).parent {
+            match self.get(&current_node)?.parent {
                 Some(parent) => current_node = parent,
                 None => break,
             }
         }
 
-        path.into_iter().rev().collect()
+        Ok(path.into_iter().rev().collect())
     }
 
     /// Gets the most recent common ancestor between two tree nodes
@@ -1053,16 +1071,20 @@ impl Tree {
     /// let ancestor = tree.get_common_ancestor(
     ///     &tree.get_by_name("A").unwrap().id,
     ///     &tree.get_by_name("D").unwrap().id,
-    /// );
+    /// ).unwrap();
     ///
-    /// assert_eq!(tree.get(&ancestor).name, Some("B".to_owned()))
+    /// assert_eq!(tree.get(&ancestor).unwrap().name, Some("B".to_owned()))
     /// ```
-    pub fn get_common_ancestor(&self, source: &NodeId, target: &NodeId) -> usize {
+    pub fn get_common_ancestor(
+        &self,
+        source: &NodeId,
+        target: &NodeId,
+    ) -> Result<usize, TreeError> {
         if source == target {
-            return *source;
+            return Ok(*source);
         }
-        let root_to_source = self.get_path_from_root(source);
-        let root_to_target = self.get_path_from_root(target);
+        let root_to_source = self.get_path_from_root(source)?;
+        let root_to_target = self.get_path_from_root(target)?;
 
         let cursor = zip(root_to_source.iter(), root_to_target.iter())
             .enumerate()
@@ -1074,7 +1096,7 @@ impl Tree {
                 root_to_source.len().min(root_to_target.len())
             });
 
-        root_to_source[cursor - 1]
+        Ok(root_to_source[cursor - 1])
     }
 
     /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
@@ -1086,22 +1108,26 @@ impl Tree {
     /// let (sum_edge_lengths, num_edges) = tree.get_distance(
     ///     &tree.get_by_name("A").unwrap().id,
     ///     &tree.get_by_name("I").unwrap().id,
-    /// );
+    /// ).unwrap();
     ///
     /// assert_eq!(num_edges, 4);
     /// assert!(sum_edge_lengths.is_none());
     /// ```
-    pub fn get_distance(&self, source: &NodeId, target: &NodeId) -> (Option<f64>, usize) {
+    pub fn get_distance(
+        &self,
+        source: &NodeId,
+        target: &NodeId,
+    ) -> Result<(Option<f64>, usize), TreeError> {
         let mut dist = 0.0;
         let mut branches = 0;
         let mut all_dists = true;
 
         if source == target {
-            return (None, 0);
+            return Ok((None, 0));
         }
 
-        let root_to_source = self.get_path_from_root(source);
-        let root_to_target = self.get_path_from_root(target);
+        let root_to_source = self.get_path_from_root(source)?;
+        let root_to_target = self.get_path_from_root(target)?;
 
         let cursor = zip(root_to_source.iter(), root_to_target.iter())
             .enumerate()
@@ -1115,7 +1141,7 @@ impl Tree {
 
         for list in vec![root_to_source, root_to_target] {
             for node in list.iter().skip(cursor) {
-                if let Some(d) = self.get(node).parent_edge {
+                if let Some(d) = self.get(node)?.parent_edge {
                     dist += d;
                 } else {
                     all_dists = false;
@@ -1125,9 +1151,9 @@ impl Tree {
         }
 
         if all_dists {
-            (Some(dist), branches)
+            Ok((Some(dist), branches))
         } else {
-            (None, branches)
+            Ok((None, branches))
         }
     }
 
@@ -1148,22 +1174,22 @@ impl Tree {
     /// assert_eq!(tree.to_newick().unwrap(), "((A,(C,E)D)B)F;")
     /// ```
     pub fn prune(&mut self, root: &NodeId) -> Result<(), TreeError> {
-        for child in self.get(root).children.clone() {
+        for child in self.get(root)?.children.clone() {
             self.prune(&child)?
         }
 
-        if let Some(parent) = self.get(root).parent {
-            self.get_mut(&parent).remove_child(root)?;
+        if let Some(parent) = self.get(root)?.parent {
+            self.get_mut(&parent)?.remove_child(root)?;
         }
 
-        self.get_mut(root).delete();
+        self.get_mut(root)?.delete();
 
         Ok(())
     }
 
     // Removes a single node
     fn compress_node(&mut self, id: &NodeId) -> Result<(), TreeError> {
-        let node = self.get(id);
+        let node = self.get(id)?;
 
         if node.parent.is_none() || node.children.len() != 1 {
             return Err(TreeError::CouldNotCompressNode(*id));
@@ -1182,11 +1208,11 @@ impl Tree {
             _ => return Err(TreeError::MissingBranchLengths),
         };
 
-        self.get_mut(&child).set_parent(parent, new_edge);
-        self.get_mut(&parent).add_child(child, new_edge);
-        self.get_mut(&parent).remove_child(&to_remove)?;
+        self.get_mut(&child)?.set_parent(parent, new_edge);
+        self.get_mut(&parent)?.add_child(child, new_edge);
+        self.get_mut(&parent)?.remove_child(&to_remove)?;
 
-        self.get_mut(&to_remove).delete();
+        self.get_mut(&to_remove)?.delete();
 
         Ok(())
     }
@@ -1241,20 +1267,20 @@ impl Tree {
     // ########################
 
     /// Generate newick representation of tree
-    fn to_newick_impl(&self, root: &NodeId) -> String {
-        let root = self.get(root);
+    fn to_newick_impl(&self, root: &NodeId) -> Result<String, TreeError> {
+        let root = self.get(root)?;
         if root.children.is_empty() {
-            root.to_newick()
+            Ok(root.to_newick())
         } else {
-            "(".to_string()
+            Ok("(".to_string()
                 + &(root
                     .children
                     .iter()
-                    .map(|child_idx| self.to_newick_impl(child_idx)))
+                    .map(|child_idx| self.to_newick_impl(child_idx).unwrap()))
                 .collect::<Vec<String>>()
                 .join(",")
                 + ")"
-                + &(root.to_newick())
+                + &(root.to_newick()))
         }
     }
 
@@ -1272,7 +1298,7 @@ impl Tree {
     /// ```
     pub fn to_newick(&self) -> Result<String, TreeError> {
         let root = self.get_root()?;
-        Ok(self.to_newick_impl(&root) + ";")
+        Ok(self.to_newick_impl(&root)? + ";")
     }
 
     /// Read a newick formatted string and build a [`Tree`] struct from it.
@@ -1364,14 +1390,14 @@ impl Tree {
                 ',' => {
                     // Add sibling
                     let node = if let Some(index) = current_index {
-                        tree.get_mut(&index)
+                        tree.get_mut(&index)?
                     } else {
                         if let Some(parent) = parent_stack.last() {
                             current_index = Some(tree.add_child(Node::new(), *parent, None)?);
                         } else {
                             unreachable!("Sould not be possible to have named child with no parent")
                         };
-                        tree.get_mut(current_index.as_ref().unwrap())
+                        tree.get_mut(current_index.as_ref().unwrap())?
                     };
 
                     if let Some(name) = current_name {
@@ -1400,14 +1426,14 @@ impl Tree {
                     // Close subtree
                     open_delimiters.pop();
                     let node = if let Some(index) = current_index {
-                        tree.get_mut(&index)
+                        tree.get_mut(&index)?
                     } else {
                         if let Some(parent) = parent_stack.last() {
                             current_index = Some(tree.add_child(Node::new(), *parent, None)?);
                         } else {
                             unreachable!("Sould not be possible to have named child with no parent")
                         };
-                        tree.get_mut(current_index.as_ref().unwrap())
+                        tree.get_mut(current_index.as_ref().unwrap())?
                     };
 
                     if let Some(name) = current_name {
@@ -1442,7 +1468,7 @@ impl Tree {
                     if !open_delimiters.is_empty() {
                         return Err(ParseError::UnclosedBracket);
                     }
-                    let node = tree.get_mut(current_index.as_ref().unwrap());
+                    let node = tree.get_mut(current_index.as_ref().unwrap())?;
                     node.name = current_name;
                     node.comment = current_comment;
                     if let Some(length) = current_length {
@@ -1452,9 +1478,9 @@ impl Tree {
                     // Finishing pass to make sure that branch lenghts are set in both children and parents
                     let ids: Vec<_> = tree.nodes.iter().map(|node| node.id).collect();
                     for node_id in ids {
-                        if let Some(edge) = tree.get(&node_id).parent_edge {
-                            if let Some(parent) = tree.get(&node_id).parent {
-                                tree.get_mut(&parent).set_child_edge(&node_id, Some(edge));
+                        if let Some(edge) = tree.get(&node_id)?.parent_edge {
+                            if let Some(parent) = tree.get(&node_id)?.parent {
+                                tree.get_mut(&parent)?.set_child_edge(&node_id, Some(edge));
                             }
                         }
                     }
@@ -1553,7 +1579,7 @@ mod tests {
     fn get_values(indices: &[usize], tree: &Tree) -> Vec<Option<String>> {
         indices
             .iter()
-            .map(|idx| tree.get(idx).name.clone())
+            .map(|idx| tree.get(idx).unwrap().name.clone())
             .collect()
     }
 
@@ -1607,67 +1633,6 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn traverse_preorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = get_values(&(tree.preorder(0).unwrap()), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-    //     assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
-    // }
-
-    // #[test]
-    // fn iter_preorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = tree
-    //         .iter_preorder()
-    //         .flat_map(|node| node.name.clone())
-    //         .collect();
-    //     assert_eq!(values, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
-    // }
-
-    // #[test]
-    // fn traverse_postorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = get_values(&(tree.postorder(0).unwrap()), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-    //     assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
-    // }
-
-    // #[test]
-    // fn iter_postorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = tree
-    //         .iter_postorder()
-    //         .unwrap()
-    //         .flat_map(|node| node.name.clone())
-    //         .collect();
-    //     assert_eq!(values, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
-    // }
-
-    // #[test]
-    // fn traverse_inorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = get_values(&(tree.inorder(0).unwrap()), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-    //     assert_eq!(values, vec!["A", "B", "C", "D", "E", "F", "H", "I", "G"])
-    // }
-
-    // #[test]
-    // fn traverse_levelorder() {
-    //     let tree = build_simple_tree().unwrap();
-    //     let values: Vec<_> = get_values(&(tree.levelorder(0).unwrap()), &tree)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect();
-    //     assert_eq!(values, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
-    // }
-
     #[test]
     fn prune_tree() {
         let mut tree = build_simple_tree().unwrap();
@@ -1679,7 +1644,7 @@ mod tests {
     #[test]
     fn path_from_root() {
         let tree = build_simple_tree().unwrap();
-        let values: Vec<_> = get_values(&(tree.get_path_from_root(&7)), &tree)
+        let values: Vec<_> = get_values(&(tree.get_path_from_root(&7).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -1699,11 +1664,14 @@ mod tests {
         for ((source, target), ancestor) in test_cases {
             println!(
                 "Testing: ({:?}, {:?}) -> {:?}",
-                tree.get(&source).name,
-                tree.get(&target).name,
-                tree.get(&ancestor).name
+                tree.get(&source).unwrap().name,
+                tree.get(&target).unwrap().name,
+                tree.get(&ancestor).unwrap().name
             );
-            assert_eq!(ancestor, tree.get_common_ancestor(&source, &target));
+            assert_eq!(
+                ancestor,
+                tree.get_common_ancestor(&source, &target).unwrap()
+            );
         }
     }
 
@@ -1721,7 +1689,7 @@ mod tests {
         let tree = build_tree_with_lengths().unwrap();
 
         for ((idx_s, idx_t), (dist, branches)) in test_cases {
-            let (d_pred, b_pred) = tree.get_distance(&idx_s, &idx_t);
+            let (d_pred, b_pred) = tree.get_distance(&idx_s, &idx_t).unwrap();
             assert_eq!(branches, b_pred);
             match dist {
                 None => assert!(d_pred.is_none()),
@@ -1742,31 +1710,6 @@ mod tests {
             .collect();
         assert_eq!(values, vec!["A", "C", "E", "H"])
     }
-
-    // #[test]
-    // fn generate_random_correct_size() {
-    //     use rand::prelude::*;
-    //     let mut rng = thread_rng();
-
-    //     for size in (0..20).map(|_| rng.gen_range(10..=100)) {
-    //         let tree = generate_tree(size, false, Distr::Uniform);
-    //         assert_eq!(tree.get_leaves().len(), size);
-    //     }
-    // }
-
-    // #[test]
-    // fn genera_gamma() {
-    //     use rand::prelude::*;
-    //     let mut rng = thread_rng();
-    //     for size in (0..20).map(|_| rng.gen_range(10..=100)) {
-    //         let tree = generate_tree(size, true, Distr::Gamma);
-    //         let tree2 = generate_tree(size, true, Distr::Uniform);
-    //         assert_eq!(tree.get_leaves().len(), size);
-    //         assert_eq!(tree2.get_leaves().len(), size);
-    //         println!("G: {}", tree.to_newick());
-    //         println!("U: {}", tree2.to_newick())
-    //     }
-    // }
 
     #[test]
     fn to_newick() {
@@ -1838,10 +1781,11 @@ mod tests {
 
         for (newick, root, leaves) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
-            let sub_leaves: Vec<String> = get_values(&tree.get_subtree_leaves(&root), &tree)
-                .iter()
-                .map(|v| v.clone().unwrap())
-                .collect();
+            let sub_leaves: Vec<String> =
+                get_values(&tree.get_subtree_leaves(&root).unwrap(), &tree)
+                    .iter()
+                    .map(|v| v.clone().unwrap())
+                    .collect();
 
             assert_eq!(sub_leaves, leaves);
         }
@@ -1911,8 +1855,8 @@ mod tests {
         dbg!(&tree);
 
         for node in tree.nodes.iter().filter(|node| !node.is_tip()) {
-            let left = tree.get_subtree_leaves(&node.children[0]);
-            let right = tree.get_subtree_leaves(&node.children[1]);
+            let left = tree.get_subtree_leaves(&node.children[0]).unwrap();
+            let right = tree.get_subtree_leaves(&node.children[1]).unwrap();
             eprintln!("Node {:?}:", node.name.clone().unwrap());
             eprintln!(
                 "\tLeft: {:?}",
@@ -2062,12 +2006,12 @@ mod tests {
         let tree = build_simple_tree().unwrap();
         eprintln!("{}", tree.to_newick().unwrap());
         dbg!(&tree);
-        let descendants_b: Vec<_> = get_values(&tree.get_descendants(&1), &tree)
+        let descendants_b: Vec<_> = get_values(&tree.get_descendants(&1).unwrap(), &tree)
             .into_iter()
             .flatten()
             .sorted()
             .collect();
-        let descendants_g: Vec<_> = get_values(&tree.get_descendants(&2), &tree)
+        let descendants_g: Vec<_> = get_values(&tree.get_descendants(&2).unwrap(), &tree)
             .into_iter()
             .flatten()
             .sorted()
