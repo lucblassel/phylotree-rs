@@ -1,10 +1,14 @@
+#![warn(missing_docs)]
+//! The `phylotree` binary is a command line tool, using the `[phylotree]` crate.
+//! It is made to execute common operations on phylogenetic trees directly in the terminal.
+
 use clap::Parser;
-use phylotree::*;
+use phylotree::{generate_tree, tree::Tree};
 use std::path::Path;
 
-mod cli;
-
-use crate::tree::Tree;
+/// contains the struct representing the command line arguments
+/// parsed by [`clap`] and used to execute this binary
+pub mod cli;
 
 fn print_stats_header() {
     println!("height\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
@@ -80,14 +84,6 @@ fn main() {
                 other_parts.len() - common,
                 rf,
             )
-        }
-        cli::Commands::RF { reftree, tocompare } => {
-            let reftree = Tree::from_file(&reftree).unwrap();
-            let compare = Tree::from_file(&tocompare).unwrap();
-
-            let rf = reftree.robinson_foulds(&compare).unwrap();
-
-            println!("{rf}")
         }
         cli::Commands::Matrix {
             tree,
