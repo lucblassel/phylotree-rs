@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use phylotree::distr::Distr;
 
-/// A simple command line tool to generate a random phylogenetic tree
+/// A simple command line tool to manipulate phylogenetic trees
 #[derive(Parser, Debug)]
 pub struct Args {
     #[command(subcommand)]
