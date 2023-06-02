@@ -98,5 +98,44 @@ fn main() {
                 println!("{}", dm.to_phylip(square).unwrap())
             }
         }
+        cli::Commands::Collapse {
+            tree,
+            threshold,
+            verbose,
+            exclude_tips,
+            output,
+        } => {
+            let mut tree = Tree::from_file(&tree).unwrap();
+            let mut n = 0;
+            for node_idx in tree.preorder(&tree.get_root().unwrap()).unwrap().iter() {
+                let node = tree.get_mut(node_idx).unwrap();
+                if exclude_tips && node.is_tip() {
+                    continue;
+                }
+                let parent_idx = node.parent;
+                let mut collapsed = false;
+                if let Some(len) = node.parent_edge {
+                    if len < threshold {
+                        node.set_parent(parent_idx.unwrap(), Some(0.0));
+                        collapsed = true;
+                        n += 1;
+                    }
+                }
+                if collapsed {
+                    let parent = tree.get_mut(&parent_idx.unwrap()).unwrap();
+                    parent.set_child_edge(node_idx, Some(0.0))
+                }
+            }
+
+            if let Some(output) = output {
+                tree.to_file(&output).unwrap()
+            } else {
+                println!("{}", tree.to_newick().unwrap());
+            }
+
+            if verbose {
+                println!("{n}")
+            }
+        }
     }
 }

@@ -29,18 +29,18 @@ pub enum Commands {
         output: Option<PathBuf>,
 
         /// Number of trees to generate
-        #[arg(short='n', long)]
+        #[arg(short = 'n', long)]
         trees: Option<usize>,
 
         /// Distribution of branch lengths
         #[arg(value_enum, short, long, default_value_t=Distr::Uniform)]
-        distribution: Distr
+        distribution: Distr,
     },
 
     /// Get statistics about a tree
     Stats {
         /// Input newick file of the tree
-        trees: Vec<PathBuf>
+        trees: Vec<PathBuf>,
     },
 
     /// Compare two trees
@@ -60,5 +60,22 @@ pub enum Commands {
         /// FIle to save the matrix to
         #[arg(short, long)]
         output: Option<PathBuf>,
-    }
+    },
+    /// Collapse branches that are under a certain branch length threshold
+    Collapse {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// The threshold under which to collapse the branch
+        threshold: phylotree::tree::Edge,
+        /// Print the number of collapsed branches at the end
+        #[arg(short, long)]
+        verbose: bool,
+        /// Don't collapse external branches
+        #[arg(short, long)]
+        exclude_tips: bool,
+        /// File to save the tree to
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
+
