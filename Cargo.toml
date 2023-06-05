@@ -26,6 +26,7 @@ categories = [
 clap = { version = "4.1.13", features = ["derive"] }
 fixedbitset = "0.4.2"
 itertools = "0.10.5"
+needletail = "0.5.1"
 num-traits = "0.2.15"
 numeric_literals = "0.2.0"
 ptree = "0.4.0"

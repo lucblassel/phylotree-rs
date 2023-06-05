@@ -43,7 +43,16 @@ pub enum Commands {
         trees: Vec<PathBuf>,
     },
 
-    /// Compare two trees
+    /// Compare two phylogenetic trees
+    ///
+    /// This will return:
+    ///  - the number of bipartitions unique to the reference tree
+    ///  - the number of common bipartitions
+    ///  - the number of bipartitions unique to the compared tree
+    ///  - the Robinson-Foulds distance
+    ///  - the weighted Robinson-Foulds distance
+    ///  - the Khuner-Felsenstein branch-score
+    #[clap(verbatim_doc_comment)]
     Compare {
         /// Reference tree
         reftree: PathBuf,
@@ -57,7 +66,17 @@ pub enum Commands {
         /// Output a square matrix instead of a triangular one
         #[arg(short, long)]
         square: bool,
-        /// FIle to save the matrix to
+        /// File to save the matrix to
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Outputs a subset of phylogenetic distances
+    Distance {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// The tips to consider
+        tips: Vec<String>,
+        /// Tab separated file to save distances to
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -77,5 +96,30 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Remove tips from the trees
+    Remove {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// Names of tips to remove
+        tips: Vec<String>,
+        /// File to save the tree to
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Remove or collapse branches corresponding to identical sequences in a reference alignment
+    Deduplicate {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// The FASTA alignment
+        alignment: PathBuf,
+        /// Whether to collapse duplicate branches to 0 instead of removing one of them
+        #[arg(short, long)]
+        collapse: bool,
+        /// File to save the tree to
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Print the number of collapse/removed branches at the end
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
-
