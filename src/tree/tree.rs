@@ -263,7 +263,7 @@ impl Tree {
     pub fn get_leaves(&self) -> Vec<NodeId> {
         self.nodes
             .iter()
-            .filter(|&node| node.is_tip())
+            .filter(|&node| !node.deleted && node.is_tip())
             .map(|node| node.id)
             .collect()
     }

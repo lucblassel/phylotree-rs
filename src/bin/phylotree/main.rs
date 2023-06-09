@@ -6,7 +6,7 @@ use clap::Parser;
 use itertools::Itertools;
 use phylotree::{generate_tree, tree::Tree};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fs::File,
     io,
     io::{BufWriter, Write},
@@ -202,7 +202,7 @@ fn main() {
 
             // Get duplicated sequence names
             let mut alignment = needletail::parse_fastx_file(alignment).unwrap();
-            let mut duplicate_sequences = HashMap::new();
+            let mut duplicate_sequences = BTreeMap::new();
             while let Some(r) = alignment.next() {
                 let record = r.unwrap();
                 let seq = String::from_utf8(record.seq().to_vec()).unwrap();
@@ -215,14 +215,20 @@ fn main() {
             let mut n = 0;
 
             let duplicates: Vec<_> = duplicate_sequences
-                .iter()
+                .into_iter()
                 .filter(|(_, v)| v.len() > 1)
+                .map(|(_, mut v)| {
+                    v.sort();
+                    v
+                })
                 .collect();
 
             if duplicates.is_empty() {}
 
+            let mut removed = vec![];
+
             // Remove/Collapse tips corresponding to duplicate_sequences
-            for duplicated in duplicate_sequences.values() {
+            for duplicated in duplicates {
                 if duplicated.len() == 1 {
                     continue;
                 }
@@ -231,6 +237,7 @@ fn main() {
                     let parent_idx = tree.get_by_name(taxa).unwrap().parent.unwrap();
 
                     if collapse {
+                        removed.push(taxa.clone());
                         tree.get_mut(&idx)
                             .unwrap()
                             .set_parent(parent_idx, Some(0.0));
@@ -242,6 +249,7 @@ fn main() {
                         // still want to keep one instance
                         continue;
                     } else {
+                        removed.push(taxa.clone());
                         tree.prune(&idx).unwrap();
                     }
                     n += 1;
@@ -252,14 +260,34 @@ fn main() {
                 tree.compress().unwrap();
             }
 
+            // Check if we removed a full cherry, in which case we 
+            // Also need to remove the parent branch 
+            let mut pruned = false;
+            while !pruned {
+                pruned = true;
+                for leaf_idx in tree.get_leaves() {
+                    let leaf = tree.get(&leaf_idx).unwrap();
+                    let unnamed = leaf.name.is_none();
+                    if unnamed {
+                        pruned = false;
+                        tree.prune(&leaf_idx).unwrap();
+                    }
+                }
+                tree.compress().unwrap();
+            }
+
             if let Some(path) = output {
                 tree.to_file(&path).unwrap();
             } else {
                 println!("{}", tree.to_newick().unwrap())
             }
 
-            if verbose {
-                println!("{}", n)
+            if verbose > 0 {
+                eprint!("{}", n);
+                if verbose > 1 {
+                    eprint!(": {}", removed.join(" "));
+                }
+                eprintln!()
             }
         }
     }

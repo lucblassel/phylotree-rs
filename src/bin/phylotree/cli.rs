@@ -119,7 +119,7 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Print the number of collapse/removed branches at the end
-        #[arg(short, long)]
-        verbose: bool,
+        #[arg(short, long, action=clap::ArgAction::Count)]
+        verbose: u8,
     },
 }
