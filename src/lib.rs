@@ -171,6 +171,9 @@ use rand::prelude::*;
 
 use tree::{Node, Tree};
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub mod distance;
 pub mod distr;
 pub mod tree;

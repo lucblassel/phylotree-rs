@@ -22,6 +22,13 @@ categories = [
     "parser-implementations",
 ]
 
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+python = ["pyo3"]
+default = ["python"]
+
 [dependencies]
 clap = { version = "4.1.13", features = ["derive"] }
 fixedbitset = "0.4.2"
@@ -35,6 +42,11 @@ rand_distr = "0.4.3"
 thiserror = "1.0.40"
 trait-set = "0.3.0"
 utf8-read = "0.4.0"
+
+[dependencies.pyo3]
+version = "0.19.0"
+features = ["extension-module"]
+optional = true
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }

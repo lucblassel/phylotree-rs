@@ -260,8 +260,8 @@ fn main() {
                 tree.compress().unwrap();
             }
 
-            // Check if we removed a full cherry, in which case we 
-            // Also need to remove the parent branch 
+            // Check if we removed a full cherry, in which case we
+            // Also need to remove the parent branch
             let mut pruned = false;
             while !pruned {
                 pruned = true;
