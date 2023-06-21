@@ -1,11 +1,6 @@
 use crate::tree::Node as RustNode;
 use crate::tree::Tree as RustTree;
-use pyo3::{
-    exceptions::PyValueError,
-    prelude::*,
-    types::{IntoPyDict, PyDict},
-    Python,
-};
+use pyo3::{exceptions::PyValueError, prelude::*, types::IntoPyDict, Python};
 use std::{collections::HashMap, path::Path};
 
 #[pyclass]
@@ -241,6 +236,11 @@ impl Tree {
         let dict = key_vals.into_py_dict(py);
 
         Ok(dict.into())
+    }
+
+    fn to_matrix(&self) -> Result<HashMap<(String, String), f64>, TreeError> {
+        let matrix = self.tree.distance_matrix()?;
+        Ok(matrix.to_map())
     }
 }
 

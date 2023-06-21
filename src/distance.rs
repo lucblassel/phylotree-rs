@@ -1,5 +1,5 @@
 //! Compute and manipulate phylogenetic distance matrices
-//! 
+//!
 
 use std::{
     collections::{hash_map::Iter, HashMap, HashSet},
@@ -23,13 +23,16 @@ pub enum MatrixError {
     /// We are trying to add more taxa than we allocated space in the matrix for
     #[error("You added more taxa than there is room for in the matrix.")]
     SizeExceeded,
-    /// We are trying to access a distance between two taxa that does not 
+    /// We are trying to access a distance between two taxa that does not
     /// exist in the matrix
     #[error("Missing distance between {0} and {1}.")]
     MissingDistance(String, String),
     /// There was an [`std::io::Error`] when writing the matrix to a phylip file
     #[error("Error writing file")]
     IoError(#[from] std::io::Error),
+    /// We are trying to access a taxon that does not exist
+    #[error("Missing taxon {0}")]
+    MissingTaxon(String),
 }
 
 /// Errors that can occur when parsing phylip distance matrix files.
@@ -47,7 +50,7 @@ where
     /// One of the matrix rows is empty
     #[error("Row {0} is empty.")]
     EmptyRow(usize),
-    /// There was an error when reading a distance. 
+    /// There was an error when reading a distance.
     #[error("Could not parse distance from file.")]
     DistParseError,
     /// There is a missing distance from one of the matrix rows
@@ -110,9 +113,36 @@ where
         self.matrix.get_mut(&self.get_key(id_1, id_2))
     }
 
+    /// Get the distance matrix as a HashMap containing taxa pairs as keys
+    /// and pairwise distances as values
+    pub fn to_map(&self) -> HashMap<(String, String), T> {
+        self.matrix.clone()
+    }
+
     /// Return iterator over the distance matrix
     pub fn iter(&self) -> Iter<(String, String), T> {
         self.matrix.iter()
+    }
+
+    /// Remove a distance from the matrix
+    pub fn remove(&mut self, id_1: &str, id_2: &str) -> Option<T> {
+        let key = self.get_key(id_1, id_2);
+        self.matrix.remove(&key)
+    }
+
+    /// Remove a taxon from the distance matrix
+    pub fn remove_taxon(&mut self, id: &str) -> Result<(), MatrixError> {
+        if !self.ids.remove(id) {
+            return Err(MatrixError::MissingTaxon(id.into()));
+        }
+
+        self.size -= 1;
+
+        for id_2 in self.ids.clone().iter() {
+            self.remove(id, id_2);
+        }
+
+        Ok(())
     }
 
     /// Set an entry in the distance matrix, if overwriting is permitted and the key
@@ -153,13 +183,14 @@ where
         for name1 in names.iter() {
             output += &format!("{name1}  ");
             for name2 in names.iter() {
-                let d = if name1 != name2 {
-                    *self
-                        .get(name1, name2)
-                        .ok_or::<MatrixError>(MatrixError::MissingDistance(name1.clone(), name2.clone()))?
-                } else {
-                    Zero::zero()
-                };
+                let d =
+                    if name1 != name2 {
+                        *self.get(name1, name2).ok_or::<MatrixError>(
+                            MatrixError::MissingDistance(name1.clone(), name2.clone()),
+                        )?
+                    } else {
+                        Zero::zero()
+                    };
 
                 output += &format!("  {}", d);
             }
@@ -180,9 +211,12 @@ where
                 if name1 == name2 {
                     break;
                 }
-                let d = self
-                    .get(name1, name2)
-                    .ok_or::<MatrixError>(MatrixError::MissingDistance(name1.clone(), name2.clone()))?;
+                let d =
+                    self.get(name1, name2)
+                        .ok_or::<MatrixError>(MatrixError::MissingDistance(
+                            name1.clone(),
+                            name2.clone(),
+                        ))?;
                 output += &format!("  {}", d);
             }
             output += "\n"
@@ -322,6 +356,19 @@ s5    5  10  15
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn remove_taxon() {
+        let removed = "3
+s1  
+s2    2
+s5    5  10
+";
+        let mut matrix = build_matrix();
+        matrix.remove_taxon("s3").unwrap();
+
+        assert_eq!(removed, matrix.to_phylip(false).unwrap())
     }
 
     #[test]

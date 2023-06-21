@@ -257,3 +257,11 @@ class Tree:
             return self._rs.levelorder(id)
         else:
             raise ValueError(f"{order} is not a valid traversal order")
+
+    def to_matrix(self) -> dict[tuple[str, str], float]:
+        """
+        Returns the distance matrix associated to the tree as
+        a dictionnary. The keys are taxon pairs and the values are
+        the distance.
+        """
+        return self._rs.to_matrix()
