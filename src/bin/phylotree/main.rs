@@ -18,21 +18,22 @@ use std::{
 pub mod cli;
 
 fn print_stats_header() {
-    println!("height\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
+    println!("height\tdiameter\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
 }
 
 fn print_stats(path: &Path) {
     let tree = Tree::from_file(path).unwrap();
     println!(
-        "{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}\t{:?}",
-        tree.height(),
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        tree.height().unwrap(),
+        tree.diameter().unwrap(),
         tree.size(),
         tree.get_leaves().len(),
-        tree.is_rooted(),
+        tree.is_rooted().unwrap(),
         tree.is_binary(),
-        tree.cherries(),
-        tree.colless(),
-        tree.sackin()
+        tree.cherries().unwrap(),
+        tree.colless().unwrap(),
+        tree.sackin().unwrap(),
     )
 }
 fn main() {

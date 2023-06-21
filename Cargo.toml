@@ -27,7 +27,7 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 python = ["pyo3"]
-default = ["python"]
+# default = ["python"]
 
 [dependencies]
 clap = { version = "4.1.13", features = ["derive"] }
