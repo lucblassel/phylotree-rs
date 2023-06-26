@@ -12,12 +12,15 @@ use super::{Edge, NodeId};
 pub enum NodeError {
     /// We are trying to access the an unexisting child of the node
     #[error("Node {parent} does not have child {child}.")]
-    HasNoChild { 
+    HasNoChild {
         /// Id of the parent the parent node
-        parent: NodeId, 
+        parent: NodeId,
         /// Id of the inexistant child node
-        child: NodeId 
+        child: NodeId,
     },
+    /// We are trying to access the parent of a parentless node
+    #[error("Node {0} does not have a parent")]
+    HasNoParent(NodeId),
 }
 
 #[derive(Clone)]

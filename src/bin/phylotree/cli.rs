@@ -122,4 +122,24 @@ pub enum Commands {
         #[arg(short, long, action=clap::ArgAction::Count)]
         verbose: u8,
     },
+    /// Draw an image of the phylogenetic tree
+    Draw {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// Width of the output svg
+        #[arg(short = 'W', long, default_value_t = 1000.)]
+        width: f64,
+        /// height of the output svg
+        #[arg(short = 'H', long, default_value_t = 1000.)]
+        height: f64,
+        /// Remove the white background from the svg
+        #[arg(short, long)]
+        transparent: bool,
+        /// Padding as percentage of min(width, height)
+        #[arg(short, long, default_value_t = 5.)]
+        padding: f64,
+        /// Output svg file
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
