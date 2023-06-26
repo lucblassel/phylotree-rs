@@ -20,18 +20,18 @@ use crate::distance::{DistanceMatrix, MatrixError};
 /// Errors that can occur when reading, writing and manipulating [`Tree`] structs.
 #[derive(Error, Debug)]
 pub enum TreeError {
-    /// The tree is not binary and we are trying to do something 
+    /// The tree is not binary and we are trying to do something
     /// only possible on binary trees
     #[error("This tree is not Binary.")]
     IsNotBinary,
-    /// The tree is not rooted and we are trying to do something 
+    /// The tree is not rooted and we are trying to do something
     /// only possible on rooted trees
     #[error("This tree is not rooted.")]
     IsNotRooted,
     /// The tree is empty and we are trying to do something that require at least one node
     #[error("This tree is empty.")]
     IsEmpty,
-    /// No root node was found in the tree and we are trying to do something 
+    /// No root node was found in the tree and we are trying to do something
     /// that requires a root node
     #[error("No root node found")]
     RootNotFound,
@@ -507,17 +507,21 @@ impl Tree {
     // #######################################
 
     /// Check if the tree is Binary
-    pub fn is_binary(&self) -> bool {
+    pub fn is_binary(&self) -> Result<bool, TreeError> {
         for node in self.nodes.iter() {
-            // The "root" node of an unrooted binary tree has 3 children
-            if node.parent.is_none() && node.children.len() > 3 {
-                return false;
-            }
-            if node.children.len() > 2 {
-                return false;
+            // Root of the tree
+            if node.parent.is_none() {
+                if self.is_rooted()? && node.children.len() > 2 {
+                    return Ok(false);
+                // The virtual root of unrooted trees can has up to 3 children
+                } else if !self.is_rooted()? && node.children.len() > 3 {
+                    return Ok(false);
+                }
+            } else if node.parent.is_some() && node.children.len() > 2 {
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     /// Checks if the tree is rooted (i.e. the root node exists and has exactly 2 children)
@@ -552,18 +556,22 @@ impl Tree {
     }
 
     /// Returns the height of the tree
-    /// (i.e. the number of edges from the root to the deepest tip)
+    /// (i.e. the number of edges or branch length sum from the root to the deepest tip)
     /// ```
     /// use phylotree::tree::Tree;
     ///
-    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// assert_eq!(tree.height(), Some(0.9));
+    /// let tree = Tree::from_newick("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// assert_eq!(tree.height().unwrap(), 0.9);
     ///
-    /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
-    /// assert_eq!(tree_no_brlen.height(), Some(2.));
+    /// let tree_no_brlen = Tree::from_newick("((A,B)G,(C,D)E)F;").unwrap();
+    /// assert_eq!(tree_no_brlen.height().unwrap(), 2.);
     /// ```
-    pub fn height(&self) -> Option<Edge> {
-        let root = self.get_root().unwrap();
+    pub fn height(&self) -> Result<Edge, TreeError> {
+        if !self.is_rooted()? {
+            return Err(TreeError::IsNotRooted);
+        }
+
+        let root = self.get_root()?;
 
         self.get_leaves()
             .iter()
@@ -575,6 +583,7 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map_or(Err(TreeError::IsEmpty), |v| Ok(v))
     }
 
     /// Returns the diameter of the tree
@@ -583,12 +592,12 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// assert_eq!(tree.diameter(), Some(1.1));
+    /// assert_eq!(tree.diameter(), 1.1);
     ///
     /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
-    /// assert_eq!(tree_no_brlen.diameter(), Some(3.));
+    /// assert_eq!(tree_no_brlen.diameter(), 3.);
     /// ```
-    pub fn diameter(&self) -> Option<f64> {
+    pub fn diameter(&self) -> Result<Edge, TreeError> {
         self.get_leaves()
             .iter()
             .combinations(2)
@@ -600,13 +609,35 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map_or(Err(TreeError::IsEmpty), |v| Ok(v))
+    }
+
+    /// Returns the lenght of the trees
+    /// (i.e. the sum of branch lenghts)
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// assert_eq!(tree.length().unwrap(), 1.5);
+    /// ```
+    pub fn length(&self) -> Result<Edge, TreeError> {
+        let s = self
+            .nodes
+            .iter()
+            .filter(|n| !n.is_root())
+            .map(|n| n.parent_edge)
+            .collect::<Option<Vec<_>>>();
+        match s {
+            Some(v) => Ok(v.iter().sum()),
+            None => Err(TreeError::MissingBranchLengths),
+        }
     }
 
     /// Checks if the tree is rooted and binary
     fn check_rooted_binary(&self) -> Result<(), TreeError> {
         if !self.is_rooted()? {
             Err(TreeError::IsNotRooted)
-        } else if !self.is_binary() {
+        } else if !self.is_binary()? {
             Err(TreeError::IsNotBinary)
         } else {
             Ok(())
@@ -615,7 +646,9 @@ impl Tree {
 
     /// Computes the number of cherries in a tree
     pub fn cherries(&self) -> Result<usize, TreeError> {
-        self.check_rooted_binary()?;
+        if !self.is_binary()? {
+            return Err(TreeError::IsNotBinary);
+        }
         if !self.nodes.is_empty() {
             let mut n = 0;
             for node in self.nodes.iter() {
@@ -1074,7 +1107,7 @@ impl Tree {
             root_o.insert(other.get_partition(i)?);
         }
         let same_root = root_s == root_o;
-        if self.is_rooted()? && rf != 0.0 && !same_root {
+        if self.is_rooted()? && other.is_rooted()? && rf != 0.0 && !same_root {
             rf += 2.0;
         }
 
@@ -1769,6 +1802,30 @@ impl Tree {
     }
 }
 
+/// Methods to infer [Tree] ojects from [DistanceMatrix] objects
+///
+/// ----
+/// ----
+// impl Tree {
+// /// #########################
+// /// # INFER TREES FROM DATA #
+// /// #########################
+//
+// fn neighbour_joining(matrix: DistanceMatrix<f64>) -> Self {
+//     let mut tree = Tree::new();
+//     let mut matrix = matrix;
+//     let mut q = DistanceMatrix::new(matrix.size);
+//
+//     for _ in 0..(matrix.size - 3) {
+//         for pair in matrix.ids.iter().enumerate().combinations(2) {
+//
+//         }
+//     }
+//
+//     tree
+// }
+// }
+
 impl Default for Tree {
     fn default() -> Self {
         Self::new()
@@ -1847,27 +1904,34 @@ mod tests {
         tree.add_child(Node::new_named("0L"), 0, None).unwrap(); //1
         tree.add_child(Node::new_named("0R"), 0, None).unwrap(); //2
 
-        assert!(tree.is_binary());
+        assert!(tree.is_binary().unwrap());
 
         tree.add_child(Node::new_named("1L"), 1, None).unwrap(); //3
         tree.add_child(Node::new_named("1R"), 1, None).unwrap(); //4
 
-        assert!(tree.is_binary());
+        assert!(tree.is_binary().unwrap());
 
         tree.add_child(Node::new_named("3L"), 3, None).unwrap(); //5
         tree.add_child(Node::new_named("3R"), 3, None).unwrap(); //6
-        assert!(tree.is_binary());
+        assert!(tree.is_binary().unwrap());
 
         tree.add_child(Node::new_named("3?"), 3, None).unwrap(); //7
-        assert!(!tree.is_binary());
+        assert!(!tree.is_binary().unwrap());
     }
 
     #[test]
     fn binary_from_newick() {
-        let test_cases = vec![("(A,B,(C,D)E)F;", false), ("((D,E)B,(F,G)C)A;", true)];
+        let test_cases = vec![
+            ("((A,B,C)D,E)F;", false),   // Rooted non binary
+            ("(A,B,(C,D)E)F;", true),    // Unrooted binary
+            ("((D,E)B,(F,G)C)A;", true), // rooted binary
+        ];
 
         for (newick, is_binary) in test_cases {
-            assert_eq!(Tree::from_newick(newick).unwrap().is_binary(), is_binary)
+            assert_eq!(
+                Tree::from_newick(newick).unwrap().is_binary().unwrap(),
+                is_binary
+            )
         }
     }
 
@@ -2033,11 +2097,11 @@ mod tests {
     fn test_height() {
         // heights computed with ete3
         let test_cases = vec![
-            ("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", 0.9),
-            ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;", 1.0),
-            ("(A,B,(C,D)E)F;", 2.0),
+            ("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;", 0.9),
+            ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1,G:0.1)F;", 1.0),
+            ("((A,B)G,(C,D)E)F;", 2.0),
             (
-                "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip0,Tip1);",
+                "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1);",
                 8.0,
             ),
         ];
@@ -2161,9 +2225,9 @@ mod tests {
     #[test]
     fn test_sackin_unrooted() {
         let test_cases = vec![
-            "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
-            "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
-            "(A,B,(C,D)E)F;",
+            "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5);",
+            "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1);",
+            "(A,B,(C,D)E);",
             "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip0,Tip1);",
         ];
 
@@ -2200,18 +2264,6 @@ mod tests {
                 assert_eq!(n1, n2)
             }
         }
-    }
-
-    #[test]
-    fn test_mutability() {
-        let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-        // First computation
-        assert_eq!(tree.diameter().unwrap(), 1.1);
-        assert_eq!(tree.height().unwrap(), 0.9);
-        // Cached value
-        eprintln!("{:?}", tree);
-        assert_eq!(tree.diameter().unwrap(), 1.1);
-        assert_eq!(tree.height().unwrap(), 0.9);
     }
 
     #[test]

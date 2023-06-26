@@ -169,7 +169,7 @@ use std::collections::VecDeque;
 use distr::{Distr, Sampler};
 use rand::prelude::*;
 
-use tree::{Node, Tree};
+use tree::{Node, Tree, TreeError};
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -178,11 +178,15 @@ pub mod distance;
 pub mod distr;
 pub mod tree;
 
-type Error = Box<dyn std::error::Error>;
-type Result<T> = std::result::Result<T, Error>;
+// type Error = Box<dyn std::error::Error>;
+// type Result<T> = std::result::Result<T, Error>;
 
 /// Genereates a random binary tree of a given size. Branch lengths are uniformly distributed
-pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Result<Tree> {
+pub fn generate_tree(
+    n_leaves: usize,
+    brlens: bool,
+    sampler_type: Distr,
+) -> Result<Tree, TreeError> {
     let mut tree = Tree::new();
     // Add root
     tree.add(Node::default());
@@ -224,8 +228,10 @@ pub fn generate_tree(n_leaves: usize, brlens: bool, sampler_type: Distr) -> Resu
 
 /// Generates a caterpillar tree by adding children to the last node addesd to the tree
 /// until we reach the desired numebr of leaves. Branch lengths are uniformly distributed
-pub fn generate_caterpillar(n_leaves: usize, brlens: bool) -> Result<Tree> {
+pub fn generate_caterpillar(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
     let mut tree = Tree::new();
+    tree.add(Node::default());
+
     let mut rng = thread_rng();
 
     let mut parent = 0;
