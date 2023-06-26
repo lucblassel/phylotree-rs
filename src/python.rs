@@ -1,6 +1,6 @@
 use crate::tree::Node as RustNode;
 use crate::tree::Tree as RustTree;
-use pyo3::{exceptions::PyValueError, prelude::*, types::IntoPyDict, Python};
+use pyo3::{exceptions::PyValueError, prelude::*, types::IntoPyDict, wrap_pyfunction, Python};
 use std::{collections::HashMap, path::Path};
 
 #[pyclass]
@@ -57,9 +57,9 @@ impl From<crate::tree::NodeError> for NodeError {
 impl Tree {
     #[new]
     fn new() -> Self {
-        Self {
-            tree: RustTree::new(),
-        }
+        let mut tree = RustTree::new();
+        tree.add(RustNode::new());
+        Self { tree }
     }
 
     #[staticmethod]
@@ -87,16 +87,23 @@ impl Tree {
         Ok(())
     }
 
-    fn is_binary(&self) -> bool {
-        self.tree.is_binary()
+    fn is_binary(&self) -> Result<bool, TreeError> {
+        let is_binary = self.tree.is_binary()?;
+        Ok(is_binary)
     }
 
     fn is_rooted(&self) -> bool {
         self.tree.is_rooted().unwrap_or(false)
     }
 
-    fn height(&self) -> Option<f64> {
-        self.tree.height()
+    fn height(&self) -> Result<f64, TreeError> {
+        let height = self.tree.height()?;
+        Ok(height)
+    }
+
+    fn length(&self) -> Result<f64, TreeError> {
+        let length = self.tree.length()?;
+        Ok(length)
     }
 
     fn n_tips(&self) -> usize {
@@ -107,8 +114,9 @@ impl Tree {
         self.tree.size()
     }
 
-    fn diameter(&self) -> Option<f64> {
-        self.tree.diameter()
+    fn diameter(&self) -> Result<f64, TreeError> {
+        let diameter = self.tree.diameter()?;
+        Ok(diameter)
     }
 
     fn n_cherries(&self) -> Result<usize, TreeError> {
@@ -242,6 +250,22 @@ impl Tree {
         let matrix = self.tree.distance_matrix()?;
         Ok(matrix.to_map())
     }
+
+    fn add_child(
+        &mut self,
+        parent: usize,
+        child_name: Option<&str>,
+        edge: Option<f64>,
+    ) -> Result<usize, TreeError> {
+        let node = match child_name {
+            Some(name) => RustNode::new_named(name),
+            None => RustNode::new(),
+        };
+
+        let id = self.tree.add_child(node, parent, edge)?;
+
+        Ok(id)
+    }
 }
 
 #[pymethods]
@@ -257,9 +281,37 @@ impl Node {
     }
 }
 
+#[pyfunction]
+fn uniform_tree(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
+    let tree = crate::generate_tree(n_leaves, brlens, crate::Distr::Uniform)?;
+    Ok(Tree { tree })
+}
+#[pyfunction]
+fn gamma_tree(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
+    let tree = crate::generate_tree(n_leaves, brlens, crate::Distr::Gamma)?;
+    Ok(Tree { tree })
+}
+#[pyfunction]
+fn exponential_tree(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
+    let tree = crate::generate_tree(n_leaves, brlens, crate::Distr::Exponential)?;
+    Ok(Tree { tree })
+}
+
+#[pyfunction]
+fn caterpillar(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
+    let tree = crate::generate_caterpillar(n_leaves, brlens)?;
+    Ok(Tree { tree })
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn pytree(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Tree>()?;
+
+    m.add_wrapped(wrap_pyfunction!(uniform_tree))?;
+    m.add_wrapped(wrap_pyfunction!(gamma_tree))?;
+    m.add_wrapped(wrap_pyfunction!(exponential_tree))?;
+    m.add_wrapped(wrap_pyfunction!(caterpillar))?;
+
     Ok(())
 }
