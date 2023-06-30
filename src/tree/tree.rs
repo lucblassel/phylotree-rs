@@ -1,3 +1,5 @@
+use accurate::sum::NaiveSum;
+use accurate::traits::*;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
@@ -65,6 +67,9 @@ pub enum TreeError {
     /// There was a [`MatrixError`] when extracting distance matrix
     #[error("Could not convert to matrix")]
     MatrixError(#[from] MatrixError),
+    /// General error
+    #[error("Encountered an error: {0}")]
+    GeneralError(&'static str),
 }
 
 /// Errors that can occur when parsing newick files.
@@ -583,7 +588,7 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or(Err(TreeError::IsEmpty), |v| Ok(v))
+            .map_or(Err(TreeError::IsEmpty), Ok)
     }
 
     /// Returns the diameter of the tree
@@ -592,10 +597,10 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// assert_eq!(tree.diameter(), 1.1);
+    /// assert_eq!(tree.diameter().unwrap(), 1.1);
     ///
     /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
-    /// assert_eq!(tree_no_brlen.diameter(), 3.);
+    /// assert_eq!(tree_no_brlen.diameter().unwrap(), 3.);
     /// ```
     pub fn diameter(&self) -> Result<Edge, TreeError> {
         self.get_leaves()
@@ -609,7 +614,7 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or(Err(TreeError::IsEmpty), |v| Ok(v))
+            .map_or(Err(TreeError::IsEmpty), Ok)
     }
 
     /// Returns the lenght of the trees
@@ -1311,8 +1316,12 @@ impl Tree {
     /// ```
     pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<Edge>, TreeError> {
         let size = self.nodes.len();
-        let mut matrix = DistanceMatrix::new(self.n_leaves());
+        let mut matrix = DistanceMatrix::new_with_size(self.n_leaves());
         let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
+
+        self.init_leaf_index()?;
+        let taxa = self.leaf_index.borrow().as_ref().unwrap().clone();
+        matrix.set_taxa(taxa)?;
 
         for tip in self.get_leaves().iter() {
             self.distance_matrix_recursive_impl(tip, None, &mut cache[*tip], 0.0)?
@@ -1324,7 +1333,7 @@ impl Tree {
             let name1 = self.get(i1)?.name.clone().unwrap();
             let name2 = self.get(i2)?.name.clone().unwrap();
 
-            matrix.set(&name1, &name2, d, false)?;
+            matrix.set(&name1, &name2, d)?;
         }
 
         Ok(matrix)
@@ -1348,7 +1357,10 @@ impl Tree {
     /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
     /// ```
     pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>, TreeError> {
-        let mut matrix = DistanceMatrix::new(self.n_leaves());
+        let mut matrix = DistanceMatrix::new_with_size(self.n_leaves());
+        self.init_leaf_index()?;
+        let taxa = self.leaf_index.borrow().as_ref().unwrap().clone();
+        matrix.set_taxa(taxa)?;
 
         for pair in self.get_leaves().iter().combinations(2) {
             let (i1, i2) = (pair[0], pair[1]);
@@ -1356,7 +1368,7 @@ impl Tree {
                 let name1 = self.get(i1)?.name.clone().unwrap();
                 let name2 = self.get(i2)?.name.clone().unwrap();
 
-                matrix.set(&name1, &name2, d, false)?;
+                matrix.set(&name1, &name2, d)?;
             } else {
                 return Err(TreeError::MissingBranchLengths);
             }
@@ -1799,6 +1811,129 @@ impl Tree {
         let tree = builder.build();
         print_tree(&tree)?;
         Ok(())
+    }
+}
+
+impl Tree {
+    fn get_pair_index(
+        &self,
+        leaf1: NodeId,
+        leaf2: NodeId,
+        leaf_order: &[NodeId],
+    ) -> Result<usize, TreeError> {
+        if leaf1 == leaf2 {
+            return Err(TreeError::GeneralError("Leaves are the same"));
+        }
+
+        let mut i = leaf_order
+            .iter()
+            .position(|&v| v == leaf1)
+            .ok_or(TreeError::GeneralError("Could not find leaf in leaf_order"))?;
+
+        let mut j = leaf_order
+            .iter()
+            .position(|&v| v == leaf2)
+            .ok_or(TreeError::GeneralError("Could not find leaf in leaf_order"))?;
+
+        let n = self.n_leaves();
+
+        if j < i {
+            std::mem::swap(&mut i, &mut j);
+        }
+
+        let idx = (2 * n - 3 - i) * i / 2 + j - 1;
+
+        Ok(idx)
+    }
+
+    /// Compute distance matrix in an efficient way (**heavily** inspired by PhyloDM)
+    pub fn distance_matrix_new(&mut self) -> Result<DistanceMatrix<f64>, TreeError> {
+        let mut leaf_order = self.get_leaves();
+        leaf_order.sort_by(|a, b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
+
+        let n = self.n_leaves();
+        let mut pairwise_vec = vec![NaiveSum::zero(); n * n / 2];
+
+        for current_node in self.levelorder(&self.get_root()?)?.iter().rev() {
+            let mut node_cache = HashMap::new();
+
+            let parent = self.get(current_node)?;
+            if parent.is_tip() {
+                node_cache.insert(*current_node, 0.);
+            }
+
+            // Compute distances from current node to descendant leaves
+            for child in parent.children.iter() {
+                let child = self.get(child)?;
+
+                // Use topological distance if no edge length
+                let child_len = child.parent_edge.unwrap_or(1.0);
+
+                for (leaf, distance) in child
+                    .subtree_distances
+                    .as_ref()
+                    .ok_or(TreeError::MissingBranchLengths)?
+                    .iter()
+                {
+                    let len = child_len + distance;
+                    node_cache.insert(*leaf, len);
+                }
+            }
+
+            // Compute distances between leaves
+            for subtree_roots in parent.children.iter().combinations(2) {
+                let subtree1 = self.get(subtree_roots[0])?;
+                let subtree2 = self.get(subtree_roots[1])?;
+
+                for (leaf1, _) in subtree1
+                    .subtree_distances
+                    .as_ref()
+                    .ok_or(TreeError::MissingBranchLengths)?
+                    .iter()
+                {
+                    for (leaf2, _) in subtree2
+                        .subtree_distances
+                        .as_ref()
+                        .ok_or(TreeError::MissingBranchLengths)?
+                        .iter()
+                    {
+                        let distance1 = node_cache.get(leaf1).unwrap();
+                        let distance2 = node_cache.get(leaf2).unwrap();
+
+                        let vec_idx = self.get_pair_index(*leaf1, *leaf2, &leaf_order)?;
+                        pairwise_vec[vec_idx] += distance1 + distance2;
+                    }
+                }
+            }
+
+            // Save distance between current node and descendant leaves
+            (self.get_mut(current_node)?).subtree_distances = Some(node_cache);
+        }
+
+        let matrix = DistanceMatrix::from_precomputed(
+            leaf_order
+                .iter()
+                .map(|i| self.get(i).unwrap().clone().name.unwrap())
+                .collect_vec(),
+            pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
+        );
+
+        // eprintln!();
+        // for leaf1 in leaf_order.iter() {
+        //     eprint!("{} ", self.get(leaf1)?.name.clone().unwrap());
+        //     for leaf2 in leaf_order.iter() {
+        //         let dist = if leaf1 == leaf2 {
+        //             0.0
+        //         } else {
+        //             let idx = self.get_pair_index(*leaf1, *leaf2, &leaf_order)?;
+        //             pairwise_vec[idx].sum()
+        //         };
+        //         eprint!("{dist} ");
+        //     }
+        //     eprintln!();
+        // }
+
+        Ok(matrix)
     }
 }
 

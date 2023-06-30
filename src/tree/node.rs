@@ -21,6 +21,14 @@ pub enum NodeError {
     /// We are trying to access the parent of a parentless node
     #[error("Node {0} does not have a parent")]
     HasNoParent(NodeId),
+    /// We are trying to read an edge length that is missing
+    #[error("Missing edge length between nodes {parent} and {child}")]
+    MissingEdgeLength {
+        /// Id of the Parent node
+        parent: NodeId,
+        /// Id of the child node
+        child: NodeId,
+    },
 }
 
 #[derive(Clone)]
@@ -40,6 +48,8 @@ pub struct Node {
     pub comment: Option<String>,
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
+    /// Distance to descendants of this node
+    pub(crate) subtree_distances: Option<HashMap<NodeId, Edge>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not
@@ -56,6 +66,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
+            subtree_distances: None,
             comment: None,
             depth: 0,
             deleted: false,
@@ -71,6 +82,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
+            subtree_distances: None,
             comment: None,
             depth: 0,
             deleted: false,
