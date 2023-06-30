@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use phylotree::distr::Distr;
+use phylotree::TreeShape;
 
 /// A simple command line tool to manipulate phylogenetic trees
 #[derive(Parser, Debug)]
@@ -31,6 +32,10 @@ pub enum Commands {
         /// Number of trees to generate
         #[arg(short = 'n', long)]
         trees: Option<usize>,
+
+        /// Shape of the tree
+        #[arg(value_enum, short, long, default_value_t=TreeShape::Yule)]
+        shape: TreeShape,
 
         /// Distribution of branch lengths
         #[arg(value_enum, short, long, default_value_t=Distr::Uniform)]

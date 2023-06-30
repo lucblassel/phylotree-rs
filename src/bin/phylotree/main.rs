@@ -5,11 +5,13 @@
 use clap::Parser;
 use itertools::Itertools;
 use phylotree::{
-    generate_tree,
+    distr::Distr,
+    generate_caterpillar, generate_tree, generate_yule,
     tree::{
         draw::{self, Layout, Node},
-        Tree,
+        Tree, TreeError,
     },
+    TreeShape,
 };
 use serde::Serialize;
 use std::{
@@ -57,8 +59,21 @@ fn main() {
             branch_lengths,
             output,
             trees,
+            shape,
             distribution,
         } => {
+            let generate = |tips: usize,
+                            brlens: bool,
+                            distr: Distr,
+                            shape: TreeShape|
+             -> Result<Tree, TreeError> {
+                match shape {
+                    TreeShape::Yule => generate_yule(tips, brlens, distr),
+                    TreeShape::Ete3 => generate_tree(tips, brlens, distr),
+                    TreeShape::Caterpillar => generate_caterpillar(tips, brlens, distr),
+                }
+            };
+
             if let Some(ntrees) = trees {
                 // Create output directory if it's missing
                 assert!(
@@ -70,11 +85,11 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate_tree(tips, branch_lengths, distribution).unwrap();
+                    let random = generate(tips, branch_lengths, distribution, shape).unwrap();
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate_tree(tips, branch_lengths, distribution).unwrap();
+                let random = generate(tips, branch_lengths, distribution, shape).unwrap();
                 if let Some(output) = output {
                     random.to_file(&output).unwrap()
                 } else {
