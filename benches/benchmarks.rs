@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main};
 
 use phylotree::{generate_tree, tree::Tree};
 
-fn distance_naive(tree: &Tree) {
+fn distance_naive(tree: &mut Tree) {
     let _matrix = tree.distance_matrix().unwrap();
 }
 
@@ -13,13 +13,14 @@ fn distance_recurs(tree: &Tree) {
 }
 
 fn from_elem(c: &mut Criterion) {
-    let tree: Tree = generate_tree(100, true, phylotree::distr::Distr::Uniform).unwrap();
+    let mut tree: Tree = generate_tree(100, true, phylotree::distr::Distr::Uniform).unwrap();
 
     c.bench_with_input(
         BenchmarkId::new("input_uncached", tree.size()),
         &tree,
         |b, s| {
-            b.iter(|| distance_naive(s));
+            let mut tree = s.clone();
+            b.iter(|| distance_naive(&mut tree));
         },
     );
 
