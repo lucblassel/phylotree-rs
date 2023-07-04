@@ -1814,39 +1814,44 @@ impl Tree {
     }
 }
 
-impl Tree {
-    fn get_pair_index(
-        &self,
-        leaf1: NodeId,
-        leaf2: NodeId,
-        leaf_order: &[NodeId],
-    ) -> Result<usize, TreeError> {
-        if leaf1 == leaf2 {
-            return Err(TreeError::GeneralError("Leaves are the same"));
-        }
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct IdentityHasher(usize);
 
-        let mut i = leaf_order
-            .iter()
-            .position(|&v| v == leaf1)
-            .ok_or(TreeError::GeneralError("Could not find leaf in leaf_order"))?;
-
-        let mut j = leaf_order
-            .iter()
-            .position(|&v| v == leaf2)
-            .ok_or(TreeError::GeneralError("Could not find leaf in leaf_order"))?;
-
-        let n = self.n_leaves();
-
-        if j < i {
-            std::mem::swap(&mut i, &mut j);
-        }
-
-        let idx = (2 * n - 3 - i) * i / 2 + j - 1;
-
-        Ok(idx)
+impl core::hash::Hasher for IdentityHasher {
+    fn finish(&self) -> u64 {
+        self.0 as u64
     }
 
+    fn write(&mut self, _bytes: &[u8]) {
+        unimplemented!("IdentityHasher only supports usize keys")
+    }
+
+    fn write_usize(&mut self, i: usize) {
+        self.0 = i;
+    }
+}
+
+type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
+
+impl Tree {
     /// Compute distance matrix in an efficient way (**heavily** inspired by PhyloDM)
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let mut tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
+    /// let matrix = tree.distance_matrix_new().unwrap();
+    ///
+    /// let phylip="\
+    /// 4
+    /// T0    0  1.6  0.9  1.6
+    /// T1    1.6  0  1.5  0.4
+    /// T2    0.9  1.5  0  1.5
+    /// T3    1.6  0.4  1.5  0
+    /// ";
+    ///
+    /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
+    /// ```
+
     pub fn distance_matrix_new(&mut self) -> Result<DistanceMatrix<f64>, TreeError> {
         let mut leaf_order = self.get_leaves();
         leaf_order.sort_by(|a, b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
@@ -1854,8 +1859,20 @@ impl Tree {
         let n = self.n_leaves();
         let mut pairwise_vec = vec![NaiveSum::zero(); n * n / 2];
 
+        let leaf_idx_to_leaf_order = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| leaf_order.iter().position(|&v| v == idx))
+            .collect_vec();
+
+        // Converts the node index of a leaf to its index in the leaf_order array
+        let get_leaf_index = |leaf: usize| -> Result<usize, TreeError> {
+            leaf_idx_to_leaf_order[leaf].ok_or(TreeError::NodeNotFound(leaf))
+        };
+
         for current_node in self.levelorder(&self.get_root()?)?.iter().rev() {
-            let mut node_cache = HashMap::new();
+            let mut node_cache: HashMap<_, _, BuildIdentityHasher> = HashMap::default();
 
             let parent = self.get(current_node)?;
             if parent.is_tip() {
@@ -1900,7 +1917,15 @@ impl Tree {
                         let distance1 = node_cache.get(leaf1).unwrap();
                         let distance2 = node_cache.get(leaf2).unwrap();
 
-                        let vec_idx = self.get_pair_index(*leaf1, *leaf2, &leaf_order)?;
+                        let mut i = get_leaf_index(*leaf1)?;
+                        let mut j = get_leaf_index(*leaf2)?;
+                        if j < i {
+                            std::mem::swap(&mut i, &mut j);
+                        }
+                        // Compute the index of the pair in the vector representing
+                        // the upper triangular matrix
+                        let vec_idx = ((2 * n - 3 - i) * i) / 2 + j - 1;
+
                         pairwise_vec[vec_idx] += distance1 + distance2;
                     }
                 }
@@ -1917,21 +1942,6 @@ impl Tree {
                 .collect_vec(),
             pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
         );
-
-        // eprintln!();
-        // for leaf1 in leaf_order.iter() {
-        //     eprint!("{} ", self.get(leaf1)?.name.clone().unwrap());
-        //     for leaf2 in leaf_order.iter() {
-        //         let dist = if leaf1 == leaf2 {
-        //             0.0
-        //         } else {
-        //             let idx = self.get_pair_index(*leaf1, *leaf2, &leaf_order)?;
-        //             pairwise_vec[idx].sum()
-        //         };
-        //         eprint!("{dist} ");
-        //     }
-        //     eprintln!();
-        // }
 
         Ok(matrix)
     }

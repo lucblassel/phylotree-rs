@@ -63,3 +63,9 @@ harness = false
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "./latex_doc_header.html"]
+
+# This is for profiling purposes
+# [profile.release]
+# debug = 1
+# [rust]
+# debuginfo-level = 1

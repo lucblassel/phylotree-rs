@@ -23,13 +23,11 @@ pub enum NodeError {
     HasNoParent(NodeId),
     /// We are trying to read an edge length that is missing
     #[error("Missing edge length between nodes {parent} and {child}")]
-    MissingEdgeLength {
-        /// Id of the Parent node
-        parent: NodeId,
-        /// Id of the child node
-        child: NodeId,
-    },
+    MissingEdgeLength { parent: NodeId, child: NodeId },
 }
+
+use crate::tree::tree::IdentityHasher;
+type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
 #[derive(Clone)]
 /// A node of the Tree
@@ -49,7 +47,7 @@ pub struct Node {
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
     /// Distance to descendants of this node
-    pub(crate) subtree_distances: Option<HashMap<NodeId, Edge>>,
+    pub(crate) subtree_distances: Option<HashMap<NodeId, Edge, BuildIdentityHasher>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not

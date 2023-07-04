@@ -165,11 +165,15 @@ where
             .position(|v| v == taxon2)
             .ok_or(MatrixError::MissingTaxon(taxon2.to_string()))?;
 
-        if j < i {
-            std::mem::swap(&mut i, &mut j);
+        Ok(self.get_vec_index(&mut i, &mut j))
+    }
+
+    fn get_vec_index(&self, i: &mut usize, j: &mut usize) -> usize {
+        if *j < *i {
+            std::mem::swap(i, j);
         }
 
-        Ok((2 * self.size - 3 - i) * i / 2 + j - 1)
+        ((2 * self.size - 3 - *i) * (*i)) / 2 + (*j) - 1
     }
 
     /// Get the distance between two sequences
@@ -208,59 +212,33 @@ where
         ))
     }
 
-    /// Returns a string representing the distance matrix in square format
-    fn to_phylip_square(&self) -> Result<String, MatrixError> {
-        let names: Vec<_> = self.taxa.iter().cloned().sorted().collect();
-        let mut output = format!("{}\n", self.size);
-
-        for name1 in names.iter() {
-            output += &format!("{name1}  ");
-            for name2 in names.iter() {
-                let d = if name1 != name2 {
-                    *self
-                        .get(name1, name2)
-                        .map_err(|_| MatrixError::MissingDistance(name1.clone(), name2.clone()))?
-                } else {
-                    Zero::zero()
-                };
-
-                output += &format!("  {}", d);
-            }
-            output += "\n"
-        }
-
-        Ok(output)
-    }
-
-    /// Returns a string representing the distance matrix in triangle format
-    fn to_phylip_triangle(&self) -> Result<String, MatrixError> {
-        let names: Vec<_> = self.taxa.iter().cloned().sorted().collect();
-        let mut output = format!("{}\n", self.size);
-
-        for name1 in names.iter() {
-            output += &format!("{name1}  ");
-            for name2 in names.iter() {
-                if name1 == name2 {
-                    break;
-                }
-                let d = self
-                    .get(name1, name2)
-                    .map_err(|_| MatrixError::MissingDistance(name1.clone(), name2.clone()))?;
-                output += &format!("  {}", d);
-            }
-            output += "\n"
-        }
-
-        Ok(output)
-    }
-
-    /// Outputs the matrix as a phylip formatted string
+    /// Outputs a matrix as a phylip formatted string
     pub fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
-        if square {
-            self.to_phylip_square()
-        } else {
-            self.to_phylip_triangle()
+        let mut output = format!("{}\n", self.size);
+
+        for (i, name1) in self.taxa.iter().enumerate() {
+            output += &format!("{name1}  ");
+            for (j, _) in self.taxa.iter().enumerate() {
+                if i == j {
+                    if square {
+                        output += &format!("  {}", 0.);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                let mut i = i;
+                let mut j = j;
+                let idx = self.get_vec_index(&mut i, &mut j);
+
+                let d = self.matrix[idx];
+
+                output += &format!("  {d}");
+            }
+            output += "\n";
         }
+
+        Ok(output)
     }
 
     /// Writes the matrix to a phylip file
@@ -367,8 +345,16 @@ s5    5  10  15
     #[test]
     fn test_to_phylip() {
         let matrix = build_matrix();
+        // let matrix = build_matrix_new();
 
-        assert_eq!(SQUARE, matrix.to_phylip(true).unwrap());
+        eprintln!("{:?} ({:?})", matrix.matrix, matrix.taxa);
+
+        assert_eq!(
+            SQUARE,
+            matrix.to_phylip(true).unwrap(),
+            "True:\n{SQUARE}\nPred:\n{}",
+            matrix.to_phylip(true).unwrap(),
+        );
         assert_eq!(TRIANGLE, matrix.to_phylip(false).unwrap());
     }
 
