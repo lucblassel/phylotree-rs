@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fmt::{Debug, Display},
 };
@@ -47,7 +48,7 @@ pub struct Node {
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
     /// Distance to descendants of this node
-    pub(crate) subtree_distances: Option<HashMap<NodeId, Edge, BuildIdentityHasher>>,
+    pub(crate) subtree_distances: RefCell<Option<HashMap<NodeId, Edge, BuildIdentityHasher>>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not
@@ -64,7 +65,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
-            subtree_distances: None,
+            subtree_distances: RefCell::new(None),
             comment: None,
             depth: 0,
             deleted: false,
@@ -80,7 +81,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
-            subtree_distances: None,
+            subtree_distances: RefCell::new(None),
             comment: None,
             depth: 0,
             deleted: false,

@@ -130,7 +130,7 @@ fn main() {
             square,
             output,
         } => {
-            let mut tree = Tree::from_file(&tree).unwrap();
+            let tree = Tree::from_file(&tree).unwrap();
             let dm = tree.distance_matrix().unwrap();
             if let Some(output) = output {
                 dm.to_file(&output, square).unwrap();
