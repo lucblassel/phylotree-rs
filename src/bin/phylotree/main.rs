@@ -4,7 +4,16 @@
 
 use clap::Parser;
 use itertools::Itertools;
-use phylotree::{generate_tree, tree::Tree};
+use phylotree::{
+    distr::Distr,
+    generate_caterpillar, generate_tree, generate_yule,
+    tree::{
+        draw::{self, Layout, Node},
+        Tree, TreeError,
+    },
+    TreeShape,
+};
+use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -12,6 +21,7 @@ use std::{
     io::{BufWriter, Write},
     path::Path,
 };
+use tinytemplate::TinyTemplate;
 
 /// contains the struct representing the command line arguments
 /// parsed by [`clap`] and used to execute this binary
@@ -23,17 +33,23 @@ fn print_stats_header() {
 
 fn print_stats(path: &Path) {
     let tree = Tree::from_file(path).unwrap();
+
     println!(
         "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        tree.height().unwrap(),
-        tree.diameter().unwrap(),
+        tree.height()
+            .map_or_else(|_| "-".to_string(), |v| format!("{}", v)),
+        tree.diameter().unwrap_or(0.0),
         tree.size(),
-        tree.get_leaves().len(),
+        tree.n_leaves(),
         tree.is_rooted().unwrap(),
-        tree.is_binary(),
+        tree.is_binary().unwrap(),
         tree.cherries().unwrap(),
-        tree.colless().unwrap(),
-        tree.sackin().unwrap(),
+        tree.colless()
+            .map(|v| format!("{}", v))
+            .unwrap_or("-".to_string()),
+        tree.sackin()
+            .map(|v| format!("{}", v))
+            .unwrap_or("-".to_string()),
     )
 }
 fn main() {
@@ -43,8 +59,21 @@ fn main() {
             branch_lengths,
             output,
             trees,
+            shape,
             distribution,
         } => {
+            let generate = |tips: usize,
+                            brlens: bool,
+                            distr: Distr,
+                            shape: TreeShape|
+             -> Result<Tree, TreeError> {
+                match shape {
+                    TreeShape::Yule => generate_yule(tips, brlens, distr),
+                    TreeShape::Ete3 => generate_tree(tips, brlens, distr),
+                    TreeShape::Caterpillar => generate_caterpillar(tips, brlens, distr),
+                }
+            };
+
             if let Some(ntrees) = trees {
                 // Create output directory if it's missing
                 assert!(
@@ -56,11 +85,11 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate_tree(tips, branch_lengths, distribution).unwrap();
+                    let random = generate(tips, branch_lengths, distribution, shape).unwrap();
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate_tree(tips, branch_lengths, distribution).unwrap();
+                let random = generate(tips, branch_lengths, distribution, shape).unwrap();
                 if let Some(output) = output {
                     random.to_file(&output).unwrap()
                 } else {
@@ -291,5 +320,81 @@ fn main() {
                 eprintln!()
             }
         }
+        cli::Commands::Draw {
+            tree,
+            width,
+            height,
+            transparent,
+            padding,
+            output,
+        } => {
+            let tree = Tree::from_file(&tree).unwrap();
+            let mut layout = draw::radial_layout(&tree).unwrap();
+
+            let mut min = f64::INFINITY;
+            let mut max = f64::NEG_INFINITY;
+            for Node { x, y, label: _ } in layout.nodes.iter() {
+                let i = x.min(*y);
+                let a = x.max(*y);
+
+                min = min.min(i);
+                max = max.max(a);
+            }
+
+            let scale = width.min(height) / (max - min);
+            layout.rescale(scale);
+            let padding_scale = (100. - padding) / 100.;
+
+            let ctx = Context {
+                xmin: -(width / 2.0) as i32,
+                ymin: -(height / 2.0) as i32,
+                width: width as i32,
+                height: height as i32,
+                scale: padding_scale,
+                transparent,
+                layout,
+            };
+
+            let mut writer = BufWriter::new(match output {
+                Some(path) => Box::new(File::create(&path).unwrap()) as Box<dyn Write>,
+                None => Box::new(io::stdout()) as Box<dyn Write>,
+            });
+
+            let mut tt = TinyTemplate::new();
+            tt.add_template("svg", SVG).unwrap();
+            writer
+                .write(tt.render("svg", &ctx).unwrap().as_bytes())
+                .unwrap();
+        }
     }
 }
+
+#[derive(Serialize)]
+struct Context {
+    xmin: i32,
+    ymin: i32,
+    width: i32,
+    height: i32,
+    scale: f64,
+    transparent: bool,
+    layout: Layout,
+}
+
+static SVG : &'static str =  "\
+<?xml version=\"1.0\" standalone=\"no\"?>
+<svg viewBox=\"{xmin} {ymin} {width} {height}\" width='100%' height='100%' xmlns='http://www.w3.org/2000/svg'>
+    {{ if not transparent }}
+    <rect fill=\"white\" x=\"{xmin}\" y=\"{ymin}\" width=\"100%\" height=\"100%\"/>
+    {{ endif }}
+    <g transform=\"scale({scale})\">
+    {{ for branch in layout.branches }}
+        <path stroke=\"black\" stroke-width=\"1\" fill=\"none\" d=\"M {branch.xstart} {branch.ystart} L {branch.xend} {branch.yend}\"/>
+    {{ endfor }}
+    {{ for node in layout.nodes }}
+        {{ if node.label }}
+        <text x=\"{node.x}\" y=\"{node.y}\" class=\"small\" font-size=\"2px\">{node.label}</text>
+        {{ endif }}
+    {{ endfor }}
+    </g>
+</svg>
+";

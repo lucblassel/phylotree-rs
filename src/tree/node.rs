@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fmt::{Debug, Display},
 };
@@ -12,13 +13,22 @@ use super::{Edge, NodeId};
 pub enum NodeError {
     /// We are trying to access the an unexisting child of the node
     #[error("Node {parent} does not have child {child}.")]
-    HasNoChild { 
+    HasNoChild {
         /// Id of the parent the parent node
-        parent: NodeId, 
+        parent: NodeId,
         /// Id of the inexistant child node
-        child: NodeId 
+        child: NodeId,
     },
+    /// We are trying to access the parent of a parentless node
+    #[error("Node {0} does not have a parent")]
+    HasNoParent(NodeId),
+    /// We are trying to read an edge length that is missing
+    #[error("Missing edge length between nodes {parent} and {child}")]
+    MissingEdgeLength { parent: NodeId, child: NodeId },
 }
+
+use crate::tree::tree::IdentityHasher;
+type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
 #[derive(Clone)]
 /// A node of the Tree
@@ -37,6 +47,8 @@ pub struct Node {
     pub comment: Option<String>,
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
+    /// Distance to descendants of this node
+    pub(crate) subtree_distances: RefCell<Option<HashMap<NodeId, Edge, BuildIdentityHasher>>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not
@@ -53,6 +65,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
+            subtree_distances: RefCell::new(None),
             comment: None,
             depth: 0,
             deleted: false,
@@ -68,6 +81,7 @@ impl Node {
             children: vec![],
             parent_edge: None,
             child_edges: None,
+            subtree_distances: RefCell::new(None),
             comment: None,
             depth: 0,
             deleted: false,
