@@ -1343,7 +1343,7 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     ///
-    /// let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
+    /// let mut tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
     /// let matrix = tree.distance_matrix().unwrap();
     ///
     /// let phylip="\
@@ -1356,23 +1356,96 @@ impl Tree {
     ///
     /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
     /// ```
-    pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>, TreeError> {
-        let mut matrix = DistanceMatrix::new_with_size(self.n_leaves());
-        self.init_leaf_index()?;
-        let taxa = self.leaf_index.borrow().as_ref().unwrap().clone();
-        matrix.set_taxa(taxa)?;
+    pub fn distance_matrix(&mut self) -> Result<DistanceMatrix<f64>, TreeError> {
+        let mut leaf_order = self.get_leaves();
+        leaf_order.sort_by(|a, b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
 
-        for pair in self.get_leaves().iter().combinations(2) {
-            let (i1, i2) = (pair[0], pair[1]);
-            if let (Some(d), _) = self.get_distance(i1, i2)? {
-                let name1 = self.get(i1)?.name.clone().unwrap();
-                let name2 = self.get(i2)?.name.clone().unwrap();
+        let n = self.n_leaves();
+        let mut pairwise_vec = vec![NaiveSum::zero(); n * n / 2];
 
-                matrix.set(&name1, &name2, d)?;
-            } else {
-                return Err(TreeError::MissingBranchLengths);
+        let leaf_idx_to_leaf_order = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| leaf_order.iter().position(|&v| v == idx))
+            .collect_vec();
+
+        // Converts the node index of a leaf to its index in the leaf_order array
+        let get_leaf_index = |leaf: usize| -> Result<usize, TreeError> {
+            leaf_idx_to_leaf_order[leaf].ok_or(TreeError::NodeNotFound(leaf))
+        };
+
+        for current_node in self.levelorder(&self.get_root()?)?.iter().rev() {
+            let mut node_cache: HashMap<_, _, BuildIdentityHasher> = HashMap::default();
+
+            let parent = self.get(current_node)?;
+            if parent.is_tip() {
+                node_cache.insert(*current_node, 0.);
             }
+
+            // Compute distances from current node to descendant leaves
+            for child in parent.children.iter() {
+                let child = self.get(child)?;
+
+                // Use topological distance if no edge length
+                let child_len = child.parent_edge.unwrap_or(1.0);
+
+                for (leaf, distance) in child
+                    .subtree_distances
+                    .as_ref()
+                    .ok_or(TreeError::MissingBranchLengths)?
+                    .iter()
+                {
+                    let len = child_len + distance;
+                    node_cache.insert(*leaf, len);
+                }
+            }
+
+            // Compute distances between leaves
+            for subtree_roots in parent.children.iter().combinations(2) {
+                let subtree1 = self.get(subtree_roots[0])?;
+                let subtree2 = self.get(subtree_roots[1])?;
+
+                for (leaf1, _) in subtree1
+                    .subtree_distances
+                    .as_ref()
+                    .ok_or(TreeError::MissingBranchLengths)?
+                    .iter()
+                {
+                    for (leaf2, _) in subtree2
+                        .subtree_distances
+                        .as_ref()
+                        .ok_or(TreeError::MissingBranchLengths)?
+                        .iter()
+                    {
+                        let distance1 = node_cache.get(leaf1).unwrap();
+                        let distance2 = node_cache.get(leaf2).unwrap();
+
+                        let mut i = get_leaf_index(*leaf1)?;
+                        let mut j = get_leaf_index(*leaf2)?;
+                        if j < i {
+                            std::mem::swap(&mut i, &mut j);
+                        }
+                        // Compute the index of the pair in the vector representing
+                        // the upper triangular matrix
+                        let vec_idx = ((2 * n - 3 - i) * i) / 2 + j - 1;
+
+                        pairwise_vec[vec_idx] += distance1 + distance2;
+                    }
+                }
+            }
+
+            // Save distance between current node and descendant leaves
+            (self.get_mut(current_node)?).subtree_distances = Some(node_cache);
         }
+
+        let matrix = DistanceMatrix::from_precomputed(
+            leaf_order
+                .iter()
+                .map(|i| self.get(i).unwrap().clone().name.unwrap())
+                .collect_vec(),
+            pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
+        );
 
         Ok(matrix)
     }
@@ -3031,7 +3104,7 @@ mod tests {
     // the reference distance matrix was computed with ete3
     #[test]
     fn compute_distance_matrix() {
-        let tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
+        let mut tree = Tree::from_newick("((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;").unwrap();
         let true_dists: HashMap<(String, String), f64> = HashMap::from_iter(vec![
             (("A".into(), "B".into()), 0.30000000000000004),
             (("A".into(), "C".into()), 1.5),
