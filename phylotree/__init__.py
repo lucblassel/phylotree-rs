@@ -299,7 +299,8 @@ class Tree:
         the distance.
         """
 
-        return DistanceMatrix.from_dict(self._rs.to_matrix())
+        return DistanceMatrix(*self._rs.to_matrix())
+
 
     def add_child(
         self,
@@ -317,8 +318,6 @@ class Tree:
 
         return self._rs.add_child(id, name, edge)
     
-    
-
 
 class DistanceMatrix:
     """
@@ -326,16 +325,38 @@ class DistanceMatrix:
     This represents a positive, symmetric, 0-diagonal matrix.
     """
 
-    distances: dict[tuple[str, str], float]
-    taxa: set[str]
+    distances: list[float]
+    taxa: list[str]
 
-    @staticmethod
-    def from_dict(distances: dict[tuple[str, str], float]) -> "DistanceMatrix":
-        matrix = DistanceMatrix()
-        matrix.taxa = set(x for k in distances for x in k)
-        matrix.distances = distances
+    def __init__(self, distances, taxa):
+        self.distances = distances
+        self.taxa = taxa
 
-        return matrix
+
+    def to_phylip(self, square: bool = False) -> str:
+        """Outputs the matrix as Phylip format"""
+        output = f"{len(self.taxa)}\n"
+        for i, name1 in enumerate(self.taxa):
+            output += f"{name1}  "
+            for j, _ in enumerate(self.taxa):
+                if i == j:
+                    if square:
+                        output += f"  {0.0}"
+                        continue
+                    else:
+                        break
+                idx = self._get_index(i,j)
+                output += f"  {self.distances[idx]}"
+            output += "\n"
+        
+        return output
+
+
+    def _get_index(self, i: int, j: int) -> int:
+        if j < i:
+            i,j = j,i
+
+        return ((2 * len(self.taxa) - 3 - i) * i) // 2 + j - 1
 
     def get(self, taxon1: str, taxon2: str) -> float:
         """Get the distance between 2 taxa"""
@@ -344,5 +365,11 @@ class DistanceMatrix:
 
         if taxon1 == taxon2:
             return 0
-        key = tuple(sorted((taxon1, taxon2)))
-        return self.distances[key]
+
+        i = self.taxa.index(taxon1)
+        j = self.taxa.index(taxon2)
+
+        idx = self._get_index(i,j)
+
+
+        return self.distances[idx]

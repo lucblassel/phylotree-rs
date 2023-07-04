@@ -92,7 +92,7 @@ pub struct DistanceMatrix<T> {
     /// Identifiers of the taxa
     pub taxa: Vec<String>,
     /// Distances between taxa
-    matrix: Vec<T>,
+    pub(crate) matrix: Vec<T>,
     /// Distance value for identical taxa
     zero: T,
 }
@@ -204,12 +204,16 @@ where
     /// Get the distance matrix as a HashMap containing taxa pairs as keys
     /// and pairwise distances as values
     pub fn to_map(&self) -> HashMap<(String, String), T> {
-        HashMap::from_iter(self.taxa.iter().cartesian_product(self.taxa.iter()).map(
-            |(taxon1, taxon2)| {
-                let idx = self.get_index(taxon1, taxon2).unwrap();
-                ((taxon1.clone(), taxon2.clone()), self.matrix[idx])
-            },
-        ))
+        HashMap::from_iter(
+            self.taxa
+                .iter()
+                .cartesian_product(self.taxa.iter())
+                .filter(|(taxon1, taxon2)| taxon1 != taxon2)
+                .map(|(taxon1, taxon2)| {
+                    let idx = self.get_index(taxon1, taxon2).unwrap();
+                    ((taxon1.clone(), taxon2.clone()), self.matrix[idx])
+                }),
+        )
     }
 
     /// Outputs a matrix as a phylip formatted string

@@ -27,7 +27,7 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 python = ["pyo3"]
-# default = ["python"]
+default = ["python"]
 
 [dependencies]
 accurate = "0.3.1"

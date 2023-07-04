@@ -1,11 +1,18 @@
+use crate::distance::DistanceMatrix as RustDistanceMatrix;
 use crate::tree::Node as RustNode;
 use crate::tree::Tree as RustTree;
+// use crate::tree::TreeError;
 use pyo3::{exceptions::PyValueError, prelude::*, types::IntoPyDict, wrap_pyfunction, Python};
 use std::{collections::HashMap, path::Path};
 
 #[pyclass]
 struct Tree {
     tree: RustTree,
+}
+
+#[pyclass]
+struct DistanceMatrix {
+    matrix: RustDistanceMatrix<f64>,
 }
 
 #[pyclass]
@@ -16,6 +23,7 @@ struct Node {
 struct TreeError(crate::tree::TreeError);
 struct ParseError(crate::tree::NewickParseError);
 struct NodeError(crate::tree::NodeError);
+struct MatrixError(crate::distance::MatrixError);
 
 impl From<TreeError> for PyErr {
     fn from(err: TreeError) -> Self {
@@ -49,6 +57,18 @@ impl From<NodeError> for PyErr {
 
 impl From<crate::tree::NodeError> for NodeError {
     fn from(err: crate::tree::NodeError) -> Self {
+        Self(err)
+    }
+}
+
+impl From<MatrixError> for PyErr {
+    fn from(err: MatrixError) -> Self {
+        PyValueError::new_err(err.0.to_string())
+    }
+}
+
+impl From<crate::distance::MatrixError> for MatrixError {
+    fn from(err: crate::distance::MatrixError) -> Self {
         Self(err)
     }
 }
@@ -246,9 +266,14 @@ impl Tree {
         Ok(dict.into())
     }
 
-    fn to_matrix(&self) -> Result<HashMap<(String, String), f64>, TreeError> {
+    fn to_matrix(&self) -> Result<(Vec<f64>, Vec<String>), TreeError> {
         let matrix = self.tree.distance_matrix()?;
-        Ok(matrix.to_map())
+        Ok((matrix.matrix, matrix.taxa))
+    }
+
+    fn pdm(&self) -> Result<DistanceMatrix, TreeError> {
+        let matrix = self.tree.distance_matrix()?;
+        Ok(DistanceMatrix { matrix })
     }
 
     fn add_child(
@@ -265,6 +290,20 @@ impl Tree {
         let id = self.tree.add_child(node, parent, edge)?;
 
         Ok(id)
+    }
+}
+
+#[pymethods]
+impl DistanceMatrix {
+    #[new]
+    fn new(size: usize) -> Self {
+        let matrix = RustDistanceMatrix::new_with_size(size);
+        DistanceMatrix { matrix }
+    }
+
+    fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
+        let phylip = self.matrix.to_phylip(square)?;
+        Ok(phylip)
     }
 }
 
@@ -299,7 +338,7 @@ fn exponential_tree(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
 
 #[pyfunction]
 fn caterpillar(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
-    let tree = crate::generate_caterpillar(n_leaves, brlens)?;
+    let tree = crate::generate_caterpillar(n_leaves, brlens, crate::Distr::Uniform)?;
     Ok(Tree { tree })
 }
 
@@ -307,6 +346,7 @@ fn caterpillar(n_leaves: usize, brlens: bool) -> Result<Tree, TreeError> {
 #[pymodule]
 fn pytree(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Tree>()?;
+    m.add_class::<DistanceMatrix>()?;
 
     m.add_wrapped(wrap_pyfunction!(uniform_tree))?;
     m.add_wrapped(wrap_pyfunction!(gamma_tree))?;
