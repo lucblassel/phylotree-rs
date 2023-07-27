@@ -24,7 +24,12 @@ pub enum NodeError {
     HasNoParent(NodeId),
     /// We are trying to read an edge length that is missing
     #[error("Missing edge length between nodes {parent} and {child}")]
-    MissingEdgeLength { parent: NodeId, child: NodeId },
+    MissingEdgeLength {
+        /// Id of the parent the parent node
+        parent: NodeId,
+        /// Id of the inexistant child node
+        child: NodeId,
+    },
 }
 
 use crate::tree::tree::IdentityHasher;

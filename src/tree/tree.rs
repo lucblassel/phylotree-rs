@@ -3,6 +3,7 @@ use accurate::traits::*;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
+use rand::seq::SliceRandom;
 use std::collections::VecDeque;
 use std::iter::zip;
 use std::{
@@ -1562,6 +1563,52 @@ impl Tree {
         for node in self.nodes.iter_mut() {
             node.rescale_edges(factor)
         }
+    }
+
+    /// Randomly resolve multifurcations to binarize the tree
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let mut tree = Tree::from_newick("((A:0.1,B:0.2):0.3, (C:0.1,D:0.2,E:0.4)F:0.5)G;").unwrap();
+    /// assert!(!tree.is_binary().unwrap());
+    ///
+    /// tree.resolve();
+    ///
+    /// assert!(tree.is_binary().unwrap());
+    /// ```
+    pub fn resolve(&mut self) -> Result<(), TreeError> {
+        let rng = &mut rand::thread_rng();
+        let mut to_binarize = vec![];
+        for node in self.nodes.iter() {
+            if node.children.len() > 2 {
+                to_binarize.push(node.id);
+            }
+        }
+
+        for node_id in to_binarize.iter() {
+            loop {
+                let mut children = self.get(node_id)?.children.clone();
+                children.shuffle(rng);
+
+                let parent = self.add_child(Node::new(), *node_id, Some(0.0))?;
+
+                for _ in 0..2 {
+                    let child = children.pop().unwrap();
+                    let edge = self.get(&child)?.parent_edge.clone();
+                    self.get_mut(&parent)?.add_child(child, edge);
+                    self.get_mut(&child)?.set_parent(parent, edge);
+                    self.get_mut(&node_id)?.remove_child(&child)?;
+                }
+
+                children.push(parent);
+
+                if children.len() <= 2 {
+                    break;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

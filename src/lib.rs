@@ -255,10 +255,10 @@ pub fn generate_yule(
 
     while tree.n_leaves() != n_leaves {
         // Choose parent
-        let parent = parent_candidates
+        let parent = *parent_candidates
             .choose(&mut rng)
-            .expect("No parent candidate")
-            .clone();
+            .expect("No parent candidate");
+        // .clone();
 
         // Generate child node
         let edge1: Option<f64> = brlens.then_some(sampler.sample(&mut rng));

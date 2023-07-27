@@ -27,15 +27,27 @@ use tinytemplate::TinyTemplate;
 /// parsed by [`clap`] and used to execute this binary
 pub mod cli;
 
-fn print_stats_header() {
-    println!("height\tdiameter\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
+fn print_stats_header(name: bool) {
+    if name {
+        println!(
+            "filename\theight\tdiameter\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin"
+        )
+    } else {
+        println!("height\tdiameter\tnodes\ttips\trooted\tbinary\tncherries\tcolless\tsackin")
+    }
 }
 
-fn print_stats(path: &Path) {
+fn print_stats(path: &Path, name: bool) {
     let tree = Tree::from_file(path).unwrap();
 
+    let name = if name {
+        format!("{:?}\t", path)
+    } else {
+        "".into()
+    };
+
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{name}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         tree.height()
             .map_or_else(|_| "-".to_string(), |v| format!("{}", v)),
         tree.diameter().unwrap_or(0.0),
@@ -98,9 +110,10 @@ fn main() {
             }
         }
         cli::Commands::Stats { trees } => {
-            print_stats_header();
+            let print_name = trees.len() > 1;
+            print_stats_header(print_name);
             for tree in trees {
-                print_stats(&tree)
+                print_stats(&tree, print_name)
             }
         }
         cli::Commands::Compare { reftree, tocompare } => {
@@ -219,6 +232,17 @@ fn main() {
                 } else {
                     panic!("The tree is missing some branch lengths between {n1} and {n2}")
                 }
+            }
+        }
+        cli::Commands::Resolve { tree, output } => {
+            let mut tree = Tree::from_file(&tree).unwrap();
+
+            tree.resolve().unwrap();
+
+            if let Some(path) = output {
+                tree.to_file(&path).unwrap();
+            } else {
+                println!("{}", tree.to_newick().unwrap());
             }
         }
         cli::Commands::Deduplicate {
@@ -341,9 +365,15 @@ fn main() {
                 max = max.max(a);
             }
 
-            let scale = width.min(height) / (max - min);
+            let scale = width.min(height) / (max - min + 1.);
             layout.rescale(scale);
             let padding_scale = (100. - padding) / 100.;
+
+            eprintln!(
+                "min.xy: {min}, max.xy: {max}, scale: {scale}, rescaled: min {}, max {}",
+                min * scale,
+                max * scale
+            );
 
             let ctx = Context {
                 xmin: -(width / 2.0) as i32,

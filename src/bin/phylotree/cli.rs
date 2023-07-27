@@ -101,6 +101,14 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Randomly resolve a multifurcated tree to a binary one
+    Resolve {
+        /// The phylogenetic tree
+        tree: PathBuf,
+        /// The output tree
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Remove tips from the trees
     Remove {
         /// The phylogenetic tree
