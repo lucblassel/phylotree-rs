@@ -16,7 +16,7 @@ use std::{
 use thiserror::Error;
 
 use super::node::{Node, NodeError};
-use super::{Edge, NodeId};
+use super::{Edge, NewickFormat, NodeId};
 
 use crate::distance::{DistanceMatrix, MatrixError};
 
@@ -221,7 +221,11 @@ impl Tree {
         Ok(node)
     }
 
-    /// Get a reference to a node in the tree by name
+    /// Get a reference to a node in the tree by name.
+    /// Note that this does not check for name unicity, if several nodes
+    /// match a name this funciton will return the first match in the tree.
+    /// If you want to find all nodes matching a name in a given tree,
+    /// use [`Tree::search_nodes`].
     /// ```
     /// use phylotree::tree::{Tree, Node};
     ///
@@ -242,6 +246,30 @@ impl Tree {
         self.nodes
             .iter_mut()
             .find(|node| node.name.is_some() && node.name == Some(String::from(name)))
+    }
+
+    /// Search nodes in the tree with a closure.
+    /// ```
+    /// use phylotree::tree::{Tree, Node};
+    ///
+    /// let mut tree = Tree::new();
+    /// let root_idx = tree.add(Node::new_named("root"));
+    /// let mut indices = vec![];
+    ///
+    /// for name in ["A", "B", "A"] {
+    ///     let idx = tree.add_child(Node::new_named(name), root_idx, None).unwrap();
+    ///     if name == "A" { indices.push(idx) }
+    /// }
+    ///
+    /// let found = tree.search_nodes(|node| node.name == Some("A".into()));
+    /// assert_eq!(found, indices);
+    /// ```
+    pub fn search_nodes(self, cond: fn(&Node) -> bool) -> Vec<NodeId> {
+        self.nodes
+            .iter()
+            .filter(|node| cond(node))
+            .map(|node| node.id)
+            .collect()
     }
 
     /// Gets the root node. In the case of unrooted trees this node is a "virtual root"
@@ -1570,11 +1598,11 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     ///
-    /// let mut tree = Tree::from_newick("((A:0.1,B:0.2):0.3, (C:0.1,D:0.2,E:0.4)F:0.5)G").unwrap();
-    /// assert!(!tree.is_binary());
+    /// let mut tree = Tree::from_newick("((A:0.1,B:0.2):0.3, (C:0.1,D:0.2,E:0.4)F:0.5)G;").unwrap();
+    /// assert!(!tree.is_binary().unwrap());
     ///
-    /// tree.resolve()
-    /// assert!(tree.is_binary());
+    /// tree.resolve();
+    /// assert!(tree.is_binary().unwrap());
     /// ```
     pub fn resolve(&mut self) -> Result<(), TreeError> {
         let rng = &mut rand::thread_rng();
@@ -1609,6 +1637,32 @@ impl Tree {
         }
         Ok(())
     }
+
+    /// Sort children of a node by number of descendants
+    ///
+    /// ```
+    ///use phylotree::tree::Tree;
+    ///
+    ///let mut tree = Tree::from_newick("(A,(((D,(E,F)),C),B));").unwrap();
+    ///tree.ladderize();
+    ///
+    ///assert_eq!("(A,(B,(C,(D,(E,F)))));", tree.to_newick().unwrap());
+    ///
+    /// ```
+    pub fn ladderize(&mut self) -> Result<(), TreeError> {
+        let mut descendant_counter = vec![0; self.nodes.len()];
+        let root = self.get_root()?;
+        // Go from tips to root
+        for node_id in self.levelorder(&root)?.into_iter().rev() {
+            let node = self.get_mut(&node_id)?;
+            for child in node.children.iter() {
+                descendant_counter[node_id] += descendant_counter[*child] + 1;
+            }
+            node.children.sort_by_key(|v| descendant_counter[*v]);
+        }
+
+        Ok(())
+    }
 }
 
 /// Methods to read and write [`Tree`] objects to and from files or [`String`] objects.
@@ -1621,20 +1675,20 @@ impl Tree {
     // ########################
 
     /// Generate newick representation of tree
-    fn to_newick_impl(&self, root: &NodeId) -> Result<String, TreeError> {
+    fn to_newick_impl(&self, root: &NodeId, format: NewickFormat) -> Result<String, TreeError> {
         let root = self.get(root)?;
         if root.children.is_empty() {
-            Ok(root.to_newick())
+            Ok(root.to_newick(format))
         } else {
             Ok("(".to_string()
                 + &(root
                     .children
                     .iter()
-                    .map(|child_idx| self.to_newick_impl(child_idx).unwrap()))
+                    .map(|child_idx| self.to_newick_impl(child_idx, format).unwrap()))
                 .collect::<Vec<String>>()
                 .join(",")
                 + ")"
-                + &(root.to_newick()))
+                + &(root.to_newick(format)))
         }
     }
 
@@ -1646,13 +1700,35 @@ impl Tree {
     /// let newick = "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F:0.6;";
     /// let tree = Tree::from_newick(newick).unwrap();
     ///
-    /// dbg!(&tree);
-    ///
     /// assert_eq!(tree.to_newick().unwrap(), newick);
     /// ```
     pub fn to_newick(&self) -> Result<String, TreeError> {
         let root = self.get_root()?;
-        Ok(self.to_newick_impl(&root)? + ";")
+        Ok(self.to_newick_impl(&root, NewickFormat::AllFields)? + ";")
+    }
+
+    /// Writes the tree as a newick formatted string with a specified
+    /// output format from [`NewickFormat`].
+    /// # Example
+    /// ```
+    /// use phylotree::tree::{Tree, NewickFormat};
+    ///
+    /// let newick = "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F:0.6;";
+    /// let tree = Tree::from_newick(newick).unwrap();
+    ///
+    /// assert_eq!(tree.to_formatted_newick(NewickFormat::Topology).unwrap(), "(,,(,));");
+    /// assert_eq!(
+    ///     tree.to_formatted_newick(NewickFormat::OnlyNames).unwrap(),
+    ///     "(A,B,(C,D)E)F;"
+    /// );
+    /// assert_eq!(
+    ///     tree.to_formatted_newick(NewickFormat::InternalLengthsLeafNames).unwrap(),
+    ///     "(A,B,(C,D):0.5):0.6;"
+    /// );
+    /// ```
+    pub fn to_formatted_newick(&self, format: NewickFormat) -> Result<String, TreeError> {
+        let root = self.get_root()?;
+        Ok(self.to_newick_impl(&root, format)? + ";")
     }
 
     /// Read a newick formatted string and build a [`Tree`] struct from it.
@@ -2179,6 +2255,44 @@ mod tests {
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             tree.to_newick().unwrap()
         );
+    }
+
+    #[test]
+    fn to_formatted_newick() {
+        let newick = "(A:0.1[Comment_1],B:0.2,(C:0.3,D:0.4)E:0.5[Comment_2])F;";
+        let tree = Tree::from_newick(newick).unwrap();
+
+        let cases = [
+            (NewickFormat::AllFields, newick),
+            (
+                NewickFormat::NoComments,
+                "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
+            ),
+            (NewickFormat::Topology, "(,,(,));"),
+            (NewickFormat::OnlyNames, "(A,B,(C,D)E)F;"),
+            (NewickFormat::OnlyLengths, "(:0.1,:0.2,(:0.3,:0.4):0.5);"),
+            (
+                NewickFormat::LeafLengthsAllNames,
+                "(A:0.1,B:0.2,(C:0.3,D:0.4)E)F;",
+            ),
+            (
+                NewickFormat::LeafLengthsLeafNames,
+                "(A:0.1,B:0.2,(C:0.3,D:0.4));",
+            ),
+            (NewickFormat::InternalLengthsLeafNames, "(A,B,(C,D):0.5);"),
+            (
+                NewickFormat::AllLengthsLeafNames,
+                "(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);",
+            ),
+        ];
+
+        for (format, expected) in cases {
+            assert_eq!(
+                expected,
+                tree.to_formatted_newick(format).unwrap(),
+                "Failed to write newick for format: {format:?}"
+            )
+        }
     }
 
     // test cases from https://github.com/ila/Newick-validator
@@ -3067,6 +3181,8 @@ mod tests {
 }
 
 #[cfg(test)]
+// These tests are lifted from the ETE3 test suite to ensure that the shared functionnalities
+// behave the same between the 2 libraries.
 mod tests_ete3 {
 
     use super::*;
@@ -3134,6 +3250,7 @@ mod tests_ete3 {
     }
 
     #[test]
+    // Do I want to support this ?
     fn export_ordered_features() {
         let tree = Tree::from_newick("((A,B),C);").unwrap();
         let expected_newick = "((A:1[&&NHX:dist=1.0:name=A:support=1.0],B:1[&&NHX:0=0:1=1:2=2:3=3:4=4:5=5:6=6:7=7:8=8:9=9:a=a:b=b:c=c:d=d:dist=1.0:e=e:f=f:g=g:h=h:i=i:j=j:k=k:l=l:m=m:n=n:name=B:o=o:p=p:q=q:r=r:s=s:support=1.0:t=t:u=u:v=v:w=w])1:1[&&NHX:dist=1.0:name=:support=1.0],C:1[&&NHX:dist=1.0:name=C:support=1.0]);";
@@ -3153,5 +3270,18 @@ mod tests_ete3 {
             expected_newick,
             tree.to_newick().expect("Could not write newick")
         );
+    }
+
+    #[test]
+    fn resolve_polytomies() {
+        let mut tree = Tree::from_newick("((a,a,a,a),(b,b,b,(c,c,c)));").unwrap();
+
+        tree.resolve().unwrap();
+        tree.ladderize().unwrap();
+
+        assert_eq!(
+            "((a,(a,(a,a))),(b,(b,(b,(c,(c,c))))));",
+            tree.to_formatted_newick(NewickFormat::OnlyNames).unwrap()
+        )
     }
 }

@@ -6,7 +6,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::{Edge, NodeId};
+use super::{Edge, NewickFormat, NodeId};
 
 /// Errors that can occur when manipulating [`Node`] structs.
 #[derive(Error, Debug)]
@@ -187,7 +187,7 @@ impl Node {
         Ok(())
     }
 
-    /// Rescales parent and chilhd edges by a factor.
+    /// Rescales parent and child edges by a factor.
     pub(crate) fn rescale_edges(&mut self, factor: f64) {
         self.parent_edge = self.parent_edge.map(|edge| edge * factor);
         if let Some(edges) = &mut self.child_edges {
@@ -207,21 +207,65 @@ impl Node {
         self.parent.is_none()
     }
 
+    fn format_name(&self) -> String {
+        self.name.clone().unwrap_or_default()
+    }
+
+    fn format_length(&self) -> String {
+        self.parent_edge
+            .map(|v| format!(":{v}"))
+            .unwrap_or_default()
+    }
+
+    fn format_comment(&self) -> String {
+        self.comment
+            .clone()
+            .map(|v| format!("[{v}]"))
+            .unwrap_or_default()
+    }
+
     /// Returns String with node in newick format
-    pub fn to_newick(&self) -> String {
+    pub fn to_newick(&self, format: NewickFormat) -> String {
         let mut repr = String::new();
 
-        if let Some(name) = self.name.clone() {
-            repr += &name;
+        match format {
+            NewickFormat::AllFields
+            | NewickFormat::NoComments
+            | NewickFormat::OnlyNames
+            | NewickFormat::LeafLengthsAllNames => repr += &self.format_name(),
+            NewickFormat::LeafLengthsLeafNames
+            | NewickFormat::InternalLengthsLeafNames
+            | NewickFormat::AllLengthsLeafNames => {
+                if self.is_tip() {
+                    repr += &self.format_name()
+                }
+            }
+            _ => (),
         }
 
-        if let Some(parent_edge) = self.parent_edge {
-            repr += &format!(":{}", &parent_edge);
+        match format {
+            NewickFormat::AllFields
+            | NewickFormat::NoComments
+            | NewickFormat::OnlyLengths
+            | NewickFormat::AllLengthsLeafNames => repr += &self.format_length(),
+            NewickFormat::InternalLengthsLeafNames => {
+                if !self.is_tip() {
+                    repr += &self.format_length()
+                }
+            }
+            NewickFormat::LeafLengthsLeafNames | NewickFormat::LeafLengthsAllNames => {
+                if self.is_tip() {
+                    repr += &self.format_length()
+                }
+            }
+            _ => (),
         }
 
-        if let Some(comment) = self.comment.clone() {
-            repr += &format!("[{}]", &comment);
+        match format {
+            NewickFormat::AllFields => repr += &self.format_comment(),
+            _ => (),
         }
+
         repr
     }
 }

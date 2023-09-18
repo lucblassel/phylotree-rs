@@ -20,3 +20,26 @@ pub type NodeId = usize;
 /// A type that represents branch lengths between [`Node`] objects
 /// within phylogenetic [`Tree`] object.
 pub type Edge = f64;
+
+/// Newick output format
+#[derive(Debug, Copy, Clone)]
+pub enum NewickFormat {
+    /// Output all supported and available fields
+    AllFields,
+    /// Only output topology
+    Topology,
+    /// Output all fields except for comments
+    NoComments,
+    /// Output node names
+    OnlyNames,
+    /// Output branch lengths
+    OnlyLengths,
+    /// Output leaf branch lenghs + all node names
+    LeafLengthsAllNames,
+    /// Output leaf branch lengths + leaf node names
+    LeafLengthsLeafNames,
+    /// Output internal branch lenghts + leaf node names
+    InternalLengthsLeafNames,
+    /// Output all branch lenghts + leaf names
+    AllLengthsLeafNames,
+}
