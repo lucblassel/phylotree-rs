@@ -215,14 +215,13 @@ impl Node {
             repr += &name;
         }
 
-        if let Some(comment) = self.comment.clone() {
-            repr += &format!("[{}]", &comment);
-        }
-
         if let Some(parent_edge) = self.parent_edge {
             repr += &format!(":{}", &parent_edge);
         }
 
+        if let Some(comment) = self.comment.clone() {
+            repr += &format!("[{}]", &comment);
+        }
         repr
     }
 }
@@ -271,8 +270,14 @@ impl Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Children({:?})",
-            self.parent_edge, self.name, self.id, self.parent, self.depth, self.children,
+            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Comments[{:?}] Children({:?})",
+            self.parent_edge,
+            self.name,
+            self.id,
+            self.parent,
+            self.depth,
+            self.comment,
+            self.children,
         )
     }
 }
