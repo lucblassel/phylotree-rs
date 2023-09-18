@@ -1,4 +1,4 @@
-///! A module to draw phylogenetic trees
+//! A module to draw phylogenetic trees
 use serde::Serialize;
 
 use super::{NodeError, Tree, TreeError};
@@ -80,7 +80,7 @@ pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
     for v in tree.postorder(&root)?.iter() {
         let node = tree.get(v)?;
         if node.is_tip() {
-            l[*v] = 1 as f64
+            l[*v] = 1_f64
         } else {
             for w_ in node.children.iter() {
                 l[*v] += l[*w_];

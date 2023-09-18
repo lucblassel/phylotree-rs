@@ -321,7 +321,7 @@ s5    5  10  15
 ";
 
     fn build_matrix() -> DistanceMatrix<f32> {
-        let names = vec![("s1", 1.0), ("s2", 2.0), ("s3", 3.0), ("s5", 5.0)];
+        let names = [("s1", 1.0), ("s2", 2.0), ("s3", 3.0), ("s5", 5.0)];
         let mut matrix = DistanceMatrix::new_with_size(names.len());
         matrix
             .set_taxa(
