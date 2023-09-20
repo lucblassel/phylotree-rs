@@ -25,7 +25,7 @@
 ### Changed
 Better documentation and README
 
-## v0.1.0 - 2023-05-02
+## v0.1.0 - 2023-05-02 [Initial Release]
 ### Added
 - Basic `Tree`, `Node` and `DistanceMatrix` structs to deal with phylogenetic trees
 - Simple manipulation methods on a tree: 
@@ -42,7 +42,6 @@ Better documentation and README
 - Methods to modify the tree: prune, rescale, compress. 
 - Methods to read/write trees from/to newick files or strings.
 - Methods to simulate trees of different shapes with simple processes: Caterpillar or Uniform *(like ete3's populate)*
-
 - Simple CLI that uses these methods with following commands:
     - generate: generate random trees
     - stats: get statistics of a tree
