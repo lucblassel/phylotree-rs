@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "phylotree"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "accurate",
  "clap 4.2.5",

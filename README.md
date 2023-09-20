@@ -12,7 +12,7 @@ This crate aims to be a general purpose package to deal with phylogenetic trees 
 
 ### Crate
 
-To use this crate just run `cargo add phylotree` in your cargo project or add `phylotree = "0.1.0"` to your `Cargo.toml` file.
+To use this crate just run `cargo add phylotree` in your cargo project or add `phylotree = "0.1.2"` to your `Cargo.toml` file.
 
 ### Cli
 

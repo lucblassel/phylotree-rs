@@ -1,6 +1,9 @@
 # Phylotree changelog
 
 ## Unreleased
+Nothing...
+
+## v0.1.2 - 2023-09-20
 ### Added
 - Basic Python bindings to this crate usign PyO3. Behind `python` feature. Used for the [`phylotree` python package](https://pypi.org/project/phylotree/).
 - Adding Yule process to tree simulation
