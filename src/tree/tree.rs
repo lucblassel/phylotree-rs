@@ -112,6 +112,9 @@ pub struct Comparison {
     pub branch_score: f64,
 }
 
+/// Used to hold compared tree edges
+type EdgeCompare = (Vec<Edge>, Vec<Edge>, Vec<(Edge, Edge)>);
+
 /// A Phylogenetic tree
 #[derive(Debug, Clone)]
 pub struct Tree {
@@ -855,6 +858,14 @@ impl Tree {
         Ok(toggled.min(bitset))
     }
 
+    // Helper function to view a partition as
+    fn partition_to_leaves(&self, bitset: &FixedBitSet) -> Result<String, TreeError> {
+        self.init_leaf_index()?;
+
+        let v = self.leaf_index.borrow().clone().unwrap();
+        Ok(bitset.ones().map(|i| v[i].clone()).collect())
+    }
+
     /// Caches partitions for distance computation
     fn init_partitions(&self) -> Result<(), TreeError> {
         self.init_leaf_index()?;
@@ -1152,6 +1163,139 @@ impl Tree {
             branch_score: kf.sqrt(),
         })
     }
+
+    /// Compare sets of branches between 2 trees. This will return 3
+    /// sets of branch lengths:
+    ///  - branches exclusive to the `self` tree
+    ///  - branches exclusive to the `other` tree
+    ///  - 2-uples for common branches: (self_len, other_len)
+    ///
+    ///  You can specify wether to include terminal branches in this calculation or not
+    ///  with the `include_terminal` parameter.
+    ///
+    ///  # Example
+    ///  ```
+    ///  use phylotree::tree::Tree;
+    ///
+    ///  // Ref Tree:     
+    ///  //               0.3
+    ///  //         0.2 +----- A
+    ///  //   0.1 +-----| 0.4      
+    ///  // +-----|     +----- B
+    ///  // |     | 0.5            
+    ///  // |     +----- C      
+    ///  // |       0.7            
+    ///  // | 0.6 +----- D      
+    ///  // +-----| 0.8            
+    ///  //       +----- E       
+    ///
+    ///  // Compared Tree:
+    ///  //               0.3
+    ///  //         0.2 +----- A
+    ///  //   0.1 +-----| 0.4     
+    ///  // +-----|     +----- C
+    ///  // |     | 0.5            
+    ///  // |     +----- B      
+    ///  // |       7.0            
+    ///  // | 0.6 +----- D      
+    ///  // +-----| 0.8            
+    ///  //       +----- E
+    ///  //
+    ///  // We just switched the B and C labels, so we should have 1
+    ///  // exlusive branch per tree. The compared tree also has one branch
+    ///  // that is 7.0 instead of 0.7.
+    ///
+    ///  let reftree = Tree::from_newick("(((A:0.3,B:0.4):0.2,C:0.5):0.1,(D:0.7,E:0.8):0.6);").unwrap();
+    ///  let cmptree = Tree::from_newick("(((A:0.3,C:0.4):0.2,B:0.5):0.1,(D:7.0,E:0.8):0.6);").unwrap();
+    ///  
+    ///  // Get branch comparison including terminal branches
+    ///  let (refset, cmpset, common) = reftree.compare_branch_lengths(&cmptree, true).unwrap();
+    ///
+    ///  assert_eq!(refset, vec![0.2]); // AB,CDE exclusive to reftree
+    ///  assert_eq!(cmpset, vec![0.2]); // AC,BDE exclusive to cmptree
+    ///
+    ///  let expected_common = [
+    ///     (0.3, 0.3), // A,...
+    ///     (0.4, 0.4), // B,...
+    ///     (0.5, 0.5), // C,...
+    ///     (0.7, 0.7), // ABC,DE
+    ///     (0.7, 7.0), // D,...
+    ///     (0.8, 0.8), // E,...
+    ///  ];
+    ///
+    ///  assert_eq!(expected_common.len(), common.len());
+    ///  for val in common {
+    ///     let mut found = false;
+    ///     for exp in expected_common.iter() {
+    ///         if val.0 - exp.0 < f64::EPSILON && val.1 - exp.1 < f64::EPSILON {
+    ///             found = true;
+    ///         }
+    ///     }
+    ///     assert!(found);
+    ///  }
+    ///  ```
+    pub fn compare_branch_lengths(
+        &self,
+        other: &Self,
+        include_tips: bool,
+    ) -> Result<EdgeCompare, TreeError> {
+        let partitions_s = self.get_partitions_with_lengths()?;
+        let partitions_o = other.get_partitions_with_lengths()?;
+
+        let mut self_branches = vec![];
+        let mut other_branches = vec![];
+        let mut common_branches = vec![];
+
+        for (edge, len_s) in partitions_s.iter() {
+            if let Some(len_o) = partitions_o.get(edge) {
+                common_branches.push((*len_s, *len_o));
+            } else {
+                self_branches.push(*len_s);
+            }
+        }
+
+        for (edge, len_o) in partitions_o.iter() {
+            if !partitions_s.contains_key(edge) {
+                other_branches.push(*len_o);
+            }
+        }
+
+        if include_tips {
+            let selftips = self.get_terminal_branches()?;
+            let othertips = other.get_terminal_branches()?;
+
+            for (tipname, len_s) in selftips.iter() {
+                let len_s = len_s.ok_or(TreeError::MissingBranchLengths)?;
+                if let Some(len_o) = othertips.get(tipname) {
+                    let len_o = len_o.ok_or(TreeError::MissingBranchLengths)?;
+                    common_branches.push((len_s, len_o));
+                } else {
+                    self_branches.push(len_s);
+                }
+            }
+
+            for (tipname, len_o) in othertips.iter() {
+                if !selftips.contains_key(tipname) {
+                    let len_o = len_o.ok_or(TreeError::MissingBranchLengths)?;
+                    other_branches.push(len_o);
+                }
+            }
+        }
+
+        Ok((self_branches, other_branches, common_branches))
+    }
+
+    // Get terminal branch lengths of a tree keyed by tip name
+    fn get_terminal_branches(&self) -> Result<HashMap<String, Option<Edge>>, TreeError> {
+        if !self.has_unique_tip_names()? {
+            return Err(TreeError::DuplicateLeafNames);
+        }
+
+        Ok(HashMap::from_iter(self.get_leaves().iter().map(|idx| {
+            let node = self.get(idx).unwrap();
+            (node.name.clone().unwrap(), node.parent_edge)
+        })))
+    }
 }
 
 /// Methods to find paths in a [`Tree`] as well as measure distances between [`Node`] objects.
@@ -1251,7 +1395,7 @@ impl Tree {
         let mut all_dists = true;
 
         if source == target {
-            return Ok((None, 0));
+            return Ok((Some(0.0), 0));
         }
 
         let root_to_source = self.get_path_from_root(source)?;
@@ -3283,5 +3427,712 @@ mod tests_ete3 {
             "((a,(a,(a,a))),(b,(b,(b,(c,(c,c))))));",
             tree.to_formatted_newick(NewickFormat::OnlyNames).unwrap()
         )
+    }
+
+    #[test]
+    fn edge_distances() {
+        // Modified the ete3 test tree since this library does not handle NHX comments
+        let tree = Tree::from_newick("(((A:0.1, B:0.01):0.001, C:0.0001)I:1.0[&&NHX:name=I], (D:0.00001)J:0.000001[&&NHX:name=J])root:2.0[&&NHX:name=root];").unwrap();
+
+        let a = tree.get_by_name("A").unwrap();
+        let b = tree.get_by_name("B").unwrap();
+        let c = tree.get_by_name("C").unwrap();
+        let d = tree.get_by_name("D").unwrap();
+        let i = tree.get_by_name("I").unwrap();
+        let j = tree.get_by_name("J").unwrap();
+        let root = tree.get_by_name("root").unwrap();
+
+        assert_eq!(tree.get_common_ancestor(&a.id, &i.id).unwrap(), i.id);
+        assert_eq!(tree.get_common_ancestor(&a.id, &d.id).unwrap(), root.id);
+
+        assert_eq!(tree.get_distance(&a.id, &i.id).unwrap().0.unwrap(), 0.101);
+        assert_eq!(tree.get_distance(&a.id, &b.id).unwrap().0.unwrap(), 0.11);
+        assert_eq!(tree.get_distance(&a.id, &a.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(tree.get_distance(&i.id, &i.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(
+            tree.get_distance(&a.id, &root.id).unwrap(),
+            tree.get_distance(&root.id, &a.id).unwrap()
+        );
+    }
+
+    #[test]
+    fn topological_distances() {
+        let tree =
+            Tree::from_newick("(((A:0.5, B:1.0):1.0, C:5.0):1, (D:10.0, F:1.0):2.0)root:20;")
+                .unwrap();
+        let a = tree.get_by_name("A").unwrap();
+        let b = tree.get_by_name("B").unwrap();
+        let c = tree.get_by_name("C").unwrap();
+        let d = tree.get_by_name("D").unwrap();
+        let f = tree.get_by_name("F").unwrap();
+        let root = tree.get_by_name("root").unwrap();
+
+        assert_eq!(tree.get_distance(&root.id, &a.id).unwrap().1, 3);
+        assert_eq!(tree.get_distance(&root.id, &c.id).unwrap().1, 2);
+        assert_eq!(tree.get_distance(&root.id, &root.id).unwrap().1, 0);
+        assert_eq!(tree.get_distance(&d.id, &d.id).unwrap().1, 0);
+    }
+
+    #[test]
+    fn traversals() {
+        // Ancestors
+        // {
+        //     todo!();
+        // }
+
+        let tree = Tree::from_newick("((3,4)2,(6,7)5)1;").unwrap();
+        let root = tree.get_root().unwrap();
+
+        let postorder = "3426751";
+        let preorder = "1234567";
+        let levelorder = "1253467";
+
+        fn get_str(iter: &[usize], tree: &Tree) -> String {
+            iter.iter()
+                .map(|id| tree.get(id).unwrap().name.clone().unwrap())
+                .collect()
+        }
+
+        assert_eq!(get_str(&tree.postorder(&root).unwrap(), &tree), postorder);
+        assert_eq!(get_str(&tree.preorder(&root).unwrap(), &tree), preorder);
+        assert_eq!(get_str(&tree.levelorder(&root).unwrap(), &tree), levelorder);
+    }
+
+    #[test]
+    fn compare() {
+        let cases = [
+            (
+                28,
+                true,
+                "(((z,y),(x,(w,v))),(u,t),((s,r),((q,(p,o)),((n,(m,(l,(k,j)))),(i,(h,g))))));",
+                "(((k,(j,(i,(h,g)))),z),(y,x),((w,v),((u,(t,(s,(r,q)))),(p,(o,(n,(m,l)))))));",
+            ),
+            (
+                28,
+                false,
+                "(((t,s),((r,(q,p)),(o,n))),(((m,(l,(k,j))),(i,(h,g))),(z,(y,(x,(w,(v,u)))))));",
+                "((((k,(j,i)),((h,g),z)),((y,(x,w)),((v,(u,t)),(s,(r,(q,p)))))),((o,n),(m,l)));",
+            ),
+            (
+                18,
+                true,
+                "(((v,(u,(t,s))),((r,(q,(p,o))),((n,m),(l,k)))),(j,(i,(h,g))),(z,(y,(x,w))));",
+                "(((z,(y,(x,w))),(v,(u,(t,s)))),((r,(q,p)),(o,(n,m))),((l,(k,(j,i))),(h,g)));",
+            ),
+            (
+                26,
+                true,
+                "(((l,k),(j,i)),((h,g),(z,(y,(x,w)))),((v,(u,(t,(s,(r,q))))),((p,o),(n,m))));",
+                "(((p,o),((n,(m,l)),(k,j))),((i,(h,g)),(z,y)),((x,(w,v)),((u,(t,s)),(r,q))));",
+            ),
+            (
+                24,
+                true,
+                "(((o,(n,m)),(l,(k,(j,(i,(h,g)))))),(z,(y,x)),((w,v),((u,(t,(s,r))),(q,p))));",
+                "(((t,(s,(r,(q,(p,o))))),(n,m)),((l,k),(j,(i,(h,g)))),((z,y),((x,w),(v,u))));",
+            ),
+            (
+                24,
+                true,
+                "(((y,(x,(w,v))),(u,t)),((s,(r,(q,(p,o)))),(n,m)),((l,k),((j,(i,(h,g))),z)));",
+                "(((z,(y,(x,w))),(v,(u,t))),(s,(r,(q,(p,(o,(n,(m,(l,k)))))))),(j,(i,(h,g))));",
+            ),
+            (
+                28,
+                false,
+                "(((p,(o,(n,(m,l)))),((k,(j,i)),(h,g))),((z,y),((x,(w,(v,u))),(t,(s,(r,q))))));",
+                "((((t,(s,r)),(q,p)),((o,n),(m,(l,(k,(j,i)))))),(((h,g),(z,(y,(x,w)))),(v,u)));",
+            ),
+            (
+                28,
+                true,
+                "((((i,(h,g)),z),(y,x)),((w,v),((u,(t,(s,r))),(q,p))),((o,n),(m,(l,(k,j)))));",
+                "((((h,g),z),(y,x)),(w,(v,u)),((t,s),((r,(q,p)),((o,(n,m)),(l,(k,(j,i)))))));",
+            ),
+            (
+                28,
+                true,
+                "(((x,(w,(v,(u,(t,(s,(r,(q,(p,o))))))))),((n,(m,l)),(k,(j,i)))),(h,g),(z,y));",
+                "(((u,t),(s,r)),((q,p),(o,(n,m))),(((l,(k,(j,i))),((h,g),(z,(y,x)))),(w,v)));",
+            ),
+            (
+                22,
+                false,
+                "(((x,(w,(v,u))),((t,(s,r)),(q,p))),((o,(n,(m,l))),((k,j),((i,(h,g)),(z,y)))));",
+                "(((z,(y,(x,(w,(v,u))))),(t,(s,r))),((q,(p,(o,(n,m)))),((l,k),(j,(i,(h,g))))));",
+            ),
+            (
+                26,
+                true,
+                "((z,(y,(x,w))),(v,(u,(t,s))),((r,(q,(p,(o,(n,m))))),((l,k),(j,(i,(h,g))))));",
+                "(((v,(u,t)),((s,r),((q,(p,o)),(n,(m,l))))),((k,j),((i,(h,g)),z)),(y,(x,w)));",
+            ),
+            (
+                34,
+                false,
+                "((((i,(h,g)),(z,(y,x))),(w,v)),((u,t),((s,r),((q,(p,(o,n))),(m,(l,(k,j)))))));",
+                "(((p,(o,(n,(m,(l,k))))),((j,i),(h,g))),(z,(y,(x,(w,(v,(u,(t,(s,(r,q))))))))));",
+            ),
+            (
+                30,
+                false,
+                "(((i,(h,g)),(z,y)),((x,w),((v,(u,(t,(s,(r,q))))),(p,(o,(n,(m,(l,(k,j)))))))));",
+                "((((l,k),(j,(i,(h,g)))),(z,(y,(x,w)))),((v,u),((t,s),((r,(q,p)),(o,(n,m))))));",
+            ),
+            (
+                26,
+                false,
+                "(((v,(u,t)),((s,(r,q)),((p,o),((n,m),((l,k),(j,i)))))),((h,g),(z,(y,(x,w)))));",
+                "(((y,(x,(w,v))),(u,(t,s))),(((r,q),((p,o),(n,(m,(l,k))))),((j,i),((h,g),z))));",
+            ),
+            (
+                20,
+                false,
+                "(((u,(t,s)),(r,q)),(((p,o),((n,m),((l,k),((j,i),((h,g),z))))),(y,(x,(w,v)))));",
+                "((((u,t),(s,r)),(((q,p),(o,(n,m))),(((l,k),(j,i)),((h,g),z)))),((y,x),(w,v)));",
+            ),
+            (
+                20,
+                true,
+                "(((y,x),(w,v)),((u,(t,s)),((r,q),(p,(o,(n,(m,(l,k))))))),((j,(i,(h,g))),z));",
+                "(((r,q),((p,o),(n,(m,(l,(k,j)))))),((i,(h,g)),(z,(y,(x,(w,v))))),(u,(t,s)));",
+            ),
+            (
+                24,
+                true,
+                "((((k,(j,i)),(h,g)),((z,(y,(x,w))),((v,(u,t)),(s,r)))),(q,(p,(o,n))),(m,l));",
+                "((((s,r),((q,p),(o,(n,m)))),((l,k),((j,i),((h,g),z)))),(y,x),(w,(v,(u,t))));",
+            ),
+            (
+                18,
+                true,
+                "((w,(v,(u,(t,s)))),(r,q),((p,(o,n)),((m,(l,k)),((j,(i,(h,g))),(z,(y,x))))));",
+                "(((y,x),((w,v),(u,(t,s)))),((r,(q,(p,(o,n)))),(m,l)),((k,j),((i,(h,g)),z)));",
+            ),
+            (
+                26,
+                true,
+                "(((j,(i,(h,g))),(z,(y,(x,(w,(v,(u,t))))))),(s,r),((q,p),((o,(n,m)),(l,k))));",
+                "(((s,(r,(q,(p,(o,(n,(m,l))))))),(k,j)),((i,(h,g)),(z,y)),((x,(w,v)),(u,t)));",
+            ),
+            (
+                30,
+                true,
+                "((((r,(q,(p,(o,n)))),((m,l),(k,(j,i)))),((h,g),z)),(y,(x,(w,v))),(u,(t,s)));",
+                "(((u,t),(s,r)),((q,p),(o,(n,(m,(l,(k,j)))))),(((i,(h,g)),(z,(y,x))),(w,v)));",
+            ),
+            (
+                30,
+                false,
+                "((((m,(l,k)),(j,i)),(((h,g),(z,y)),(x,w))),((v,u),(t,(s,(r,(q,(p,(o,n))))))));",
+                "(((u,t),((s,(r,q)),(p,(o,(n,(m,(l,k))))))),((j,(i,(h,g))),(z,(y,(x,(w,v))))));",
+            ),
+            (
+                22,
+                false,
+                "(((k,(j,i)),(h,g)),((z,(y,x)),((w,(v,(u,(t,(s,r))))),((q,(p,(o,n))),(m,l)))));",
+                "(((w,(v,u)),((t,(s,r)),((q,p),((o,(n,(m,l))),((k,(j,i)),((h,g),z)))))),(y,x));",
+            ),
+            (
+                26,
+                false,
+                "(((x,(w,(v,(u,(t,s))))),(r,q)),((p,(o,(n,(m,l)))),((k,j),((i,(h,g)),(z,y)))));",
+                "(((o,(n,m)),(l,(k,j))),(((i,(h,g)),(z,y)),((x,w),((v,u),((t,(s,r)),(q,p))))));",
+            ),
+            (
+                28,
+                true,
+                "(((x,(w,v)),(u,(t,s))),((r,(q,(p,(o,(n,m))))),(l,(k,(j,(i,(h,g)))))),(z,y));",
+                "((((i,(h,g)),(z,(y,x))),((w,v),((u,t),(s,(r,(q,p)))))),(o,n),((m,l),(k,j)));",
+            ),
+            (
+                20,
+                false,
+                "((((m,l),(k,(j,(i,(h,g))))),(z,y)),((x,(w,(v,(u,(t,s))))),(r,(q,(p,(o,n))))));",
+                "((((m,l),((k,(j,i)),(h,g))),(z,(y,(x,(w,v))))),((u,t),(s,(r,(q,(p,(o,n)))))));",
+            ),
+            (
+                26,
+                true,
+                "(((o,(n,(m,(l,k)))),(j,i)),((h,g),(z,y)),((x,(w,(v,(u,(t,s))))),(r,(q,p))));",
+                "((((t,(s,(r,(q,(p,(o,n)))))),(m,(l,k))),((j,i),(h,g))),(z,(y,x)),(w,(v,u)));",
+            ),
+            (
+                22,
+                false,
+                "((((p,o),((n,m),((l,k),(j,i)))),((h,g),(z,y))),((x,(w,(v,u))),((t,s),(r,q))));",
+                "((((v,(u,(t,s))),(r,q)),((p,o),((n,m),(l,k)))),(((j,i),(h,g)),(z,(y,(x,w)))));",
+            ),
+            (
+                28,
+                false,
+                "((((r,(q,(p,(o,n)))),(m,(l,k))),(((j,i),(h,g)),((z,y),(x,w)))),((v,u),(t,s)));",
+                "((((k,j),((i,(h,g)),(z,y))),(x,w)),(((v,(u,t)),(s,r)),((q,p),((o,n),(m,l)))));",
+            ),
+            (
+                20,
+                true,
+                "((((q,(p,o)),(n,m)),((l,k),((j,i),(h,g)))),(z,(y,x)),((w,v),(u,(t,(s,r)))));",
+                "((((l,(k,(j,i))),(h,g)),((z,y),(x,(w,v)))),(u,t),((s,(r,(q,(p,o)))),(n,m)));",
+            ),
+            (
+                28,
+                false,
+                "(((t,(s,r)),(q,(p,o))),(((n,(m,(l,k))),(j,(i,(h,g)))),((z,y),(x,(w,(v,u))))));",
+                "(((w,(v,u)),(t,s)),(((r,(q,p)),(o,n)),(((m,l),((k,j),((i,(h,g)),z))),(y,x))));",
+            ),
+            (
+                24,
+                true,
+                "((((h,g),(z,y)),((x,(w,(v,u))),(t,(s,(r,q))))),(p,o),((n,m),((l,k),(j,i))));",
+                "(((t,s),((r,(q,p)),((o,(n,(m,l))),((k,j),(i,(h,g)))))),(z,y),(x,(w,(v,u))));",
+            ),
+            (
+                20,
+                true,
+                "(((p,o),(n,(m,(l,(k,(j,i)))))),((h,g),z),((y,(x,w)),((v,u),(t,(s,(r,q))))));",
+                "(((y,(x,w)),(v,(u,t))),((s,r),(q,p)),((o,(n,m)),((l,(k,(j,i))),((h,g),z))));",
+            ),
+            (
+                32,
+                true,
+                "((((s,(r,q)),((p,(o,n)),(m,(l,k)))),((j,(i,(h,g))),(z,y))),(x,w),(v,(u,t)));",
+                "(((u,(t,(s,r))),((q,(p,o)),((n,(m,l)),(k,(j,i))))),((h,g),(z,(y,x))),(w,v));",
+            ),
+            (
+                26,
+                true,
+                "(((z,(y,x)),(w,(v,(u,t)))),(s,(r,(q,(p,(o,n))))),((m,l),(k,(j,(i,(h,g))))));",
+                "(((u,t),((s,r),((q,p),((o,n),((m,(l,k)),((j,i),((h,g),z))))))),(y,x),(w,v));",
+            ),
+            (
+                10,
+                true,
+                "(((p,o),((n,m),((l,(k,(j,i))),((h,g),(z,y))))),(x,(w,(v,u))),((t,s),(r,q)));",
+                "((((n,m),((l,(k,(j,i))),((h,g),(z,y)))),(x,w)),(v,(u,(t,(s,(r,q))))),(p,o));",
+            ),
+            (
+                30,
+                true,
+                "((((h,g),z),((y,x),((w,v),(u,t)))),(s,r),((q,p),((o,n),((m,l),(k,(j,i))))));",
+                "((((v,(u,(t,(s,r)))),(q,(p,o))),((n,m),((l,k),(j,(i,(h,g)))))),(z,y),(x,w));",
+            ),
+            (
+                30,
+                false,
+                "(((q,(p,o)),((n,m),((l,(k,(j,(i,(h,g))))),(z,y)))),((x,(w,v)),(u,(t,(s,r)))));",
+                "((((t,s),((r,q),((p,o),(n,m)))),((l,k),(j,i))),(((h,g),z),((y,(x,w)),(v,u))));",
+            ),
+            (
+                // This is the only test case that does not work. I'm still not sure why RF should
+                // 24...
+                24,
+                false,
+                "(((p,o),(n,m)),(((l,(k,(j,i))),(h,g)),((z,y),((x,w),((v,u),(t,(s,(r,q))))))));",
+                "((x,(w,v)),((u,(t,(s,(r,q)))),((p,(o,(n,(m,(l,(k,(j,(i,(h,g))))))))),(z,y))));",
+            ),
+            (
+                28,
+                false,
+                "(((z,y),((x,w),((v,u),(t,s)))),((r,(q,(p,(o,(n,m))))),((l,k),((j,i),(h,g)))));",
+                "((((s,(r,q)),((p,o),((n,(m,l)),(k,(j,(i,(h,g))))))),(z,y)),((x,w),(v,(u,t))));",
+            ),
+            (
+                24,
+                false,
+                "((((o,n),((m,l),((k,(j,i)),(h,g)))),(z,(y,x))),((w,(v,(u,(t,(s,r))))),(q,p)));",
+                "(((q,(p,(o,(n,m)))),((l,(k,j)),(i,(h,g)))),(z,(y,(x,(w,(v,(u,(t,(s,r)))))))));",
+            ),
+            (
+                22,
+                true,
+                "(((p,(o,(n,m))),((l,k),((j,i),((h,g),(z,y))))),(x,w),((v,u),((t,s),(r,q))));",
+                "(((u,(t,(s,(r,(q,(p,(o,(n,m)))))))),((l,k),((j,i),((h,g),(z,(y,x)))))),w,v);",
+            ),
+            (
+                28,
+                false,
+                "((((r,q),((p,o),(n,(m,l)))),((k,(j,i)),(h,g))),((z,y),((x,(w,v)),(u,(t,s)))));",
+                "(((h,g),z),((y,x),((w,v),((u,t),((s,(r,(q,(p,(o,(n,m)))))),(l,(k,(j,i))))))));",
+            ),
+            (
+                30,
+                true,
+                "((((h,g),z),((y,(x,(w,(v,u)))),((t,s),((r,(q,(p,o))),(n,m))))),(l,k),(j,i));",
+                "((((o,n),((m,(l,(k,j))),((i,(h,g)),z))),(y,(x,(w,v)))),(u,(t,s)),(r,(q,p)));",
+            ),
+            (
+                30,
+                true,
+                "(((v,u),(t,(s,(r,(q,p))))),((o,(n,m)),((l,(k,j)),((i,(h,g)),z))),(y,(x,w)));",
+                "((((m,(l,k)),((j,i),(h,g))),(z,y)),(x,w),((v,(u,(t,(s,(r,q))))),(p,(o,n))));",
+            ),
+            (
+                26,
+                true,
+                "(((q,p),((o,(n,(m,l))),(k,(j,i)))),((h,g),z),((y,x),((w,(v,(u,t))),(s,r))));",
+                "((((j,(i,(h,g))),(z,(y,x))),((w,v),(u,t))),(s,(r,q)),((p,o),(n,(m,(l,k)))));",
+            ),
+            (
+                20,
+                false,
+                "((((o,(n,m)),((l,k),((j,i),((h,g),z)))),(y,x)),(((w,v),(u,t)),((s,r),(q,p))));",
+                "((((j,i),((h,g),z)),((y,x),(w,(v,(u,(t,(s,r))))))),((q,p),((o,n),(m,(l,k)))));",
+            ),
+            (
+                30,
+                false,
+                "(((x,w),(v,(u,(t,(s,(r,(q,(p,(o,(n,m)))))))))),((l,k),((j,(i,(h,g))),(z,y))));",
+                "(((m,l),((k,(j,(i,(h,g)))),z)),((y,(x,(w,(v,(u,t))))),((s,r),((q,p),(o,n)))));",
+            ),
+            (
+                32,
+                true,
+                "((((y,x),(w,v)),((u,(t,(s,r))),(q,(p,o)))),((n,m),(l,(k,j))),((i,(h,g)),z));",
+                "(((m,l),(k,(j,i))),((h,g),z),((y,(x,w)),((v,u),((t,s),(r,(q,(p,(o,n))))))));",
+            ),
+            (
+                28,
+                true,
+                "(((v,u),((t,(s,(r,(q,p)))),((o,n),((m,l),(k,(j,(i,(h,g)))))))),(z,y),(x,w));",
+                "((((n,m),((l,k),((j,i),((h,g),(z,(y,(x,(w,(v,u))))))))),(t,s)),(r,q),(p,o));",
+            ),
+            (
+                32,
+                false,
+                "(((r,(q,p)),(o,n)),(((m,(l,k)),(j,i)),(((h,g),(z,y)),((x,w),((v,u),(t,s))))));",
+                "(((y,x),((w,v),(u,(t,(s,r))))),(((q,(p,(o,n))),(m,l)),((k,(j,(i,(h,g)))),z)));",
+            ),
+            (
+                20,
+                true,
+                "(((w,v),((u,(t,(s,r))),((q,p),((o,(n,(m,l))),((k,j),((i,(h,g)),z)))))),y,x);",
+                "(((w,v),((u,t),(s,(r,q)))),((p,o),((n,(m,l)),(k,j))),((i,(h,g)),(z,(y,x))));",
+            ),
+            (
+                24,
+                false,
+                "(((x,(w,v)),((u,(t,s)),(r,q))),(((p,o),((n,(m,l)),(k,j))),((i,(h,g)),(z,y))));",
+                "((((i,(h,g)),z),((y,x),(w,v))),((u,(t,s)),((r,(q,(p,(o,(n,m))))),(l,(k,j)))));",
+            ),
+            (
+                22,
+                false,
+                "((((k,(j,(i,(h,g)))),(z,(y,x))),((w,v),(u,t))),((s,(r,(q,(p,o)))),(n,(m,l))));",
+                "(((w,v),(u,(t,(s,(r,(q,(p,o))))))),(((n,m),((l,(k,(j,i))),((h,g),z))),(y,x)));",
+            ),
+            (
+                28,
+                true,
+                "(((x,w),((v,u),((t,s),(r,(q,p))))),((o,n),(m,l)),((k,(j,i)),((h,g),(z,y))));",
+                "((((p,o),(n,m)),((l,(k,(j,i))),((h,g),z))),(y,(x,(w,v))),((u,t),(s,(r,q))));",
+            ),
+            (
+                30,
+                false,
+                "(((q,p),((o,(n,(m,l))),((k,(j,(i,(h,g)))),z))),((y,x),((w,(v,u)),(t,(s,r)))));",
+                "((((m,(l,k)),((j,(i,(h,g))),z)),(y,(x,w))),((v,(u,(t,(s,(r,q))))),(p,(o,n))));",
+            ),
+            (
+                30,
+                false,
+                "(((y,x),((w,(v,(u,(t,(s,r))))),(q,p))),((o,(n,(m,(l,(k,(j,i)))))),((h,g),z)));",
+                "((((t,(s,(r,q))),((p,(o,(n,(m,l)))),((k,(j,i)),(h,g)))),(z,y)),((x,w),(v,u)));",
+            ),
+            (
+                20,
+                false,
+                "(((u,(t,s)),(r,(q,(p,(o,(n,(m,(l,(k,j))))))))),(((i,(h,g)),z),(y,(x,(w,v)))));",
+                "(((o,n),(m,(l,(k,j)))),(((i,(h,g)),(z,y)),((x,(w,v)),((u,(t,(s,r))),(q,p)))));",
+            ),
+            (
+                26,
+                false,
+                "(((t,s),((r,(q,(p,(o,n)))),(m,(l,k)))),(((j,i),((h,g),z)),((y,(x,w)),(v,u))));",
+                "(((r,(q,(p,o))),((n,(m,(l,k))),((j,i),(h,g)))),((z,(y,(x,(w,v)))),(u,(t,s))));",
+            ),
+            (
+                28,
+                true,
+                "((((r,q),((p,(o,(n,(m,l)))),((k,(j,i)),(h,g)))),(z,(y,(x,w)))),(v,u),(t,s));",
+                "(((x,(w,(v,(u,(t,s))))),(r,(q,(p,o)))),(n,m),((l,k),((j,(i,(h,g))),(z,y))));",
+            ),
+            (
+                28,
+                false,
+                "(((t,s),((r,(q,p)),((o,n),(m,(l,(k,(j,i))))))),(((h,g),(z,y)),(x,(w,(v,u)))));",
+                "((((h,g),(z,(y,(x,(w,v))))),(u,(t,(s,r)))),((q,(p,(o,(n,m)))),(l,(k,(j,i)))));",
+            ),
+            (
+                26,
+                true,
+                "((((q,(p,o)),((n,m),((l,(k,(j,i))),(h,g)))),(z,(y,x))),(w,v),(u,(t,(s,r))));",
+                "(((y,x),(w,(v,u))),((t,(s,r)),((q,p),(o,n))),((m,(l,k)),((j,(i,(h,g))),z)));",
+            ),
+            (
+                28,
+                false,
+                "((((q,(p,(o,n))),((m,(l,k)),((j,(i,(h,g))),z))),(y,x)),((w,(v,(u,t))),(s,r)));",
+                "(((z,(y,x)),(w,v)),(((u,t),((s,(r,(q,p))),((o,n),(m,l)))),((k,(j,i)),(h,g))));",
+            ),
+            (
+                22,
+                true,
+                "(((x,w),((v,(u,(t,s))),(r,q))),((p,(o,n)),((m,(l,k)),(j,(i,(h,g))))),(z,y));",
+                "((((j,(i,(h,g))),(z,(y,x))),(w,(v,u))),((t,s),((r,q),(p,o))),((n,m),(l,k)));",
+            ),
+            (
+                26,
+                false,
+                "((((n,(m,l)),(k,j)),(((i,(h,g)),(z,y)),((x,w),((v,u),(t,s))))),((r,q),(p,o)));",
+                "(((v,u),(t,s)),(((r,(q,(p,(o,n)))),((m,(l,k)),(j,i))),((h,g),(z,(y,(x,w))))));",
+            ),
+            (
+                32,
+                false,
+                "((((n,(m,(l,(k,j)))),((i,(h,g)),z)),(y,x)),((w,v),((u,(t,(s,r))),(q,(p,o)))));",
+                "((((v,u),(t,(s,(r,(q,p))))),((o,(n,(m,(l,k)))),(j,(i,(h,g))))),((z,y),(x,w)));",
+            ),
+            (
+                20,
+                false,
+                "((((q,(p,(o,n))),(m,l)),((k,(j,(i,(h,g)))),z)),((y,(x,(w,(v,(u,t))))),(s,r)));",
+                "(((w,(v,(u,t))),(s,r)),(((q,p),(o,n)),(((m,l),(k,(j,i))),((h,g),(z,(y,x))))));",
+            ),
+            (
+                20,
+                true,
+                "(((z,(y,(x,w))),(v,u)),((t,(s,r)),(q,(p,o))),((n,(m,l)),((k,(j,i)),(h,g))));",
+                "((((q,(p,(o,n))),(m,l)),((k,j),(i,(h,g)))),(z,y),((x,w),((v,u),(t,(s,r)))));",
+            ),
+            (
+                34,
+                false,
+                "(((w,(v,(u,(t,(s,(r,q)))))),(p,o)),(((n,m),(l,(k,j))),((i,(h,g)),(z,(y,x)))));",
+                "(((y,(x,(w,(v,u)))),(t,(s,r))),(((q,(p,(o,(n,(m,(l,k)))))),(j,i)),((h,g),z)));",
+            ),
+            (
+                26,
+                false,
+                "(((y,x),(w,(v,(u,t)))),(((s,r),((q,(p,o)),(n,(m,l)))),((k,(j,(i,(h,g)))),z)));",
+                "(((s,(r,(q,(p,o)))),(n,m)),(((l,k),((j,i),((h,g),(z,(y,(x,w)))))),(v,(u,t))));",
+            ),
+            (
+                30,
+                false,
+                "(((v,(u,t)),((s,r),((q,p),((o,(n,(m,(l,k)))),(j,i))))),(((h,g),z),(y,(x,w))));",
+                "(((y,(x,(w,v))),((u,(t,s)),(r,(q,(p,o))))),((n,(m,l)),((k,(j,i)),((h,g),z))));",
+            ),
+            (
+                26,
+                false,
+                "(((y,x),(w,v)),(((u,t),((s,(r,(q,p))),(o,n))),((m,(l,k)),((j,i),((h,g),z)))));",
+                "((((s,(r,q)),((p,(o,n)),((m,l),(k,(j,i))))),((h,g),z)),((y,(x,w)),(v,(u,t))));",
+            ),
+            (
+                22,
+                true,
+                "(((w,v),(u,t)),((s,r),((q,p),((o,(n,m)),((l,k),((j,i),(h,g)))))),(z,(y,x)));",
+                "(((z,y),(x,(w,(v,u)))),(t,(s,r)),((q,(p,o)),((n,m),((l,(k,(j,i))),(h,g)))));",
+            ),
+            (
+                28,
+                false,
+                "(((y,x),(w,(v,(u,t)))),(((s,(r,q)),((p,o),(n,(m,(l,k))))),((j,i),((h,g),z))));",
+                "((((i,(h,g)),(z,(y,x))),((w,(v,u)),(t,s))),((r,q),((p,o),((n,m),(l,(k,j))))));",
+            ),
+            (
+                26,
+                false,
+                "(((v,(u,(t,s))),(r,(q,p))),(((o,n),((m,(l,(k,j))),((i,(h,g)),(z,y)))),(x,w)));",
+                "(((q,p),((o,n),((m,l),((k,j),((i,(h,g)),z))))),(y,(x,(w,(v,(u,(t,(s,r))))))));",
+            ),
+            (
+                26,
+                true,
+                "(((t,(s,(r,q))),((p,o),((n,(m,l)),((k,j),((i,(h,g)),z))))),(y,x),(w,(v,u)));",
+                "(((z,y),(x,w)),(v,u),((t,(s,r)),((q,(p,(o,(n,(m,l))))),((k,(j,i)),(h,g)))));",
+            ),
+            (
+                30,
+                true,
+                "(((w,(v,(u,(t,(s,r))))),(q,p)),((o,(n,m)),((l,k),(j,i))),(((h,g),z),(y,x)));",
+                "((((p,o),(n,(m,(l,(k,(j,(i,(h,g)))))))),(z,(y,x))),(w,(v,u)),((t,s),(r,q)));",
+            ),
+            (
+                26,
+                true,
+                "((((i,(h,g)),(z,y)),(x,w)),((v,u),((t,(s,r)),(q,p))),((o,n),(m,(l,(k,j)))));",
+                "(((l,k),((j,i),((h,g),(z,y)))),(x,w),((v,u),((t,s),((r,(q,(p,o))),(n,m)))));",
+            ),
+            (
+                26,
+                false,
+                "(((x,w),((v,(u,(t,s))),((r,(q,p)),((o,(n,(m,(l,k)))),((j,i),(h,g)))))),(z,y));",
+                "(((p,(o,(n,m))),(l,k)),(((j,i),(h,g)),((z,y),((x,(w,v)),((u,t),(s,(r,q)))))));",
+            ),
+            (
+                24,
+                true,
+                "(((x,w),((v,(u,t)),(s,r))),((q,p),(o,(n,(m,(l,k))))),((j,i),((h,g),(z,y))));",
+                "(((h,g),(z,y)),(x,(w,(v,u))),((t,(s,r)),(q,(p,(o,(n,(m,(l,(k,(j,i))))))))));",
+            ),
+            (
+                24,
+                true,
+                "(((y,x),(w,v)),((u,t),((s,r),((q,p),((o,n),(m,(l,k)))))),((j,(i,(h,g))),z));",
+                "((((r,(q,p)),(o,(n,(m,(l,(k,(j,(i,(h,g))))))))),(z,y)),(x,(w,v)),(u,(t,s)));",
+            ),
+            (
+                28,
+                false,
+                "(((y,(x,(w,v))),((u,t),((s,(r,q)),((p,(o,n)),((m,l),(k,(j,i))))))),((h,g),z));",
+                "(((v,u),(t,(s,(r,(q,(p,(o,n))))))),(((m,l),((k,j),((i,(h,g)),z))),(y,(x,w))));",
+            ),
+            (
+                26,
+                true,
+                "((((h,g),z),((y,x),((w,(v,u)),((t,(s,(r,q))),(p,(o,n)))))),(m,(l,k)),(j,i));",
+                "((z,y),(x,(w,(v,(u,t)))),((s,r),((q,p),((o,n),((m,(l,k)),(j,(i,(h,g))))))));",
+            ),
+            (
+                24,
+                true,
+                "(((u,t),(s,r)),((q,p),((o,n),((m,(l,(k,(j,(i,(h,g)))))),z))),(y,(x,(w,v))));",
+                "((((j,(i,(h,g))),z),(y,x)),(w,(v,(u,t))),((s,(r,(q,p))),((o,(n,m)),(l,k))));",
+            ),
+            (
+                30,
+                true,
+                "(((t,(s,r)),((q,p),((o,n),(m,(l,(k,j)))))),((i,(h,g)),z),((y,x),(w,(v,u))));",
+                "((((w,(v,(u,t))),(s,(r,q))),((p,(o,(n,m))),(l,k))),((j,i),(h,g)),(z,(y,x)));",
+            ),
+            (
+                30,
+                false,
+                "((((x,(w,v)),(u,t)),((s,(r,q)),(p,o))),(((n,m),((l,k),((j,i),(h,g)))),(z,y)));",
+                "((r,q),((p,(o,n)),((m,(l,(k,(j,i)))),((h,g),(z,(y,(x,(w,(v,(u,(t,s)))))))))));",
+            ),
+            (
+                28,
+                true,
+                "((((k,j),((i,(h,g)),(z,(y,x)))),(w,v)),(u,t),((s,(r,q)),(p,(o,(n,(m,l))))));",
+                "(((z,y),(x,w)),(v,(u,(t,(s,(r,q))))),((p,o),((n,(m,(l,(k,(j,i))))),(h,g))));",
+            ),
+            (
+                18,
+                true,
+                "(((t,s),((r,(q,(p,o))),(n,m))),((l,(k,j)),((i,(h,g)),(z,y))),((x,w),(v,u)));",
+                "((((l,k),(j,i)),(((h,g),(z,y)),(x,w))),((v,u),(t,s)),((r,q),((p,o),(n,m))));",
+            ),
+            (
+                26,
+                true,
+                "(((h,g),z),(y,(x,w)),((v,(u,(t,s))),((r,(q,p)),((o,(n,(m,l))),(k,(j,i))))));",
+                "(((s,r),(q,p)),((o,n),(m,l)),(((k,j),((i,(h,g)),(z,(y,x)))),(w,(v,(u,t)))));",
+            ),
+            (
+                30,
+                true,
+                "(((x,w),((v,(u,(t,(s,(r,(q,(p,(o,n)))))))),((m,(l,k)),((j,i),(h,g))))),z,y);",
+                "((((h,g),z),(y,x)),((w,v),((u,(t,s)),(r,q))),((p,(o,(n,(m,l)))),(k,(j,i))));",
+            ),
+            (
+                30,
+                false,
+                "(((v,(u,(t,(s,(r,q))))),((p,(o,(n,m))),((l,(k,(j,i))),(h,g)))),((z,y),(x,w)));",
+                "(((v,u),((t,(s,(r,(q,(p,o))))),(n,(m,(l,(k,j)))))),((i,(h,g)),(z,(y,(x,w)))));",
+            ),
+            (
+                22,
+                true,
+                "(((z,y),((x,(w,v)),((u,(t,(s,r))),(q,(p,o))))),(n,m),((l,k),(j,(i,(h,g)))));",
+                "(((r,q),(p,(o,(n,m)))),((l,(k,(j,(i,(h,g))))),(z,y)),((x,w),(v,(u,(t,s)))));",
+            ),
+            (
+                30,
+                true,
+                "(((x,w),((v,(u,(t,(s,r)))),(q,p))),((o,n),(m,l)),((k,j),((i,(h,g)),(z,y))));",
+                "((((p,o),((n,(m,(l,k))),((j,i),(h,g)))),((z,y),(x,(w,v)))),(u,t),(s,(r,q)));",
+            ),
+            (
+                32,
+                false,
+                "(((r,(q,p)),(o,(n,m))),(((l,(k,(j,i))),(h,g)),((z,(y,(x,(w,(v,u))))),(t,s))));",
+                "((((j,(i,(h,g))),(z,y)),(x,(w,(v,(u,t))))),(((s,r),(q,(p,o))),((n,m),(l,k))));",
+            ),
+            (
+                30,
+                false,
+                "((((q,p),((o,(n,(m,(l,k)))),((j,(i,(h,g))),(z,y)))),(x,w)),((v,u),(t,(s,r))));",
+                "((((o,(n,m)),((l,(k,(j,i))),((h,g),z))),(y,x)),((w,v),((u,t),((s,r),(q,p)))));",
+            ),
+            (
+                28,
+                false,
+                "((((s,r),((q,(p,o)),(n,(m,l)))),((k,(j,i)),(h,g))),((z,(y,x)),(w,(v,(u,t)))));",
+                "(((m,l),(k,j)),(((i,(h,g)),z),((y,x),((w,(v,(u,(t,(s,r))))),((q,p),(o,n))))));",
+            ),
+            (
+                20,
+                true,
+                "((((z,y),(x,(w,(v,u)))),((t,s),(r,q))),((p,o),(n,(m,l))),((k,(j,i)),(h,g)));",
+                "(((j,i),(h,g)),(z,(y,x)),((w,(v,u)),((t,(s,(r,q))),((p,o),((n,m),(l,k))))));",
+            ),
+            (
+                20,
+                false,
+                "(((v,u),((t,s),(r,q))),(((p,o),(n,(m,l))),(((k,(j,i)),((h,g),z)),(y,(x,w)))));",
+                "((((s,(r,q)),(p,o)),(((n,(m,l)),(k,(j,i))),((h,g),z))),((y,x),((w,v),(u,t))));",
+            ),
+            (
+                28,
+                true,
+                "((z,y),(x,w),((v,u),((t,(s,(r,q))),((p,(o,(n,m))),(l,(k,(j,(i,(h,g)))))))));",
+                "((((r,q),((p,o),((n,m),((l,k),(j,i))))),((h,g),(z,(y,x)))),(w,v),(u,(t,s)));",
+            ),
+            (
+                24,
+                false,
+                "((((k,(j,(i,(h,g)))),(z,y)),(x,(w,v))),(((u,t),(s,(r,q))),((p,o),(n,(m,l)))));",
+                "(((w,v),(u,(t,s))),(((r,(q,(p,o))),((n,m),(l,(k,(j,(i,(h,g))))))),(z,(y,x))));",
+            ),
+            (
+                24,
+                true,
+                "((((n,m),((l,(k,j)),(i,(h,g)))),(z,y)),(x,(w,v)),((u,(t,(s,(r,q)))),(p,o)));",
+                "(((r,q),(p,o)),((n,(m,l)),((k,j),((i,(h,g)),z))),((y,x),(w,(v,(u,(t,s))))));",
+            ),
+        ];
+
+        let mut failed = vec![];
+
+        for (i, (expected, unrooted, nw1, nw2)) in cases.into_iter().enumerate() {
+            let t1 = Tree::from_newick(nw1).unwrap();
+            let t2 = Tree::from_newick(nw2).unwrap();
+
+            let rf = t1.robinson_foulds(&t2).unwrap();
+
+            // Add information to failure output
+            if expected != rf {
+                let p1 = t1.get_partitions().unwrap();
+                let p2 = t2.get_partitions().unwrap();
+
+                let p1_s: Result<Vec<_>, _> =
+                    p1.iter().map(|part| t1.partition_to_leaves(part)).collect();
+                let p2_s: Result<Vec<_>, _> =
+                    p2.iter().map(|part| t2.partition_to_leaves(part)).collect();
+
+                let mut p1_s = p1_s.unwrap();
+                let mut p2_s = p2_s.unwrap();
+
+                p1_s.sort();
+                p2_s.sort();
+
+                failed.push((i, rf, expected, nw1, nw2, unrooted, p1_s, p2_s));
+            }
+        }
+
+        assert!(failed.is_empty(), "Failed cases:\n{failed:#?}")
     }
 }
