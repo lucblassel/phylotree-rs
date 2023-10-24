@@ -113,14 +113,18 @@ pub struct Comparison {
 }
 
 /// Used to hold compared tree edges
-type EdgeCompare = (Vec<Edge>, Vec<Edge>, Vec<(Edge, Edge)>);
+type EdgeCompare = (
+    Vec<(usize, Edge)>,
+    Vec<(usize, Edge)>,
+    Vec<((usize, Edge), (usize, Edge))>,
+);
 
 /// A Phylogenetic tree
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
     leaf_index: RefCell<Option<Vec<String>>>,
-    partitions: RefCell<Option<HashMap<FixedBitSet, Option<Edge>>>>,
+    partitions: RefCell<Option<HashMap<FixedBitSet, (usize, Option<Edge>)>>>,
 }
 
 /// Base methods to add and get [`Node`] objects to and from the [`Tree`].
@@ -874,7 +878,7 @@ impl Tree {
             return Ok(());
         }
 
-        let mut partitions: HashMap<FixedBitSet, Option<f64>> = HashMap::new();
+        let mut partitions: HashMap<FixedBitSet, (usize, Option<f64>)> = HashMap::new();
 
         for node in self
             .nodes
@@ -888,16 +892,16 @@ impl Tree {
             }
 
             let new_len = node.parent_edge;
-            let old_len = partitions.get(&part);
+            let old_value = partitions.get(&part);
 
-            let len = match (new_len, old_len) {
+            let len = match (new_len, old_value) {
                 (None, None) => None,
-                (Some(new_len), Some(old_len)) => old_len.map(|v| v + new_len),
+                (Some(new_len), Some((_, old_len))) => old_len.map(|v| v + new_len),
                 (Some(new_len), None) => Some(new_len),
-                (None, Some(old_len)) => *old_len,
+                (None, Some((_, old_len))) => *old_len,
             };
 
-            partitions.insert(part, len);
+            partitions.insert(part, (node.depth, len));
         }
 
         (*self.partitions.borrow_mut()) = Some(partitions);
@@ -920,19 +924,17 @@ impl Tree {
         ))
     }
 
-    /// Get all partitions of a tree along with corresponding branch lengths
+    /// Get all partitions of a tree along with corresponding branch lengths and branch depths
     pub(crate) fn get_partitions_with_lengths(
         &self,
-    ) -> Result<HashMap<FixedBitSet, f64>, TreeError> {
+    ) -> Result<HashMap<FixedBitSet, (usize, f64)>, TreeError> {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
         let mut partitions = HashMap::new();
-        for (bitset, len) in self.partitions.borrow().as_ref().unwrap().iter() {
-            if len.is_none() {
-                return Err(TreeError::MissingBranchLengths);
-            }
-            partitions.insert(bitset.clone(), len.unwrap());
+        for (bitset, (depth, len)) in self.partitions.borrow().as_ref().unwrap().iter() {
+            let len = len.ok_or(TreeError::MissingBranchLengths)?;
+            partitions.insert(bitset.clone(), (*depth, len));
         }
 
         Ok(partitions)
@@ -1038,15 +1040,15 @@ impl Tree {
 
         let mut dist = 0.;
 
-        for (edge, len_s) in partitions_s.iter() {
-            if let Some(len_o) = partitions_o.get(edge) {
+        for (edge, (_, len_s)) in partitions_s.iter() {
+            if let Some((_, len_o)) = partitions_o.get(edge) {
                 dist += (len_s - len_o).abs()
             } else {
                 dist += len_s
             }
         }
 
-        for (edge, len_o) in partitions_o.iter() {
+        for (edge, (_, len_o)) in partitions_o.iter() {
             if !partitions_s.contains_key(edge) {
                 dist += len_o
             }
@@ -1074,15 +1076,15 @@ impl Tree {
 
         let mut dist = 0.;
 
-        for (edge, len_s) in partitions_s.iter() {
-            if let Some(len_o) = partitions_o.get(edge) {
+        for (edge, (_, len_s)) in partitions_s.iter() {
+            if let Some((_, len_o)) = partitions_o.get(edge) {
                 dist += f64::powi(len_s - len_o, 2)
             } else {
                 dist += f64::powi(*len_s, 2)
             }
         }
 
-        for (edge, len_o) in partitions_o.iter() {
+        for (edge, (_, len_o)) in partitions_o.iter() {
             if !partitions_s.contains_key(edge) {
                 dist += f64::powi(*len_o, 2)
             }
@@ -1122,8 +1124,8 @@ impl Tree {
         let mut rf_weight = 0.;
         let mut kf = 0.;
 
-        for (edge, len_s) in partitions_s.iter() {
-            if let Some(len_o) = partitions_o.get(edge) {
+        for (edge, (_, len_s)) in partitions_s.iter() {
+            if let Some((_, len_o)) = partitions_o.get(edge) {
                 rf_weight += (len_s - len_o).abs();
                 kf += f64::powi(len_s - len_o, 2);
                 intersection += 1.0;
@@ -1133,7 +1135,7 @@ impl Tree {
             }
         }
 
-        for (edge, len_o) in partitions_o.iter() {
+        for (edge, (_, len_o)) in partitions_o.iter() {
             if !partitions_s.contains_key(edge) {
                 rf_weight += len_o;
                 kf += f64::powi(*len_o, 2);
@@ -1264,20 +1266,20 @@ impl Tree {
             let selftips = self.get_terminal_branches()?;
             let othertips = other.get_terminal_branches()?;
 
-            for (tipname, len_s) in selftips.iter() {
+            for (tipname, (depth_s, len_s)) in selftips.iter() {
                 let len_s = len_s.ok_or(TreeError::MissingBranchLengths)?;
-                if let Some(len_o) = othertips.get(tipname) {
+                if let Some((depth_o, len_o)) = othertips.get(tipname) {
                     let len_o = len_o.ok_or(TreeError::MissingBranchLengths)?;
-                    common_branches.push((len_s, len_o));
+                    common_branches.push(((*depth_s, len_s), (*depth_o, len_o)));
                 } else {
-                    self_branches.push(len_s);
+                    self_branches.push((*depth_s, len_s));
                 }
             }
 
-            for (tipname, len_o) in othertips.iter() {
+            for (tipname, (depth_o, len_o)) in othertips.iter() {
                 if !selftips.contains_key(tipname) {
                     let len_o = len_o.ok_or(TreeError::MissingBranchLengths)?;
-                    other_branches.push(len_o);
+                    other_branches.push((*depth_o, len_o));
                 }
             }
         }
@@ -1286,14 +1288,14 @@ impl Tree {
     }
 
     // Get terminal branch lengths of a tree keyed by tip name
-    fn get_terminal_branches(&self) -> Result<HashMap<String, Option<Edge>>, TreeError> {
+    fn get_terminal_branches(&self) -> Result<HashMap<String, (usize, Option<Edge>)>, TreeError> {
         if !self.has_unique_tip_names()? {
             return Err(TreeError::DuplicateLeafNames);
         }
 
         Ok(HashMap::from_iter(self.get_leaves().iter().map(|idx| {
             let node = self.get(idx).unwrap();
-            (node.name.clone().unwrap(), node.parent_edge)
+            (node.name.clone().unwrap(), (node.depth, node.parent_edge))
         })))
     }
 }
@@ -1806,6 +1808,24 @@ impl Tree {
         }
 
         Ok(())
+    }
+
+    // recusrive implementation of depth recomputation
+    fn reset_depth_impl(&mut self, root: &NodeId, depth: usize) -> Result<(), TreeError> {
+        let root = self.get_mut(&root)?;
+        root.set_depth(depth);
+
+        for child in root.children.clone().iter() {
+            self.reset_depth_impl(&child, depth + 1)?
+        }
+
+        Ok(())
+    }
+
+    /// Recompute node depths and set them correctly.
+    pub fn reset_depths(&mut self) -> Result<(), TreeError> {
+        let root = self.get_root()?;
+        self.reset_depth_impl(&root, 0)
     }
 }
 
