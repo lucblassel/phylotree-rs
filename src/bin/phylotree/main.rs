@@ -16,6 +16,7 @@ use phylotree::{
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
+    fmt::Display,
     fs::File,
     io,
     io::{BufWriter, Write},
@@ -37,6 +38,13 @@ fn print_stats_header(name: bool) {
     }
 }
 
+fn to_repr<T, E>(res: Result<T, E>) -> String
+where
+    T: Display,
+{
+    res.map_or_else(|_| "-".into(), |v| format!("{v}"))
+}
+
 fn print_stats(path: &Path, name: bool) {
     let tree = Tree::from_file(path).unwrap();
 
@@ -48,22 +56,18 @@ fn print_stats(path: &Path, name: bool) {
 
     println!(
         "{name}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        tree.height()
-            .map_or_else(|_| "-".to_string(), |v| format!("{}", v)),
-        tree.diameter().unwrap_or(0.0),
+        to_repr(tree.height()),
+        to_repr(tree.diameter()),
         tree.size(),
         tree.n_leaves(),
-        tree.is_rooted().unwrap(),
-        tree.is_binary().unwrap(),
-        tree.cherries().unwrap(),
-        tree.colless()
-            .map(|v| format!("{}", v))
-            .unwrap_or("-".to_string()),
-        tree.sackin()
-            .map(|v| format!("{}", v))
-            .unwrap_or("-".to_string()),
+        to_repr(tree.is_rooted()),
+        to_repr(tree.is_binary()),
+        to_repr(tree.cherries()),
+        to_repr(tree.colless()),
+        to_repr(tree.sackin()),
     )
 }
+
 fn main() {
     match cli::Args::parse().command {
         cli::Commands::Generate {

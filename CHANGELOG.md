@@ -1,7 +1,10 @@
 # Phylotree changelog
 
 ## Unreleased
-Nothing...
+### Added
+- Adding branch depth information to bipartitions
+### Changed
+- Better output for `phylotree stats` command.
 
 ## v0.1.2 - 2023-09-20
 ### Added
