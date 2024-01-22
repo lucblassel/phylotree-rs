@@ -2129,6 +2129,36 @@ impl Tree {
         Self::from_newick(&newick_string)
     }
 
+    /// Outputs a Nexus formatted string of the tree
+    pub fn to_nexus(&self) -> Result<String, TreeError> {
+        let nwk = self.to_newick()?;
+        let n = self.n_leaves();
+        let labels = self
+            .nodes
+            .iter()
+            .map(|node| {
+                if node.is_tip() {
+                    node.name.clone()
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .join(" ");
+
+        Ok(format!(
+            "#NEXUS
+BEGIN TAXA;
+    DIMENSIONS NTAX={n};
+    TAXLABELS {labels};
+END;
+BEGIN TREES;
+    TREE tree1 = {nwk}
+END;
+"
+        ))
+    }
+
     /// Recursive function that adds node representation to a printable tree builder
     fn print_nodes(
         &self,
@@ -2483,6 +2513,13 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             assert_eq!(newick, tree.to_newick().unwrap());
         }
+    }
+
+    #[test]
+    fn to_nexus() {
+        let tree = crate::generate_tree(10, true, crate::distr::Distr::Uniform).unwrap();
+        println!("{}", tree.to_nexus().unwrap());
+        panic!()
     }
 
     #[test]
