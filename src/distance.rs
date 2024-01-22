@@ -2,7 +2,7 @@
 //!
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{Debug, Display},
     fs,
     path::Path,
@@ -73,6 +73,9 @@ where
     /// The size of the matrix and the number of rows do not match
     #[error("Size and number of rows do not match: {0} rows for size {1}")]
     SizeAndRowsMismatch(usize, usize),
+    /// A value on the diagonal is non 0
+    #[error("Non 0 diagonal distance for taxa {0}")]
+    NonZeroDiagonalValue(String),
     /// The square phylip matrix is not symmetric
     #[error("Non symetric matrix: {0} and {1} are different")]
     NonSymmetric(T, T),
@@ -285,9 +288,19 @@ where
         let mut matrix = Self::new_with_size(size);
         matrix.set_taxa(names.iter().cloned().map(|v| v.to_string()).collect_vec())?;
 
+        let mut seen = HashSet::new();
+
         for (&n1, row) in names.iter().zip(rows) {
             for (&n2, dist) in names.iter().zip(row) {
-                matrix.set(n1, n2, dist)?;
+                if seen.contains(&(n2.to_string(), n1.to_string())) {
+                    let known = matrix.get(n1, n2)?;
+                    if *known != dist {
+                        return Err(ParseError::NonSymmetric(*known, dist));
+                    }
+                } else {
+                    seen.insert((n1.to_string(), n2.to_string()));
+                    matrix.set(n1, n2, dist)?;
+                }
             }
         }
 
@@ -381,21 +394,21 @@ s5    5  10  15
 
     #[test]
     fn from_phylip_errors() {
-        //         let square_nonsym = "4
-        // s1    0  2  3  7
-        // s2    2  0  6  10
-        // s3    3  6  0  15
-        // s5    5  10  15  0
-        // ";
-        //         let mut matrix: Result<DistanceMatrix<f32>, _> =
-        //             DistanceMatrix::from_phylip(square_nonsym, true);
-        //         assert!(matrix.is_err());
-        //
-        //         let err = matrix.err().unwrap();
-        //         match err {
-        //             ParseError::NonSymmetric(_, _) => {}
-        //             _ => panic!("Error should be 'ParseError::NonSymmetric' not: {err}"),
-        //         }
+        let square_nonsym = "4
+s1    0  2  3  7
+s2    2  0  6  10
+s3    3  6  0  15
+s5    5  10  15  0
+";
+        let matrix: Result<DistanceMatrix<f32>, _> =
+            DistanceMatrix::from_phylip(square_nonsym, true);
+        assert!(matrix.is_err());
+
+        let err = matrix.err().unwrap();
+        match err {
+            ParseError::NonSymmetric(_, _) => {}
+            _ => panic!("Error should be 'ParseError::NonSymmetric' not: {err}"),
+        }
 
         let square_missing_dist = "4
 s1    0  2  3  7
@@ -439,6 +452,22 @@ s5    5  10  15  0
         match err {
             ParseError::SizeParseError(_) => {}
             _ => panic!("Error should be 'ParseError::SizeParseError' not: {err}"),
+        }
+
+        let square_nonzero = "4
+s1    1  2  3  7
+s2    2  0  6  10
+s3    3  6  0  15
+s5    7  10  15  0
+";
+        let matrix: Result<DistanceMatrix<f32>, _> =
+            DistanceMatrix::from_phylip(square_nonzero, true);
+        assert!(matrix.is_err());
+
+        let err = matrix.err().unwrap();
+        match err {
+            ParseError::MatrixError(_) => {}
+            _ => panic!("Error should be 'ParseError::MatrixError' not: {err}"),
         }
     }
 }
