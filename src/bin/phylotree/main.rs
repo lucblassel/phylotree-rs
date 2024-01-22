@@ -2,7 +2,8 @@
 //! The `phylotree` binary is a command line tool, using the `[phylotree]` crate.
 //! It is made to execute common operations on phylogenetic trees directly in the terminal.
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use itertools::Itertools;
 use phylotree::{
     distr::Distr,
@@ -399,6 +400,11 @@ fn main() {
             writer
                 .write(tt.render("svg", &ctx).unwrap().as_bytes())
                 .unwrap();
+        }
+        cli::Commands::Completion { shell } => {
+            let mut cmd = cli::Args::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, name, &mut io::stdout());
         }
     }
 }

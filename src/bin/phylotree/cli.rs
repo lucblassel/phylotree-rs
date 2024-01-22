@@ -1,11 +1,15 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 use phylotree::distr::Distr;
 use phylotree::TreeShape;
 
+const ABOUT: &str = "A Simple command line tool to manipulate phylogenetic trees";
+
 /// A simple command line tool to manipulate phylogenetic trees
 #[derive(Parser, Debug)]
+#[command(author, version, long_about=ABOUT)]
 pub struct Args {
     #[command(subcommand)]
     /// The command to execute
@@ -155,4 +159,12 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Generate shell-completion scripts
+    Completion {
+        /// Shell
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
+
+impl Commands {}
