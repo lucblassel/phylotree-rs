@@ -52,21 +52,23 @@ pub enum Commands {
         trees: Vec<PathBuf>,
     },
 
-    /// Compare two phylogenetic trees
+    /// Compare phylogenetic trees to a reference 
     ///
     /// This will return:
+    ///  - the path of the compared tree
     ///  - the number of bipartitions unique to the reference tree
     ///  - the number of common bipartitions
     ///  - the number of bipartitions unique to the compared tree
     ///  - the Robinson-Foulds distance
+    ///  - the normalize Robinson-Foulds distance
     ///  - the weighted Robinson-Foulds distance
     ///  - the Khuner-Felsenstein branch-score
     #[clap(verbatim_doc_comment)]
     Compare {
         /// Reference tree
         reftree: PathBuf,
-        /// Tree to compare to reference
-        tocompare: PathBuf,
+        /// Tree(s) to compare to reference
+        tocompare: Vec<PathBuf>,
     },
     /// Output the phylogenetic distance matrix of the tree
     Matrix {
@@ -164,6 +166,17 @@ pub enum Commands {
         /// Shell
         #[arg(value_enum)]
         shell: Shell,
+    },
+    /// Rescale branch lengths of tree(s)
+    Rescale {
+        /// Rescaling factor by which branch lengtsh will be multiplied
+        /// If there are multiple input trees, then it will be treated as a directory
+        factor: f64,
+        /// Path to tree(s) to rescale
+        trees: Vec<PathBuf>,
+        /// Path to output.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
