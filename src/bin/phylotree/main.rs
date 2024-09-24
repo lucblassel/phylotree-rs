@@ -4,6 +4,7 @@
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
+use indicatif::ProgressIterator;
 use itertools::Itertools;
 use phylotree::{
     distr::Distr,
@@ -18,7 +19,7 @@ use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fmt::Display,
-    fs::File,
+    fs::{self, File},
     io,
     io::{BufWriter, Write},
     path::Path,
@@ -122,26 +123,34 @@ fn main() {
             }
         }
         cli::Commands::Compare { reftree, tocompare } => {
+            // Read reference tree
             let reftree = Tree::from_file(&reftree).unwrap();
-            let compare = Tree::from_file(&tocompare).unwrap();
-
             let ref_parts = reftree.get_partitions().unwrap();
-            let other_parts = compare.get_partitions().unwrap();
 
-            let common = ref_parts.intersection(&other_parts).count();
+            // Print header
+            println!("tree\tpath\treference\tcommon\tcompared\trf\tnorm_rf\trf_w\tbranch_score");
+            for (i, cmp_path) in tocompare.into_iter().enumerate() {
+                let compare = Tree::from_file(&cmp_path).unwrap();
 
-            let stats = reftree.compare_topologies(&compare).unwrap();
+                let other_parts = compare.get_partitions().unwrap();
 
-            println!("tree\treference\tcommon\tcompared\trf\trf_w\tbranch_score");
-            println!(
-                "0\t{}\t{}\t{}\t{}\t{}\t{}",
-                ref_parts.len() - common,
-                common,
-                other_parts.len() - common,
-                stats.rf,
-                stats.weighted_rf,
-                stats.branch_score,
-            )
+                let common = ref_parts.intersection(&other_parts).count();
+
+                let stats = reftree.compare_topologies(&compare).unwrap();
+
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    i,
+                    cmp_path.to_str().unwrap_or("-"),
+                    ref_parts.len() - common,
+                    common,
+                    other_parts.len() - common,
+                    stats.rf,
+                    stats.norm_rf,
+                    stats.weighted_rf,
+                    stats.branch_score,
+                )
+            }
         }
         cli::Commands::Matrix {
             tree,
