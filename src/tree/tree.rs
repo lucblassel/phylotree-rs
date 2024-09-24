@@ -1625,7 +1625,7 @@ impl Tree {
             pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
         );
 
-        Ok(matrix)
+        Ok(matrix?)
     }
 }
 
@@ -2264,6 +2264,8 @@ impl Default for Tree {
 // #[allow(clippy::excessive_precision)]
 mod tests {
 
+    use core::f64;
+
     use super::*;
 
     /// Generates example tree from the tree traversal wikipedia page
@@ -2299,6 +2301,17 @@ mod tests {
         Ok(tree)
     }
 
+    fn build_tree_without_lengths() -> Result<Tree, TreeError> {
+        let mut tree = Tree::new();
+        tree.add(Node::new_named("F")); // 0
+        tree.add_child(Node::new_named("A"), 0, None)?; // 1
+        tree.add_child(Node::new_named("B"), 0, None)?; // 2
+        tree.add_child(Node::new_named("E"), 0, None)?; // 3
+        tree.add_child(Node::new_named("C"), 3, None)?; // 4
+        tree.add_child(Node::new_named("D"), 3, None)?; // 5
+
+        Ok(tree)
+    }
     fn get_values(indices: &[usize], tree: &Tree) -> Vec<Option<String>> {
         indices
             .iter()
@@ -2408,25 +2421,27 @@ mod tests {
     #[test]
     fn get_distances_lengths() {
         let test_cases = vec![
-            ((1, 3), (Some(0.6), 2)), // (A,E)
-            ((1, 4), (Some(0.9), 3)), // (A,C)
-            ((4, 5), (Some(0.7), 2)), // (C,D)
-            ((5, 2), (Some(1.1), 3)), // (D,B)
-            ((2, 5), (Some(1.1), 3)), // (B,D)
-            ((0, 2), (Some(0.2), 1)), // (F,B)
-            ((1, 1), (None, 0)),      // (A,A)
+            ((1, 3), (0.6, 2)), // (A,E)
+            ((1, 4), (0.9, 3)), // (A,C)
+            ((4, 5), (0.7, 2)), // (C,D)
+            ((5, 2), (1.1, 3)), // (D,B)
+            ((2, 5), (1.1, 3)), // (B,D)
+            ((0, 2), (0.2, 1)), // (F,B)
+            ((1, 1), (0.0, 0)), // (A,A)
         ];
         let tree = build_tree_with_lengths().unwrap();
+        let tree2 = build_tree_without_lengths().unwrap();
 
         for ((idx_s, idx_t), (dist, branches)) in test_cases {
             let (d_pred, b_pred) = tree.get_distance(&idx_s, &idx_t).unwrap();
+            let (d_pred2, b_pred2) = tree2.get_distance(&idx_s, &idx_t).unwrap();
             assert_eq!(branches, b_pred);
-            match dist {
-                None => assert!(d_pred.is_none()),
-                Some(d) => {
-                    assert!(d_pred.is_some());
-                    assert!((d_pred.unwrap() - d).abs() < f64::EPSILON);
-                }
+            assert_eq!(branches, b_pred2);
+
+            assert!(d_pred.is_some());
+            assert!((d_pred.unwrap() - dist).abs() < f64::EPSILON);
+            if idx_s != idx_t {
+                assert!(d_pred2.is_none(), "{d_pred2:?}");
             }
         }
     }
@@ -3383,6 +3398,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 // These tests are lifted from the ETE3 test suite to ensure that the shared functionnalities
 // behave the same between the 2 libraries.
 mod tests_ete3 {

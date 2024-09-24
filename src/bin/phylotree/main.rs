@@ -233,7 +233,9 @@ fn main() {
                 None => Box::new(io::stdout()) as Box<dyn Write>,
             });
 
-            writer.write("Seq1\tSeq2\tDistance\n".as_bytes()).unwrap();
+            writer
+                .write_all("Seq1\tSeq2\tDistance\n".as_bytes())
+                .unwrap();
 
             for pair in tips.iter().combinations(2) {
                 let (n1, n2) = (pair[0], pair[1]);
@@ -241,7 +243,7 @@ fn main() {
                 let i2 = tree.get_by_name(n2).unwrap().id;
                 if let (Some(d), _) = tree.get_distance(&i1, &i2).unwrap() {
                     writer
-                        .write(format!("{n1}\t{n2}\t{d}\n").as_bytes())
+                        .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
                         .unwrap();
                 } else {
                     panic!("The tree is missing some branch lengths between {n1} and {n2}")
@@ -407,7 +409,7 @@ fn main() {
             let mut tt = TinyTemplate::new();
             tt.add_template("svg", SVG).unwrap();
             writer
-                .write(tt.render("svg", &ctx).unwrap().as_bytes())
+                .write_all(tt.render("svg", &ctx).unwrap().as_bytes())
                 .unwrap();
         }
         cli::Commands::Completion { shell } => {
