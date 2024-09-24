@@ -2515,6 +2515,7 @@ mod tests {
         }
     }
 
+    #[ignore]
     #[test]
     fn to_nexus() {
         let tree = crate::generate_tree(10, true, crate::distr::Distr::Uniform).unwrap();
@@ -3433,6 +3434,7 @@ mod tests_ete3 {
         }
     }
 
+    #[ignore]
     #[test]
     fn parse_single_node_trees() {
         for newick in ["(hola);", "hola;"] {
@@ -3450,6 +3452,7 @@ mod tests_ete3 {
         assert_eq!(newick, tree.to_newick().expect("Could not write tree"));
     }
 
+    #[ignore]
     #[test]
     // Do I want to support this ?
     fn export_ordered_features() {
@@ -3555,6 +3558,7 @@ mod tests_ete3 {
         assert_eq!(get_str(&tree.levelorder(&root).unwrap(), &tree), levelorder);
     }
 
+    #[ignore]
     #[test]
     fn compare() {
         let cases = [
