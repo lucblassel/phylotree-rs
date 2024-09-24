@@ -271,7 +271,7 @@ impl Tree {
     /// let found = tree.search_nodes(|node| node.name == Some("A".into()));
     /// assert_eq!(found, indices);
     /// ```
-    pub fn search_nodes(self, cond: fn(&Node) -> bool) -> Vec<NodeId> {
+    pub fn search_nodes(self, cond: impl Fn(&Node) -> bool) -> Vec<NodeId> {
         self.nodes
             .iter()
             .filter(|node| cond(node))
