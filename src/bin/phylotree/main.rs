@@ -406,6 +406,41 @@ fn main() {
             let name = cmd.get_name().to_string();
             generate(shell, &mut cmd, name, &mut io::stdout());
         }
+        cli::Commands::Rescale {
+            trees,
+            factor,
+            output,
+        } => {
+            if trees.len() > 1 {
+                let Some(out) = output else {
+                    eprintln!("You cannot give multiple trees as input without specifying an output directory");
+                    return;
+                };
+
+                fs::create_dir(out.clone()).unwrap();
+
+                let _ = trees
+                    .into_iter()
+                    .map(move |p| {
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap();
+                        let output = out.clone().join(name);
+
+                        let mut tree = Tree::from_file(&p).unwrap();
+                        tree.rescale(factor);
+                        tree.to_file(&output).unwrap();
+                    })
+                    .progress()
+                    .collect_vec();
+            } else {
+                let mut tree = Tree::from_file(&trees[0]).unwrap();
+                tree.rescale(factor);
+                if let Some(out) = output {
+                    tree.to_file(&out).unwrap();
+                } else {
+                    println!("{}", tree.to_newick().unwrap());
+                }
+            }
+        }
     }
 }
 
