@@ -1536,7 +1536,7 @@ impl Tree {
         leaf_order.sort_by(|a, b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
 
         let n = self.n_leaves();
-        let mut pairwise_vec = vec![NaiveSum::zero(); n * n / 2];
+        let mut pairwise_vec = vec![NaiveSum::zero(); n * (n - 1) / 2];
 
         let leaf_idx_to_leaf_order = self
             .nodes
