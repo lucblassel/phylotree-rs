@@ -1213,8 +1213,8 @@ impl Tree {
     ///  // Get branch comparison including terminal branches
     ///  let (refset, cmpset, common) = reftree.compare_branch_lengths(&cmptree, true).unwrap();
     ///
-    ///  assert_eq!(refset, vec![0.2]); // AB,CDE exclusive to reftree
-    ///  assert_eq!(cmpset, vec![0.2]); // AC,BDE exclusive to cmptree
+    ///  assert_eq!(refset, vec![(2,0.2)]); // AB,CDE exclusive to reftree
+    ///  assert_eq!(cmpset, vec![(2,0.2)]); // AC,BDE exclusive to cmptree
     ///
     ///  let expected_common = [
     ///     (0.3, 0.3), // A,...
@@ -1226,7 +1226,7 @@ impl Tree {
     ///  ];
     ///
     ///  assert_eq!(expected_common.len(), common.len());
-    ///  for val in common {
+    ///  for val in common.into_iter().map(|((_d1,l1),(_d2,l2))| (l1,l2)) {
     ///     let mut found = false;
     ///     for exp in expected_common.iter() {
     ///         if val.0 - exp.0 < f64::EPSILON && val.1 - exp.1 < f64::EPSILON {
