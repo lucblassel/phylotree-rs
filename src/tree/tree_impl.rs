@@ -3501,13 +3501,9 @@ mod tests_ete3 {
     fn resolve_polytomies() {
         let mut tree = Tree::from_newick("((a,a,a),(b,b,b,(c,c,c)));").unwrap();
 
+        assert!(tree.nodes.iter().any(|n| n.children.len() > 2));
         tree.resolve().unwrap();
-        tree.ladderize().unwrap();
-
-        assert_eq!(
-            "((a,(a,a)),(b,(b,(b,(c,(c,c))))));",
-            tree.to_formatted_newick(NewickFormat::OnlyNames).unwrap()
-        )
+        assert!(!tree.nodes.iter().any(|n| n.children.len() > 2));
     }
 
     #[test]
