@@ -8,10 +8,10 @@
 /// A module to draw phylogenetic trees
 pub mod draw;
 mod node;
-mod tree;
+mod tree_impl;
 
 pub use self::node::{Node, NodeError};
-pub use self::tree::{Comparison, NewickParseError, Tree, TreeError};
+pub use self::tree_impl::{Comparison, NewickParseError, Tree, TreeError};
 
 /// A type that represents Identifiers of [`Node`] objects
 /// within phylogenetic [`Tree`] object.

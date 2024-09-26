@@ -1,5 +1,5 @@
 //! Distributions to generate branch lengths inb random trees
-//! 
+//!
 
 use std::fmt::{Debug, Display};
 
@@ -10,22 +10,21 @@ use rand_distr::{uniform::SampleUniform, Distribution, Exp, Gamma, Uniform};
 use trait_set::trait_set;
 
 trait_set! {
-    /// Trait describing objects that can be used as branch lengths 
+    /// Trait describing objects that can be used as branch lengths
     /// in phylogenetic trees.
     pub trait BranchLength = Debug + Display + Float + Zero + SampleUniform;
 }
 
-
 /// Available branch length distributions
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Distr {
-    /// A [uniform](https://en.wikipedia.org/wiki/Continuous_uniform_distribution) 
+    /// A [uniform](https://en.wikipedia.org/wiki/Continuous_uniform_distribution)
     /// distribution over $[0.002, 1.0)$
     Uniform,
-    /// An [exponential](https://en.wikipedia.org/wiki/Exponential_distribution) 
+    /// An [exponential](https://en.wikipedia.org/wiki/Exponential_distribution)
     /// distribution with rate $\lambda=0.15$
     Exponential,
-    /// A [gamma](https://en.wikipedia.org/wiki/Gamma_distribution) distribution 
+    /// A [gamma](https://en.wikipedia.org/wiki/Gamma_distribution) distribution
     /// with a shape $k=4$ and scale $\theta=1.0$.
     Gamma,
 }

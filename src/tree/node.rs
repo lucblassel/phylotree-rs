@@ -32,7 +32,7 @@ pub enum NodeError {
     },
 }
 
-use crate::tree::tree::IdentityHasher;
+use crate::tree::tree_impl::IdentityHasher;
 type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
 #[derive(Clone)]
