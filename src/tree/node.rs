@@ -261,9 +261,8 @@ impl Node {
             _ => (),
         }
 
-        match format {
-            NewickFormat::AllFields => repr += &self.format_comment(),
-            _ => (),
+        if let NewickFormat::AllFields = format {
+            repr += &self.format_comment()
         }
 
         repr

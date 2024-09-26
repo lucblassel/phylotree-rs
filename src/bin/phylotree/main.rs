@@ -293,7 +293,10 @@ fn main() {
                 })
                 .collect();
 
-            if duplicates.is_empty() {}
+            if duplicates.is_empty() {
+                eprintln!("No duplicates found");
+                return;
+            }
 
             let mut removed = vec![];
 
@@ -466,7 +469,7 @@ struct Context {
     layout: Layout,
 }
 
-static SVG : &'static str =  "\
+static SVG : &str =  "\
 <?xml version=\"1.0\" standalone=\"no\"?>
 <svg viewBox=\"{xmin} {ymin} {width} {height}\" width='100%' height='100%' xmlns='http://www.w3.org/2000/svg'>
     {{ if not transparent }}

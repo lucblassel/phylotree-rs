@@ -52,7 +52,7 @@ pub enum Commands {
         trees: Vec<PathBuf>,
     },
 
-    /// Compare phylogenetic trees to a reference 
+    /// Compare phylogenetic trees to a reference
     ///
     /// This will return:
     ///  - the path of the compared tree
@@ -96,7 +96,7 @@ pub enum Commands {
         /// The phylogenetic tree
         tree: PathBuf,
         /// The threshold under which to collapse the branch
-        threshold: phylotree::tree::Edge,
+        threshold: phylotree::tree::EdgeLength,
         /// Print the number of collapsed branches at the end
         #[arg(short, long)]
         verbose: bool,

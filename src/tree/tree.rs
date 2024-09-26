@@ -2,6 +2,7 @@ use accurate::sum::NaiveSum;
 use accurate::traits::*;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use ndarray::Array1;
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::VecDeque;
@@ -629,7 +630,7 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or(Err(TreeError::IsEmpty), Ok)
+            .ok_or(TreeError::IsEmpty)
     }
 
     /// Returns the diameter of the tree
@@ -655,7 +656,7 @@ impl Tree {
                 }
             })
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map_or(Err(TreeError::IsEmpty), Ok)
+            .ok_or(TreeError::IsEmpty)
     }
 
     /// Returns the lenght of the trees
@@ -1713,8 +1714,8 @@ impl Tree {
         let to_compress: Vec<_> = self
             .nodes
             .iter()
-            .cloned()
             .filter(|node| !node.deleted && node.parent.is_some() && node.children.len() == 1)
+            .cloned()
             .map(|node| node.id)
             .collect();
 
@@ -1764,16 +1765,16 @@ impl Tree {
             }
         }
 
-        for node_id in to_binarize.iter() {
+        for &node_id in to_binarize.iter() {
             loop {
-                let mut children = self.get(node_id)?.children.clone();
+                let mut children = self.get(&node_id)?.children.clone();
                 children.shuffle(rng);
 
-                let parent = self.add_child(Node::new(), *node_id, Some(0.0))?;
+                let parent = self.add_child(Node::new(), node_id, Some(0.0))?;
 
                 for _ in 0..2 {
                     let child = children.pop().unwrap();
-                    let edge = self.get(&child)?.parent_edge.clone();
+                    let edge = self.get(&child)?.parent_edge;
                     self.get_mut(&parent)?.add_child(child, edge);
                     self.get_mut(&child)?.set_parent(parent, edge);
                     self.get_mut(&node_id)?.remove_child(&child)?;
@@ -1817,10 +1818,10 @@ impl Tree {
 
     // recusrive implementation of depth recomputation
     fn reset_depth_impl(&mut self, root: &NodeId, depth: usize) -> Result<(), TreeError> {
-        let root = self.get_mut(&root)?;
+        let root = self.get_mut(root)?;
         root.set_depth(depth);
 
-        for child in root.children.clone().iter() {
+        for &child in root.children.clone().iter() {
             self.reset_depth_impl(&child, depth + 1)?
         }
 
@@ -2141,14 +2142,13 @@ impl Tree {
         let labels = self
             .nodes
             .iter()
-            .map(|node| {
+            .filter_map(|node| {
                 if node.is_tip() {
                     node.name.clone()
                 } else {
                     None
                 }
             })
-            .flatten()
             .join(" ");
 
         Ok(format!(
@@ -3517,10 +3517,8 @@ mod tests_ete3 {
 
         let a = tree.get_by_name("A").unwrap();
         let b = tree.get_by_name("B").unwrap();
-        let c = tree.get_by_name("C").unwrap();
         let d = tree.get_by_name("D").unwrap();
         let i = tree.get_by_name("I").unwrap();
-        let j = tree.get_by_name("J").unwrap();
         let root = tree.get_by_name("root").unwrap();
 
         assert_eq!(tree.get_common_ancestor(&a.id, &i.id).unwrap(), i.id);
@@ -3542,10 +3540,8 @@ mod tests_ete3 {
             Tree::from_newick("(((A:0.5, B:1.0):1.0, C:5.0):1, (D:10.0, F:1.0):2.0)root:20;")
                 .unwrap();
         let a = tree.get_by_name("A").unwrap();
-        let b = tree.get_by_name("B").unwrap();
         let c = tree.get_by_name("C").unwrap();
         let d = tree.get_by_name("D").unwrap();
-        let f = tree.get_by_name("F").unwrap();
         let root = tree.get_by_name("root").unwrap();
 
         assert_eq!(tree.get_distance(&root.id, &a.id).unwrap().1, 3);
@@ -3556,11 +3552,6 @@ mod tests_ete3 {
 
     #[test]
     fn traversals() {
-        // Ancestors
-        // {
-        //     todo!();
-        // }
-
         let tree = Tree::from_newick("((3,4)2,(6,7)5)1;").unwrap();
         let root = tree.get_root().unwrap();
 
