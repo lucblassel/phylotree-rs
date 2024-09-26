@@ -16,7 +16,7 @@ use std::{
 use thiserror::Error;
 
 use super::node::{Node, NodeError};
-use super::{Edge, NewickFormat, NodeId};
+use super::{EdgeDepth, EdgeLength, NewickFormat, NodeId};
 
 use crate::distance::{DistanceMatrix, MatrixError};
 
@@ -114,17 +114,22 @@ pub struct Comparison {
 
 /// Used to hold compared tree edges
 type EdgeCompare = (
-    Vec<(usize, Edge)>,
-    Vec<(usize, Edge)>,
-    Vec<((usize, Edge), (usize, Edge))>,
+    Vec<(EdgeDepth, EdgeLength)>,
+    Vec<(EdgeDepth, EdgeLength)>,
+    Vec<((EdgeDepth, EdgeLength), (EdgeDepth, EdgeLength))>,
 );
+
+type Partition = FixedBitSet;
+type WrappedPartitionMap = HashMap<Partition, (usize, Option<EdgeLength>)>;
+type PartitionMap = HashMap<Partition, (EdgeDepth, EdgeLength)>;
+type PartitionSet = HashSet<Partition>;
 
 /// A Phylogenetic tree
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
     leaf_index: RefCell<Option<Vec<String>>>,
-    partitions: RefCell<Option<HashMap<FixedBitSet, (usize, Option<Edge>)>>>,
+    partitions: RefCell<Option<WrappedPartitionMap>>,
 }
 
 /// Base methods to add and get [`Node`] objects to and from the [`Tree`].
@@ -183,7 +188,7 @@ impl Tree {
         &mut self,
         node: Node,
         parent: NodeId,
-        edge: Option<Edge>,
+        edge: Option<EdgeLength>,
     ) -> Result<NodeId, TreeError> {
         if parent >= self.nodes.len() {
             return Err(TreeError::NodeNotFound(parent));
@@ -607,7 +612,7 @@ impl Tree {
     /// let tree_no_brlen = Tree::from_newick("((A,B)G,(C,D)E)F;").unwrap();
     /// assert_eq!(tree_no_brlen.height().unwrap(), 2.);
     /// ```
-    pub fn height(&self) -> Result<Edge, TreeError> {
+    pub fn height(&self) -> Result<EdgeLength, TreeError> {
         if !self.is_rooted()? {
             return Err(TreeError::IsNotRooted);
         }
@@ -638,7 +643,7 @@ impl Tree {
     /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
     /// assert_eq!(tree_no_brlen.diameter().unwrap(), 3.);
     /// ```
-    pub fn diameter(&self) -> Result<Edge, TreeError> {
+    pub fn diameter(&self) -> Result<EdgeLength, TreeError> {
         self.get_leaves()
             .iter()
             .combinations(2)
@@ -661,7 +666,7 @@ impl Tree {
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// assert_eq!(tree.length().unwrap(), 1.5);
     /// ```
-    pub fn length(&self) -> Result<Edge, TreeError> {
+    pub fn length(&self) -> Result<EdgeLength, TreeError> {
         let s = self
             .nodes
             .iter()
@@ -838,7 +843,7 @@ impl Tree {
     }
 
     /// Get the partition corresponding to the branch associated to the node at index
-    fn get_partition(&self, index: &NodeId) -> Result<FixedBitSet, TreeError> {
+    fn get_partition(&self, index: &NodeId) -> Result<Partition, TreeError> {
         self.init_leaf_index()?;
 
         let subtree_leaves = self.get_subtree_leaves(index)?;
@@ -862,12 +867,12 @@ impl Tree {
         Ok(toggled.min(bitset))
     }
 
-    // Helper function to view a partition as
-    fn partition_to_leaves(&self, bitset: &FixedBitSet) -> Result<String, TreeError> {
+    /// Helper function to view a partition as
+    pub fn partition_to_leaves(&self, partition: &Partition) -> Result<String, TreeError> {
         self.init_leaf_index()?;
 
         let v = self.leaf_index.borrow().clone().unwrap();
-        Ok(bitset.ones().map(|i| v[i].clone()).collect())
+        Ok(partition.ones().map(|i| v[i].clone()).collect())
     }
 
     /// Caches partitions for distance computation
@@ -878,7 +883,7 @@ impl Tree {
             return Ok(());
         }
 
-        let mut partitions: HashMap<FixedBitSet, (usize, Option<f64>)> = HashMap::new();
+        let mut partitions: WrappedPartitionMap = HashMap::new();
 
         for node in self
             .nodes
@@ -910,7 +915,7 @@ impl Tree {
     }
 
     /// Get all partitions of a tree
-    pub fn get_partitions(&self) -> Result<HashSet<FixedBitSet>, TreeError> {
+    pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
@@ -925,9 +930,7 @@ impl Tree {
     }
 
     /// Get all partitions of a tree along with corresponding branch lengths and branch depths
-    pub(crate) fn get_partitions_with_lengths(
-        &self,
-    ) -> Result<HashMap<FixedBitSet, (usize, f64)>, TreeError> {
+    pub(crate) fn get_partitions_with_lengths(&self) -> Result<PartitionMap, TreeError> {
         self.init_leaf_index()?;
         self.init_partitions()?;
 
@@ -1288,7 +1291,9 @@ impl Tree {
     }
 
     // Get terminal branch lengths of a tree keyed by tip name
-    fn get_terminal_branches(&self) -> Result<HashMap<String, (usize, Option<Edge>)>, TreeError> {
+    fn get_terminal_branches(
+        &self,
+    ) -> Result<HashMap<String, (usize, Option<EdgeLength>)>, TreeError> {
         if !self.has_unique_tip_names()? {
             return Err(TreeError::DuplicateLeafNames);
         }
@@ -1489,7 +1494,7 @@ impl Tree {
     ///
     /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
     /// ```
-    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<Edge>, TreeError> {
+    pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<EdgeLength>, TreeError> {
         let size = self.nodes.len();
         let mut matrix = DistanceMatrix::new_with_size(self.n_leaves());
         let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
@@ -1622,7 +1627,7 @@ impl Tree {
                 .iter()
                 .map(|i| self.get(i).unwrap().clone().name.unwrap())
                 .collect_vec(),
-            pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
+            Array1::from_iter(pairwise_vec.iter().map(|v| v.sum())),
         );
 
         Ok(matrix?)

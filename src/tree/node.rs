@@ -6,7 +6,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::{Edge, NewickFormat, NodeId};
+use super::{EdgeLength, NewickFormat, NodeId};
 
 /// Errors that can occur when manipulating [`Node`] structs.
 #[derive(Error, Debug)]
@@ -47,13 +47,13 @@ pub struct Node {
     /// Indices of child nodes
     pub children: Vec<NodeId>,
     /// length of branch between parent and node
-    pub parent_edge: Option<Edge>,
+    pub parent_edge: Option<EdgeLength>,
     /// Optional comment attached to node
     pub comment: Option<String>,
     /// lenght of branches between node and children
-    pub(crate) child_edges: Option<HashMap<NodeId, Edge>>,
+    pub(crate) child_edges: Option<HashMap<NodeId, EdgeLength>>,
     /// Distance to descendants of this node
-    pub(crate) subtree_distances: RefCell<Option<HashMap<NodeId, Edge, BuildIdentityHasher>>>,
+    pub(crate) subtree_distances: RefCell<Option<HashMap<NodeId, EdgeLength, BuildIdentityHasher>>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not
@@ -105,7 +105,7 @@ impl Node {
 
     /// Set the parent node
     /// See `add_child` for example usage
-    pub fn set_parent(&mut self, parent: NodeId, parent_edge: Option<Edge>) {
+    pub fn set_parent(&mut self, parent: NodeId, parent_edge: Option<EdgeLength>) {
         self.parent = Some(parent);
         self.parent_edge = parent_edge;
     }
@@ -143,13 +143,13 @@ impl Node {
     /// assert_eq!(child.parent_edge, Some(l));
     /// assert_eq!(parent.get_child_edge(&child.id), Some(l));
     /// ```
-    pub fn add_child(&mut self, child: NodeId, child_edge: Option<Edge>) {
+    pub fn add_child(&mut self, child: NodeId, child_edge: Option<EdgeLength>) {
         self.children.push(child);
         self.set_child_edge(&child, child_edge);
     }
 
     /// Get the Edge between node and a child
-    pub fn get_child_edge(&self, child: &NodeId) -> Option<Edge> {
+    pub fn get_child_edge(&self, child: &NodeId) -> Option<EdgeLength> {
         if let Some(edges) = &self.child_edges {
             edges.get(child).copied()
         } else {
@@ -158,7 +158,7 @@ impl Node {
     }
 
     /// Sets the Edge between a node and its child
-    pub fn set_child_edge(&mut self, child: &NodeId, edge: Option<Edge>) {
+    pub fn set_child_edge(&mut self, child: &NodeId, edge: Option<EdgeLength>) {
         if let Some(edge) = edge {
             if self.child_edges.is_none() {
                 self.child_edges = Some(HashMap::new());

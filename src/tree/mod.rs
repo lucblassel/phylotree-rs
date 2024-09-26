@@ -19,7 +19,11 @@ pub type NodeId = usize;
 
 /// A type that represents branch lengths between [`Node`] objects
 /// within phylogenetic [`Tree`] object.
-pub type Edge = f64;
+pub type EdgeLength = f64;
+
+/// A type that represents the depth (i.e. distance from the root) o        
+/// given edge within a phylogenetic [`Tree`] object.
+pub type EdgeDepth = usize;
 
 /// Newick output format
 #[derive(Debug, Copy, Clone)]
