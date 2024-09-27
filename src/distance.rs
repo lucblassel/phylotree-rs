@@ -7,12 +7,18 @@ use std::{
     fs,
     path::Path,
     str::FromStr,
-    vec::IntoIter,
 };
 
 use itertools::Itertools;
 use num_traits::{zero, Float, Zero};
 use thiserror::Error;
+use trait_set::trait_set;
+
+trait_set! {
+    /// Trait describing objects that can be used as branch lengths
+    /// in phylogenetic trees.
+    pub trait PairwiseDist = Display + Debug + Float + Zero + FromStr + Clone + Copy;
+}
 
 /// Errors that can occur when reading, writing and manipulating [`DistanceMatrix`] structs.
 #[derive(Error, Debug)]
@@ -105,7 +111,7 @@ pub struct DistanceMatrix<T> {
 
 impl<T> DistanceMatrix<T>
 where
-    T: Display + Debug + Float + Zero + FromStr + Clone + Copy,
+    T: PairwiseDist,
 {
     /// Create a new distance matrix for a certain number of sequences
     pub fn new(taxa: Vec<String>, matrix: &[T]) -> Self {
@@ -380,6 +386,36 @@ where
         Ok(matrix)
     }
 
+    /// Find smallest distance in the distance matrix as well as the
+    /// corresponding index
+    pub fn min(&self) -> Option<((usize, usize), T)> {
+        self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
+            None => Some(((i, j), *v)),
+            Some((_, av)) => {
+                if *v < av {
+                    Some(((i, j), *v))
+                } else {
+                    a
+                }
+            }
+        })
+    }
+
+    /// Find largest distance in the distance matrix as well as the
+    /// corresponding index
+    pub fn max(&self) -> Option<((usize, usize), T)> {
+        self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
+            None => Some(((i, j), *v)),
+            Some((_, av)) => {
+                if *v > av {
+                    Some(((i, j), *v))
+                } else {
+                    a
+                }
+            }
+        })
+    }
+
     /// Reads the matrix from a phylip file
     pub fn from_file(path: &Path, square: bool) -> Result<Self, PhylipParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
@@ -398,9 +434,16 @@ where
             .enumerate()
             .map(|(k, v)| (self.vec_to_tril_index(k).unwrap(), v))
     }
+}
 
-    /// Iterator over lower triangle of the matrix
-    pub fn into_iter(self) -> IntoIter<T> {
+impl<T> IntoIterator for DistanceMatrix<T>
+where
+    T: PairwiseDist,
+{
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.matrix.into_iter()
     }
 }
@@ -712,14 +755,23 @@ s5    5  10  15  0
         let tril = vec![2., 3., 6., 5., 10., 15.];
         let indices = vec![(1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2)];
 
-        assert!(dm
-            .iter()
-            .zip(tril.clone())
-            .all(|(v1, v2)| { v1 - v2 <= f32::EPSILON }));
+        assert!(dm.iter().zip(tril.clone()).all(|(v1, v2)| { *v1 == v2 }));
 
         assert!(dm
             .indexed_iter()
-            .zip(indices.into_iter().zip(tril))
-            .all(|((i1, v1), (i2, v2))| i1 == i2 && v1 - v2 <= f32::EPSILON));
+            .zip(indices.into_iter().zip(tril.clone()))
+            .all(|((i1, v1), (i2, v2))| i1 == i2 && *v1 == v2));
+
+        assert!(dm.into_iter().zip(tril).all(|(v1, v2)| { v1 == v2 }));
+    }
+
+    #[test]
+    fn min_max() {
+        let dm = build_matrix();
+        let min = Some(((1, 0), 2.));
+        let max = Some(((3, 2), 15.));
+
+        assert_eq!(dm.min(), min);
+        assert_eq!(dm.max(), max);
     }
 }
