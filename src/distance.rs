@@ -14,6 +14,8 @@ use num_traits::{zero, Float, Zero};
 use thiserror::Error;
 use trait_set::trait_set;
 
+use crate::tree::{Node, Tree};
+
 trait_set! {
     /// Trait describing objects that can be used as branch lengths
     /// in phylogenetic trees.
@@ -96,7 +98,7 @@ where
     IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// A phylogenetic distance matrix
 pub struct DistanceMatrix<T> {
     /// Number of taxa in the matrix
@@ -448,6 +450,114 @@ where
     }
 }
 
+/// Tree building methods
+impl<T> DistanceMatrix<T>
+where
+    T: PairwiseDist,
+{
+    /// Build a [`Tree`] from the distance matrix using the
+    /// [UPGMA](https://en.wikipedia.org/wiki/UPGMA) algorithm
+    pub fn upgma(&self) -> Result<Tree, MatrixError> {
+        // Setup
+        let mut dm = (*self).clone();
+        let mut card = vec![1; dm.size];
+        //let mut taxa = self.taxa.clone();
+        let mut merged = vec![false; dm.size];
+        let mut heights = vec![0.; dm.size];
+        let mut n_clusters = self.size;
+
+        // Build starting star tree
+        let mut tree = Tree::new();
+        let virt_root = tree.add(Node::new());
+        let mut node_ids = self
+            .taxa
+            .iter()
+            .map(|n| tree.add_child(Node::new_named(n), virt_root, None).unwrap())
+            .collect_vec();
+
+        let max_val = T::infinity();
+
+        while n_clusters > 2 {
+            let ((a, b), d_ab) = dm.min().ok_or(MatrixError::IndexError)?; // TODO: Add error
+            let u = a;
+            let node_height = d_ab.to_f64().unwrap() / 2.;
+            let d_au = node_height - heights[a];
+            let d_bu = node_height - heights[b];
+
+            merged[b] = true;
+            heights[u] += d_au;
+
+            // Merge nodes a and b in to new parent u
+            let u_node = tree
+                .merge_children(
+                    &node_ids[a],
+                    &node_ids[b],
+                    Some(d_au),
+                    Some(d_bu),
+                    None,
+                    None,
+                )
+                .unwrap();
+
+            // get cardinality of new parent node u
+            let c_a = T::from(card[a]).unwrap();
+            let c_b = T::from(card[b]).unwrap();
+            for (x, _) in merged.iter().enumerate().filter(|(_, &p)| !p) {
+                if x != a && b != x {
+                    // Set distance from new parent to other unmerged nodes
+                    let d_ax = dm.matrix[self.tril_to_vec_index(x, a)?];
+                    let d_bx = dm.matrix[self.tril_to_vec_index(x, b)?];
+                    let d_ux = (c_a * d_ax + c_b * d_bx) / (c_a + c_b);
+                    dm.matrix[self.tril_to_vec_index(u, x)?] = d_ux;
+                }
+
+                // Set distance to merge node as max if necessary
+                if b != x {
+                    let b_idx = dm.tril_to_vec_index(b, x)?;
+                    dm.matrix[b_idx] = max_val;
+                }
+            }
+
+            // Replace a with new node u + update cardinality
+            node_ids[u] = u_node;
+            card[u] = card[a] + card[b];
+
+            // Update number of clusters
+            n_clusters -= 1;
+        }
+
+        // Merge last nodes
+        let Some((a_i, b_i)) = merged
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, v)| if v { None } else { Some(i) })
+            .next_tuple() else {
+            return Err(MatrixError::IndexError)
+        };
+
+        let (a, b) = (node_ids[a_i], node_ids[b_i]);
+
+        let d_ab = dm.matrix[self.tril_to_vec_index(a_i, b_i)?];
+        let tree_height = d_ab.to_f64().unwrap() / 2.;
+        let d_ar = tree_height - heights[a_i];
+        let d_br = tree_height - heights[b_i];
+
+        let root_node = tree.get_mut(&virt_root).unwrap();
+        root_node.set_child_edge(&a, Some(d_ar));
+        root_node.set_child_edge(&b, Some(d_br));
+        tree.get_mut(&a).unwrap().parent_edge = Some(d_ar);
+        tree.get_mut(&b).unwrap().parent_edge = Some(d_br);
+
+        Ok(tree)
+    }
+
+    /// Build a [`Tree`] from the distance matrix using the
+    /// [neighbor joining](https://en.wikipedia.org/wiki/Neighbor_joining) algorithm
+    pub fn neighbor_joining(&self) -> Result<Tree, MatrixError> {
+        todo!()
+    }
+}
+
 ////////////////////////
 // INDEXING UTILITIES //
 ////////////////////////
@@ -773,5 +883,29 @@ s5    5  10  15  0
 
         assert_eq!(dm.min(), min);
         assert_eq!(dm.max(), max);
+    }
+
+    #[test]
+    fn build_upgma() {
+        // Expected tree
+        let expected =
+            Tree::from_newick("((c:14.0,d:14.0):2.5,(e:11.0,(a:8.5,b:8.5):2.5):5.5);").unwrap();
+
+        // Corresponding distance matrix
+        let p_str = r"5
+a    0  17 21 31 23
+b    17 0  30 34 21
+c    21 30 0  28 39
+d    31 34 28 0  43
+e    23 21 39 43 0 
+";
+        let dm = DistanceMatrix::<f64>::from_phylip_strict(p_str, true).unwrap();
+        let built = dm.upgma().unwrap();
+
+        // Check topologies and branch lengths are the same
+        let rf = expected.robinson_foulds(&built).unwrap();
+        let wrf = expected.weighted_robinson_foulds(&built).unwrap();
+        assert_eq!(wrf, 0.0);
+        assert_eq!(rf, 0,);
     }
 }
