@@ -7,7 +7,7 @@ use std::{
     fs,
     path::Path,
     str::FromStr,
-    vec,
+    vec::IntoIter,
 };
 
 use itertools::Itertools;
@@ -398,6 +398,11 @@ where
             .enumerate()
             .map(|(k, v)| (self.vec_to_tril_index(k).unwrap(), v))
     }
+
+    /// Iterator over lower triangle of the matrix
+    pub fn into_iter(self) -> IntoIter<T> {
+        self.matrix.into_iter()
+    }
 }
 
 ////////////////////////
@@ -699,5 +704,22 @@ s5    5  10  15  0
                 }
             }
         }
+    }
+
+    #[test]
+    fn iterators() {
+        let dm = build_matrix();
+        let tril = vec![2., 3., 6., 5., 10., 15.];
+        let indices = vec![(1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2)];
+
+        assert!(dm
+            .iter()
+            .zip(tril.clone())
+            .all(|(v1, v2)| { v1 - v2 <= f32::EPSILON }));
+
+        assert!(dm
+            .indexed_iter()
+            .zip(indices.into_iter().zip(tril))
+            .all(|((i1, v1), (i2, v2))| i1 == i2 && v1 - v2 <= f32::EPSILON));
     }
 }
