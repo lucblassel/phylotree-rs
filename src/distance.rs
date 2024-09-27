@@ -11,7 +11,6 @@ use std::{
 };
 
 use itertools::Itertools;
-use ndarray::Array1;
 use num_traits::{zero, Float, Zero};
 use thiserror::Error;
 
@@ -99,22 +98,22 @@ pub struct DistanceMatrix<T> {
     /// Identifiers of the taxa
     pub taxa: Vec<String>,
     /// Distances between taxa
-    matrix: Array1<T>,
+    matrix: Vec<T>,
     /// Distance value for identical taxa
     zero: T,
 }
 
 impl<T> DistanceMatrix<T>
 where
-    T: Display + Debug + Float + Zero + FromStr,
+    T: Display + Debug + Float + Zero + FromStr + Clone + Copy,
 {
     /// Create a new distance matrix for a certain number of sequences
-    pub fn new(taxa: Vec<String>, matrix: Array1<T>) -> Self {
+    pub fn new(taxa: Vec<String>, matrix: &[T]) -> Self {
         Self {
             size: taxa.len(),
             taxa,
-            matrix,
-            zero: Zero::zero(),
+            matrix: matrix.to_vec(),
+            zero: zero(),
         }
     }
 
@@ -123,9 +122,8 @@ where
         Self {
             size,
             taxa: Vec::with_capacity(size),
-            matrix: Array1::zeros(size * (size - 1) / 2),
-            //matrix: vec![Zero::zero(); size * (size - 1) / 2],
-            zero: Zero::zero(),
+            matrix: vec![zero(); size * (size - 1) / 2],
+            zero: zero(),
         }
     }
 
@@ -133,10 +131,7 @@ where
     /// represents the upper triangle of the distance matrix as a single vector.
     /// The matrix index to vector index formula can be found in the [`DistanceMatrix.get_index`]
     /// function.
-    pub(crate) fn from_precomputed(
-        taxa: Vec<String>,
-        matrix: Array1<T>,
-    ) -> Result<Self, MatrixError> {
+    pub(crate) fn from_precomputed(taxa: Vec<String>, matrix: Vec<T>) -> Result<Self, MatrixError> {
         // Check that taxa and distances are coherent
         let n = taxa.len();
         let n_pairs = (n * (n - 1)) / 2;
@@ -154,7 +149,7 @@ where
             size: taxa.len(),
             taxa,
             matrix,
-            zero: Zero::zero(),
+            zero: zero(),
         })
     }
 
@@ -328,7 +323,7 @@ where
             return Err(PhylipParseError::SizeAndRowsMismatch(taxa.len(), size));
         }
 
-        Ok(Self::from_precomputed(taxa, Array1::from_vec(max_v))?)
+        Ok(Self::from_precomputed(taxa, max_v)?)
     }
 
     /// Build a distance matrix from a phylip formatted string, checks that the phylip matrix is
@@ -390,7 +385,24 @@ where
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip_strict(&newick_string, square)
     }
+
+    /// Iterator over the lower triangle of the matrix
+    pub fn iter(&self) -> impl Iterator<Item = &'_ T> {
+        self.matrix.iter()
+    }
+
+    /// Iterator over the lower triangle of the matrix with the corresponding
+    /// (row,col) matrix indices
+    pub fn indexed_iter(&self) -> impl Iterator<Item = ((usize, usize), &'_ T)> {
+        self.iter()
+            .enumerate()
+            .map(|(k, v)| (self.vec_to_tril_index(k).unwrap(), v))
+    }
 }
+
+////////////////////////
+// INDEXING UTILITIES //
+////////////////////////
 
 // Convert (row,col) matrix index of triangular matrix to the index
 // in the row-wise vector representation of the matrix

@@ -2,7 +2,6 @@ use accurate::sum::NaiveSum;
 use accurate::traits::*;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use ndarray::Array1;
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::VecDeque;
@@ -1629,7 +1628,7 @@ impl Tree {
                 .iter()
                 .map(|i| self.get(i).unwrap().clone().name.unwrap())
                 .collect_vec(),
-            Array1::from_iter(pairwise_vec.iter().map(|v| v.sum())),
+            pairwise_vec.iter().map(|v| v.sum()).collect_vec(),
         );
 
         Ok(matrix?)
