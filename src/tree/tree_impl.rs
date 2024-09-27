@@ -59,6 +59,9 @@ pub enum TreeError {
     /// The node with index [`NodeId`] could not be compressed
     #[error("Could not compress node {0}, it does not have exactly one parent and one child")]
     CouldNotCompressNode(NodeId),
+    /// The two nodes could not be merged into a single parent
+    #[error("Cound not merge nodes {0} and {1} since they are not siblings")]
+    MergingNonSiblingNodes(NodeId, NodeId),
     /// There was a [`std::io::Error`] when writin the tree to a file
     #[error("Error writing tree to file")]
     IoError(#[from] std::io::Error),
@@ -1832,6 +1835,63 @@ impl Tree {
     pub fn reset_depths(&mut self) -> Result<(), TreeError> {
         let root = self.get_root()?;
         self.reset_depth_impl(&root, 0)
+    }
+
+    /// Merge 2 sibling nodes into a new parent node.
+    /// Useful for agglomerative tree building / polytomy resolution
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// // Initialize star tree
+    /// let mut tree = Tree::from_newick("(A,B,C);").unwrap();
+    /// let a = tree.get_by_name("A").unwrap().id;
+    /// let b = tree.get_by_name("B").unwrap().id;
+    ///
+    /// // Merge A and B into node D
+    /// tree.merge_children(&a, &b, None, None, None, Some("D".into()));
+    ///
+    /// let expected = Tree::from_newick("((A,B)D, C);").unwrap();
+    /// assert_eq!(tree.robinson_foulds(&expected).unwrap(), 0);
+    /// ```
+    pub fn merge_children(
+        &mut self,
+        child1: &NodeId,
+        child2: &NodeId,
+        edge1: Option<EdgeLength>,
+        edge2: Option<EdgeLength>,
+        parent_edge: Option<EdgeLength>,
+        parent_name: Option<String>,
+    ) -> Result<NodeId, TreeError> {
+        // Check that nodes are siblings
+        let parent = self.get(child1)?.parent;
+        if parent != self.get(child2)?.parent {
+            return Err(TreeError::MergingNonSiblingNodes(*child1, *child2));
+        }
+
+        // Add new parent node as child of current parent
+        let parent = match parent {
+            Some(parent_id) => {
+                // Remove merged nodes as children of current parent
+                let parent_node = self.get_mut(&parent_id)?;
+                parent_node.remove_child(child1)?;
+                parent_node.remove_child(child2)?;
+                // Add new parent
+                self.add_child(Node::new(), parent_id, parent_edge)?
+            }
+            None => self.add(Node::new()),
+        };
+
+        // Set parent/child relationships between merged nodes and new parent node
+        let p = self.get_mut(&parent)?;
+        p.add_child(*child1, edge1);
+        p.add_child(*child2, edge2);
+        p.name = parent_name;
+
+        // Set new parent in child nodes
+        self.get_mut(child1)?.set_parent(parent, edge1);
+        self.get_mut(child2)?.set_parent(parent, edge2);
+
+        Ok(parent)
     }
 }
 
