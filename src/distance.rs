@@ -185,18 +185,28 @@ where
             return Err(MatrixError::IndexError);
         }
 
-        let mut i = self.get_taxa_index(taxon1)?;
-        let mut j = self.get_taxa_index(taxon2)?;
+        let i = self.get_taxa_index(taxon1)?;
+        let j = self.get_taxa_index(taxon2)?;
 
-        Ok(self.get_vec_index(&mut i, &mut j))
+        self.tril_to_vec_index(i, j)
     }
 
-    fn get_vec_index(&self, i: &mut usize, j: &mut usize) -> usize {
-        if *j < *i {
-            std::mem::swap(i, j);
+    // Convert (row,col) matrix index to lower triangular linear index
+    fn tril_to_vec_index(&self, i: usize, j: usize) -> Result<usize, MatrixError> {
+        if i == j || i >= self.size || j >= self.size {
+            Err(MatrixError::IndexError)
+        } else {
+            Ok(tril_to_rowvec_index(self.size, i, j))
         }
+    }
 
-        ((2 * self.size - 3 - *i) * (*i)) / 2 + (*j) - 1
+    // Convert lower triangular linear index to (row,col) matrix index
+    fn vec_to_tril_index(&self, k: usize) -> Result<(usize, usize), MatrixError> {
+        if k >= self.matrix.len() {
+            Err(MatrixError::IndexError)
+        } else {
+            Ok(rowvec_to_tril_index(self.size, k))
+        }
     }
 
     /// Get the distance between two sequences
@@ -245,11 +255,10 @@ where
                 let lim = if square { self.size } else { i };
                 let row_s = (0..lim)
                     .map(|j| {
-                        let (mut i, mut j) = (i, j);
                         let d = if i == j {
                             zero()
                         } else {
-                            let idx = self.get_vec_index(&mut i, &mut j);
+                            let idx = self.tril_to_vec_index(i, j).unwrap();
                             self.matrix[idx]
                         };
                         format!("{d}")
@@ -383,212 +392,57 @@ where
     }
 }
 
-//#[derive(Debug)]
-///// A phylogenetic distance matrix
-//pub struct DistanceMatrix2D<T> {
-//    /// Number of taxa in the matrix
-//    pub size: usize,
-//    /// Identifiers of the taxa
-//    pub taxa: Vec<String>,
-//    /// Distances between taxa
-//    matrix: Array2<T>,
-//}
-//
-//impl<T> DistanceMatrix2D<T>
-//where
-//    T: Display + Debug + Float + Zero + FromStr,
-//{
-//    /// Build a distance matrix from a phylip formatted string
-//    pub fn from_phylip(phylip: &str, square: bool) -> Result<Self, ParseError<T>> {
-//        let mut lines = phylip.lines();
-//        let size: usize = lines
-//            .next()
-//            .ok_or(ParseError::EmptyMatrixFile)?
-//            .parse()
-//            .map_err(ParseError::SizeParseError)?;
-//
-//        let mut matrix = Array2::<T>::zeros((size, size));
-//
-//        let mut taxa = Vec::with_capacity(size);
-//
-//        for (i, line) in lines.enumerate() {
-//            let mut fields = line.split_whitespace();
-//            let name = fields.next().ok_or(ParseError::EmptyRow(i))?;
-//            let dists = fields
-//                .map(|d| d.parse().map_err(|_| ParseError::DistParseError))
-//                .collect::<Result<Vec<_>, _>>()?;
-//            let dists = Array1::from_vec(dists);
-//
-//            if square && dists.len() != size || !square && dists.len() != i {
-//                return Err(ParseError::MissingDistance(i + 1));
-//            }
-//
-//            if square {
-//                matrix.slice_mut(s![i, ..]).assign(&dists);
-//            } else {
-//                matrix.slice_mut(s![i, ..i]).assign(&dists);
-//                matrix.slice_mut(s![..i, i]).assign(&dists);
-//            }
-//
-//            if (*matrix.get((i, i)).unwrap()) != zero() {
-//                return Err(ParseError::NonZeroDiagonalValue(name.to_string()));
-//            }
-//
-//            taxa.push(name.to_string());
-//        }
-//
-//        if taxa.len() != size {
-//            return Err(ParseError::SizeAndRowsMismatch(taxa.len(), size));
-//        }
-//
-//        // Check that matrix is symmetric
-//        if !(matrix.t() == matrix) {
-//            return Err(ParseError::NonSymmetricMat);
-//        }
-//
-//        Ok(DistanceMatrix2D { size, taxa, matrix })
-//    }
-//
-//    /// Build phylip formatted representation of the distance matrix
-//    pub fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
-//        let body = self
-//            .matrix
-//            .axis_iter(Axis(0))
-//            .enumerate()
-//            .map(|(i, row)| {
-//                let lim = if square { self.size } else { i };
-//                let row_s = row.iter().take(lim).map(|e| e.to_string()).join("  ");
-//
-//                let mut out = self.taxa[i].to_string();
-//                if !row_s.is_empty() {
-//                    out.push_str(&format!("    {row_s}"));
-//                }
-//                out
-//
-//                //format!("{}    {row_s}", self.taxa[i])
-//            })
-//            .join("\n");
-//
-//        Ok(format!("{}\n{body}\n", self.size))
-//    }
-//
-//    /// Write distance matrix to file in Phylip format
-//    pub fn to_file(&self, path: &Path, square: bool) -> Result<(), MatrixError> {
-//        match fs::write(path, self.to_phylip(square)?) {
-//            Ok(_) => Ok(()),
-//            Err(e) => Err(MatrixError::IoError(e)),
-//        }
-//    }
-//
-//    /// Find minimum non-zero distance and associated indices
-//    pub fn min(self) -> Option<(T, (usize, usize))> {
-//        self.matrix.indexed_iter().fold(None, |a, ((i, j), v)| {
-//            if i == j {
-//                return a; // Skip diag
-//            }
-//
-//            match a {
-//                None => Some((*v, (i, j))),
-//                Some((mut a_v, (mut a_i, mut a_j))) => {
-//                    if *v < a_v {
-//                        a_i = i;
-//                        a_j = j;
-//                        a_v = *v;
-//                    }
-//
-//                    Some((a_v, (a_i, a_j)))
-//                }
-//            }
-//        })
-//    }
-//
-//    /// Get numerical index associated to taxon identifier
-//    pub fn get_taxa_index(&self, id: &str) -> Result<usize, MatrixError> {
-//        self.taxa
-//            .iter()
-//            .find_position(|v| *v == id)
-//            .ok_or(MatrixError::MissingTaxon(id.to_string()))
-//            .map(|(i, _)| i)
-//    }
-//
-//    /// get distance between 2 taxa
-//    pub fn get(&self, id_1: &str, id_2: &str) -> Result<&T, MatrixError> {
-//        let i1 = self.get_taxa_index(id_1)?;
-//        let i2 = self.get_taxa_index(id_2)?;
-//
-//        self.matrix.get((i1, i2)).ok_or(MatrixError::IndexError)
-//    }
-//
-//    /// Set the taxa identifers of the distance matrix
-//    pub fn set_taxa(&mut self, taxa: Vec<String>) -> Result<(), MatrixError> {
-//        if self.size != taxa.len() {
-//            return Err(MatrixError::SizeError {
-//                size: self.size,
-//                n_taxa: taxa.len(),
-//            });
-//        }
-//
-//        self.taxa = taxa;
-//
-//        Ok(())
-//    }
-//
-//    /// Set the distance between 2 taxa
-//    pub fn set(&mut self, id_1: &str, id_2: &str, dist: T) -> Result<(), MatrixError> {
-//        let i1 = self.get_taxa_index(id_1)?;
-//        let i2 = self.get_taxa_index(id_2)?;
-//
-//        // Set value in both symmetric entries
-//        for index in vec![(i1, i2), (i2, i1)] {
-//            let v_ptr = self.matrix.get_mut(index).ok_or(MatrixError::IndexError)?;
-//            *v_ptr = dist;
-//        }
-//
-//        Ok(())
-//    }
-//
-//    /// Allocate space for a distance matrix of given number of taxa
-//    pub fn new_with_size(size: usize) -> Self {
-//        Self {
-//            size,
-//            taxa: Vec::with_capacity(size),
-//            matrix: Array2::<T>::zeros((size, size)),
-//        }
-//    }
-//
-//    pub(crate) fn from_precomputed(taxa: Vec<String>, matrix: Vec<T>) -> Result<Self, MatrixError> {
-//        // Check that sizes are OK
-//        let n = taxa.len();
-//        let n_pairs = (n * (n - 1)) / 2;
-//        if matrix.len() != n_pairs {
-//            return Err(MatrixError::SizeError {
-//                size: {
-//                    let delta = (8.0 * (n_pairs as f64) + 1.).sqrt() as usize;
-//                    (delta + 1) / 2
-//                },
-//                n_taxa: n,
-//            });
-//        }
-//
-//        let mut m = Self::new_with_size(taxa.len());
-//        m.set_taxa(taxa)?;
-//
-//        for ((i, j), v) in iproduct!(0..n, 0..n)
-//            .filter(|(i, j)| i < j)
-//            .zip(matrix.iter())
-//        {
-//            *(m.matrix.get_mut((i, j)).ok_or(MatrixError::IndexError)?) = *v;
-//            *(m.matrix.get_mut((j, i)).ok_or(MatrixError::IndexError)?) = *v;
-//        }
-//
-//        Ok(m)
-//    }
-//}
+// Convert (row,col) matrix index of triangular matrix to the index
+// in the row-wise vector representation of the matrix
+pub(crate) fn tril_to_rowvec_index(_size: usize, i: usize, j: usize) -> usize {
+    let (i, j) = if i > j { (i, j) } else { (j, i) };
+
+    ((i.saturating_sub(1)) * i) / 2 + j
+}
+
+// Convert index in row-wise vector representation of the lower
+// triangular matrix to the (row,col) matrix index.
+// Formula from [hal-02047514](https://hal.science/hal-02047514)
+pub(crate) fn rowvec_to_tril_index(_size: usize, k: usize) -> (usize, usize) {
+    let p = (((1.0 + 8.0 * (k as f64)).sqrt() - 1.0) / 2.0).floor() as usize;
+    let i = p + 1;
+    let j = k - p * (p + 1) / 2;
+
+    (i, j)
+}
+
+#[allow(dead_code)]
+// Convert (row,col) matrix index of triangular matrix to the index
+// in the row-wise vector representation of the matrix
+pub(crate) fn tril_to_colvec_index(size: usize, i: usize, j: usize) -> usize {
+    let (i, j) = if j < i { (j, i) } else { (i, j) };
+    ((2 * size - 3 - i) * i) / 2 + j - 1
+}
+
+#[allow(dead_code)]
+// Convert index in col-wise vector representation of the lower
+// triangular matrix to the (row,col) matrix index.
+// Formula from [hal-02047514](https://hal.science/hal-02047514)
+pub(crate) fn colvec_to_tril_index(size: usize, k: usize) -> (usize, usize) {
+    // k + 1 because formula is for 1-indexed
+    let k = k + 1;
+    let n = size;
+
+    let kp = n * (n - 1) / 2 - k;
+    let p = (((1. + 8. * (kp as f64)).sqrt() - 1.) / 2.).floor() as usize;
+
+    let i = n - (kp - p * (p + 1) / 2) - 1;
+    let j = n - 1 - p - 1;
+
+    (i, j)
+}
 
 #[cfg(test)]
 mod tests {
 
     use core::panic;
+
+    use ndarray::Array2;
 
     use super::*;
 
@@ -808,11 +662,30 @@ s5    5  10  15  0
         }
     }
 
-    //#[test]
-    //fn test_dm2() {
-    //    let mat = DistanceMatrix::<f32>::from_phylip(TRIANGLE, false).unwrap();
-    //    let (v, idx) = mat.min().unwrap();
-    //    assert_eq!(v, 2.0);
-    //    assert!(idx == (0, 1) || idx == (1, 0));
-    //}
+    #[test]
+    fn index_conversions() {
+        for size in [5, 10, 20, 50] {
+            let mut c = 0;
+            for i in 1..size {
+                for j in 0..i {
+                    let k = tril_to_rowvec_index(size, i, j);
+                    assert_eq!(k, c, "Expected {c} got {k}");
+                    assert_eq!((i, j), rowvec_to_tril_index(size, k));
+                    c += 1;
+                }
+            }
+
+            c = 0;
+            let mut m = Array2::zeros((size, size));
+            for j in 0..size {
+                for i in (j + 1)..size {
+                    *(m.get_mut((i, j)).unwrap()) = c + 1;
+                    let k = tril_to_colvec_index(size, i, j);
+                    assert_eq!(k, c, "Expected {c} got {k}");
+                    assert_eq!((i, j), colvec_to_tril_index(size, k));
+                    c += 1;
+                }
+            }
+        }
+    }
 }

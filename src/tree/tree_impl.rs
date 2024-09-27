@@ -19,7 +19,7 @@ use thiserror::Error;
 use super::node::{Node, NodeError};
 use super::{EdgeDepth, EdgeLength, NewickFormat, NodeId};
 
-use crate::distance::{DistanceMatrix, MatrixError};
+use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
 
 /// Errors that can occur when reading, writing and manipulating [`Tree`] structs.
 #[derive(Error, Debug)]
@@ -1612,7 +1612,8 @@ impl Tree {
                         }
                         // Compute the index of the pair in the vector representing
                         // the upper triangular matrix
-                        let vec_idx = ((2 * n - 3 - i) * i) / 2 + j - 1;
+                        //let vec_idx = ((2 * n - 3 - i) * i) / 2 + j - 1;
+                        let vec_idx = tril_to_rowvec_index(n, i, j);
 
                         pairwise_vec[vec_idx] += distance1 + distance2;
                     }
