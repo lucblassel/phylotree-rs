@@ -177,9 +177,8 @@ where
     pub fn get_taxa_index(&self, id: &str) -> Result<usize, MatrixError> {
         self.taxa
             .iter()
-            .find_position(|v| *v == id)
-            .ok_or(MatrixError::MissingTaxon(id.to_string()))
-            .map(|(i, _)| i)
+            .position(|v| *v == id)
+            .ok_or_else(|| MatrixError::MissingTaxon(id.to_string()))
     }
 
     /// Get the index in the distance vector for 2 sequences
