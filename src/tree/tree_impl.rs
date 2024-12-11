@@ -850,14 +850,11 @@ impl Tree {
         self.init_leaf_index()?;
 
         let subtree_leaves = self.get_subtree_leaves(index)?;
+        let l_index = self.leaf_index.borrow();
         let indices = subtree_leaves
             .iter()
-            .filter_map(|index| self.get(index).as_ref().unwrap().name.clone())
-            .map(|name| {
-                let v = self.leaf_index.borrow().clone();
-                v.map(|v| v.iter().position(|n| *n == name).unwrap())
-                    .unwrap()
-            });
+            .filter_map(|index| self.get(index).unwrap().name.as_ref())
+            .map(|name| l_index.iter().flatten().position(|n| n == name).unwrap());
 
         let mut bitset = FixedBitSet::with_capacity(self.n_leaves());
         for index in indices {
