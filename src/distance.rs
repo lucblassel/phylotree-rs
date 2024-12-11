@@ -530,8 +530,9 @@ where
             .into_iter()
             .enumerate()
             .filter_map(|(i, v)| if v { None } else { Some(i) })
-            .next_tuple() else {
-            return Err(MatrixError::IndexError)
+            .next_tuple()
+        else {
+            return Err(MatrixError::IndexError);
         };
 
         let (a, b) = (node_ids[a_i], node_ids[b_i]);
