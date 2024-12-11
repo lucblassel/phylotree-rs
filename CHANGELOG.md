@@ -1,6 +1,8 @@
 # Phylotree changelog
 
 ## Unreleased
+
+## v0.1.3 - 2024-12-11
 ### Added
 #### Lib
 - Adding branch depth information to bipartitions
