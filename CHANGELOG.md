@@ -2,9 +2,27 @@
 
 ## Unreleased
 ### Added
+#### Lib
 - Adding branch depth information to bipartitions
-### Changed
+- Basic nexus file output
+- Adding basic CI (`cargo fmt`, `cargo test` and `cargo clippy`)
+- Iterators for DistanceMatrix
+- min and max methods for DistanceMatrix
+- Node merging into parent
+- Tree building with UPGMA
+#### Bin
+- Shell completion 
+- Rescale command
+- Many to single ref tree comparison
+### Changed 
 - Better output for `phylotree stats` command.
+- More informative type names
+- Better output for criterion benchmarks
+### Fixed
+- Make node searching possible with capturing closures (#9 and #10 🙏 @4less)
+- Fixing bad tests
+- Triangular Matrix / Vector index conversions
+- Removed un-needed allocations and clones to speed up execution of [`phylocompare`](https://github.com/lucblassel/phylocompare) (#12 🙏 @krtab)
 
 ## v0.1.2 - 2023-09-20
 ### Added
