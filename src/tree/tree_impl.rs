@@ -2292,30 +2292,6 @@ impl core::hash::Hasher for IdentityHasher {
 
 type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
-/// Methods to infer [Tree] ojects from [DistanceMatrix] objects
-///
-/// ----
-/// ----
-// impl Tree {
-// /// #########################
-// /// # INFER TREES FROM DATA #
-// /// #########################
-//
-// fn neighbour_joining(matrix: DistanceMatrix<f64>) -> Self {
-//     let mut tree = Tree::new();
-//     let mut matrix = matrix;
-//     let mut q = DistanceMatrix::new(matrix.size);
-//
-//     for _ in 0..(matrix.size - 3) {
-//         for pair in matrix.ids.iter().enumerate().combinations(2) {
-//
-//         }
-//     }
-//
-//     tree
-// }
-// }
-
 impl Default for Tree {
     fn default() -> Self {
         Self::new()
