@@ -5,6 +5,7 @@ use std::{
 };
 
 use thiserror::Error;
+use vec_map::VecMap;
 
 use super::{EdgeLength, NewickFormat, NodeId};
 
@@ -32,9 +33,6 @@ pub enum NodeError {
     },
 }
 
-use crate::tree::tree_impl::IdentityHasher;
-type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
-
 #[derive(Clone)]
 /// A node of the Tree
 pub struct Node {
@@ -53,7 +51,7 @@ pub struct Node {
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, EdgeLength>>,
     /// Distance to descendants of this node
-    pub(crate) subtree_distances: RefCell<Option<HashMap<NodeId, EdgeLength, BuildIdentityHasher>>>,
+    pub(crate) subtree_distances: RefCell<Option<VecMap<EdgeLength>>>,
     /// Number of edges to root
     pub(crate) depth: usize,
     // Whether the node is deleted or not

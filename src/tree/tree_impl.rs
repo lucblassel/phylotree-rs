@@ -12,6 +12,7 @@ use std::{
     fs,
     path::Path,
 };
+use vec_map::VecMap;
 
 use thiserror::Error;
 
@@ -1556,7 +1557,7 @@ impl Tree {
         };
 
         for current_node in self.levelorder(&self.get_root()?)?.iter().rev() {
-            let mut node_cache: HashMap<_, _, BuildIdentityHasher> = HashMap::default();
+            let mut node_cache = VecMap::new();
 
             let parent = self.get(current_node)?;
             if parent.is_tip() {
@@ -1578,7 +1579,7 @@ impl Tree {
                     .iter()
                 {
                     let len = child_len + distance;
-                    node_cache.insert(*leaf, len);
+                    node_cache.insert(leaf, len);
                 }
             }
 
@@ -1604,8 +1605,8 @@ impl Tree {
                         let distance1 = node_cache.get(leaf1).unwrap();
                         let distance2 = node_cache.get(leaf2).unwrap();
 
-                        let mut i = get_leaf_index(*leaf1)?;
-                        let mut j = get_leaf_index(*leaf2)?;
+                        let mut i = get_leaf_index(leaf1)?;
+                        let mut j = get_leaf_index(leaf2)?;
                         if j < i {
                             std::mem::swap(&mut i, &mut j);
                         }
@@ -2272,25 +2273,6 @@ END;
         Ok(())
     }
 }
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct IdentityHasher(usize);
-
-impl core::hash::Hasher for IdentityHasher {
-    fn finish(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn write(&mut self, _bytes: &[u8]) {
-        unimplemented!("IdentityHasher only supports usize keys")
-    }
-
-    fn write_usize(&mut self, i: usize) {
-        self.0 = i;
-    }
-}
-
-type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
 impl Default for Tree {
     fn default() -> Self {
