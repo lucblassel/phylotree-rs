@@ -158,12 +158,9 @@ impl Node {
     /// Sets the Edge between a node and its child
     pub fn set_child_edge(&mut self, child: &NodeId, edge: Option<EdgeLength>) {
         if let Some(edge) = edge {
-            if self.child_edges.is_none() {
-                self.child_edges = Some(HashMap::new());
-            }
             self.child_edges
-                .as_mut()
-                .map(|edges| edges.insert(*child, edge));
+                .get_or_insert_with(Default::default)
+                .insert(*child, edge);
         }
     }
 

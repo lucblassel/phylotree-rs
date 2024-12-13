@@ -254,14 +254,14 @@ impl Tree {
     pub fn get_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
             .iter()
-            .find(|node| node.name.is_some() && node.name == Some(String::from(name)))
+            .find(|node| node.name.as_deref().is_some_and(|n| n == name))
     }
 
     /// Get a mutable reference to a node in the tree by name
     pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
         self.nodes
             .iter_mut()
-            .find(|node| node.name.is_some() && node.name == Some(String::from(name)))
+            .find(|node| node.name.as_deref().is_some_and(|n| n == name))
     }
 
     /// Search nodes in the tree with a closure.
