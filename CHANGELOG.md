@@ -1,6 +1,13 @@
 # Phylotree changelog
 
 ## Unreleased
+### Added
+#### Lib
+#### Bin
+- Added an option to name internal nodes in simulated trees
+### Changed
+### Fixed
+ - Changing sutree-caching from HashMap to VecMap in distance matrix computation (#13 🙏 @krtab)
 
 ## v0.1.3 - 2024-12-11
 ### Added
