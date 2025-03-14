@@ -44,6 +44,10 @@ pub enum Commands {
         /// Distribution of branch lengths
         #[arg(value_enum, short, long, default_value_t=Distr::Uniform)]
         distribution: Distr,
+
+        /// Give names to internal nodes as well
+        #[arg(short, long)]
+        internal_names: bool,
     },
 
     /// Get statistics about a tree

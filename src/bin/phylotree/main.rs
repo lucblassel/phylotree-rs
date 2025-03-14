@@ -79,17 +79,38 @@ fn main() {
             trees,
             shape,
             distribution,
+            internal_names,
         } => {
             let generate = |tips: usize,
                             brlens: bool,
                             distr: Distr,
-                            shape: TreeShape|
+                            shape: TreeShape,
+                            internal_names: bool|
              -> Result<Tree, TreeError> {
-                match shape {
+                let mut tree = match shape {
                     TreeShape::Yule => generate_yule(tips, brlens, distr),
                     TreeShape::Ete3 => generate_tree(tips, brlens, distr),
                     TreeShape::Caterpillar => generate_caterpillar(tips, brlens, distr),
+                }?;
+
+                if internal_names {
+                    // Rename root
+                    let root = tree.get_root()?;
+
+                    let mut c = 0;
+                    for id in tree.preorder(&root)? {
+                        if tree.get(&id)?.is_tip() {
+                            continue;
+                        }
+
+                        tree.get_mut(&id)?.set_name(format!("Int_{c}"));
+                        c += 1;
+                    }
+
+                    tree.get_mut(&root)?.set_name("Root".to_string());
                 }
+
+                Ok(tree)
             };
 
             if let Some(ntrees) = trees {
@@ -103,11 +124,14 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate(tips, branch_lengths, distribution, shape).unwrap();
+                    let random =
+                        generate(tips, branch_lengths, distribution, shape, internal_names)
+                            .unwrap();
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate(tips, branch_lengths, distribution, shape).unwrap();
+                let random =
+                    generate(tips, branch_lengths, distribution, shape, internal_names).unwrap();
                 if let Some(output) = output {
                     random.to_file(&output).unwrap()
                 } else {
