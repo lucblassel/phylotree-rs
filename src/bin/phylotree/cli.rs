@@ -62,7 +62,7 @@ pub enum Commands {
     ///  - the Robinson-Foulds distance
     ///  - the normalize Robinson-Foulds distance
     ///  - the weighted Robinson-Foulds distance
-    ///  - the Khuner-Felsenstein branch-score
+    ///  - the Kuhner-Felsenstein branch-score
     #[clap(verbatim_doc_comment)]
     Compare {
         /// Reference tree

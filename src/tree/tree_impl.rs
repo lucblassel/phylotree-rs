@@ -112,7 +112,7 @@ pub struct Comparison {
     pub norm_rf: f64,
     /// Weighted Robinson Foulds
     pub weighted_rf: f64,
-    /// Khuner Felsenstein Branch Score
+    /// Kuhner Felsenstein Branch Score
     pub branch_score: f64,
 }
 
@@ -137,7 +137,7 @@ pub struct Tree {
 }
 
 /// Base methods to add and get [`Node`] objects to and from the [`Tree`].
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -164,7 +164,7 @@ impl Tree {
         idx
     }
 
-    /// Add a child to one of the tree's nodes.  
+    /// Add a child to one of the tree's nodes.
     ///
     /// # Example
     /// ```
@@ -415,7 +415,7 @@ impl Tree {
 }
 
 /// Methods to traverse the [`Tree`]
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -548,7 +548,7 @@ impl Tree {
 }
 
 /// Methods that compute characteristics and measures to describe the [`Tree`]
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -716,7 +716,7 @@ impl Tree {
     }
 
     /// Computes the Colless index for the tree.
-    /// The colless index, $I_c$, measures the imbalance of a phylogenetic tree:  
+    /// The colless index, $I_c$, measures the imbalance of a phylogenetic tree:
     /// $$
     /// I_c = \sum_{i \in nodes} |L_i - R_i|
     /// $$
@@ -743,13 +743,13 @@ impl Tree {
         Ok(colless)
     }
 
-    /// Computes the normalized colless statistic with a Yule null model:  
+    /// Computes the normalized colless statistic with a Yule null model:
     /// $$
     /// I_{yule} = \frac{I_c - n\cdot\log(n) - n(\gamma-1-\log(2))}{n}
     /// $$
     /// Where $I_c$ is the unnormalized colless index *(computed with [`Tree::colless()`])*,
     /// $n$ the number of leaves
-    /// and $\gamma$ the [Euler constant](https://en.wikipedia.org/wiki/Euler%27s_constant).  
+    /// and $\gamma$ the [Euler constant](https://en.wikipedia.org/wiki/Euler%27s_constant).
     /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/colless.html))*
     pub fn colless_yule(&self) -> Result<f64, TreeError> {
         self.colless().map(|i_c| {
@@ -760,12 +760,12 @@ impl Tree {
         })
     }
 
-    /// Computes the normalized colless statistic with a PDA null model:  
+    /// Computes the normalized colless statistic with a PDA null model:
     /// $$
     /// I_{PDA} = \frac{I_c}{n^{3/2}}
     /// $$
     /// Where $I_c$ is the unnormalized colless index *(computed with [`Tree::colless()`])*
-    /// and $n$ the number of leaves.  
+    /// and $n$ the number of leaves.
     /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/colless.html))*
     pub fn colless_pda(&self) -> Result<f64, TreeError> {
         self.colless()
@@ -790,7 +790,7 @@ impl Tree {
     /// I_{yule} = \frac{I_s - 2n\cdot \sum_{j=2}^n \frac{1}{j}}{n}
     /// $$
     /// With $I_s$ the unnormalized Sackin index *(computed with [`Tree::sackin()`])*
-    /// and $n$ the number of leaves in the tree.  
+    /// and $n$ the number of leaves in the tree.
     /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/sackin.html))*
     pub fn sackin_yule(&self) -> Result<f64, TreeError> {
         self.sackin().map(|i_n| {
@@ -806,7 +806,7 @@ impl Tree {
     /// I_{PDA} = \frac{I_s}{n^{3/2}}
     /// $$
     /// With $I_s$ the unnormalized Sackin index *(computed with [`Tree::sackin()`])*
-    /// and $n$ the number of leaves in the tree.  
+    /// and $n$ the number of leaves in the tree.
     /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/sackin.html))*
     pub fn sackin_pda(&self) -> Result<f64, TreeError> {
         self.sackin()
@@ -815,7 +815,7 @@ impl Tree {
 }
 
 /// Methods that compute edge bipartitions and compare [`Tree`] objects with each other.
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -973,7 +973,7 @@ impl Tree {
     /// $$
     /// RF = |A\cup B| - |A\cap B|
     /// $$
-    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.  
+    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
         let partitions_s = self.get_partitions()?;
@@ -1009,11 +1009,11 @@ impl Tree {
     /// [(Robinson & Foulds, 1981)](https://doi.org/10.1016/0025-5564(81)90043-2).
     /// The RF distance is normalized by the maximum possible RF distance for both trees
     /// *(i.e the number of bipartitions in both trees)* so that the resulting distance
-    /// is contained within [0, 1]:  
+    /// is contained within [0, 1]:
     /// $$
     /// RF_{norm} = \frac{RF}{|A| + |B|}
     /// $$
-    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.  
+    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64, TreeError> {
         let rf = self.robinson_foulds(other)?;
@@ -1029,14 +1029,14 @@ impl Tree {
     /// Computes the weighted Robinson Foulds distance between two trees
     /// [(Robinson & Foulds, 1979)](https://doi.org/10.1007/BFb0102690).
     /// This distance is equal to the absolute difference of branch lengths for
-    /// matched bipartitions between the two trees, plus branch lenghts for unique bipartitions:  
+    /// matched bipartitions between the two trees, plus branch lenghts for unique bipartitions:
     /// $$
     /// RF_{weighted} = \sum_{e \in A\cap B} |d_{(e,A)} - d_{(e,B)}| +
     /// \sum_{e \in A\setminus B}d_{(e,A)} +
     /// \sum_{e \in B\setminus A}d_{(e,B)}
     /// $$
     /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees,
-    /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).  
+    /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).
     /// See also [Tree::compare_topologies()]
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
         let partitions_s = self.get_partitions_with_lengths()?;
@@ -1061,11 +1061,11 @@ impl Tree {
         Ok(dist)
     }
 
-    /// Computes the khuner felsenstein branch score between two trees,
-    /// [(Khuner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
+    /// Computes the kuhner felsenstein branch score between two trees,
+    /// [(Kuhner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
     /// The distance is computed by taking the squared difference of branch lengths for
     /// matched bipartitions between the two trees, plus squared branch lenghts for unique bipartitions.
-    /// The branch score is then derived by taking the square root of that total sum:  
+    /// The branch score is then derived by taking the square root of that total sum:
     /// $$
     /// KF = \sqrt{
     ///     \sum_{e \in A\cap B} (d_{(e,A)} - d_{(e,B)})^2 +
@@ -1074,7 +1074,7 @@ impl Tree {
     /// }
     /// $$
     /// See also [Tree::compare_topologies()]
-    pub fn khuner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
+    pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -1109,7 +1109,7 @@ impl Tree {
     /// let rf = tree1.robinson_foulds(&tree2).unwrap() as f64;
     /// let norm_rf = tree1.robinson_foulds_norm(&tree2).unwrap();
     /// let weighted_rf = tree1.weighted_robinson_foulds(&tree2).unwrap();
-    /// let branch_score = tree1.khuner_felsenstein(&tree2).unwrap();
+    /// let branch_score = tree1.kuhner_felsenstein(&tree2).unwrap();
     ///
     /// let comparison = tree1.compare_topologies(&tree2).unwrap();
     ///
@@ -1183,28 +1183,28 @@ impl Tree {
     ///  ```
     ///  use phylotree::tree::Tree;
     ///
-    ///  // Ref Tree:     
+    ///  // Ref Tree:
     ///  //               0.3
     ///  //         0.2 +----- A
-    ///  //   0.1 +-----| 0.4      
+    ///  //   0.1 +-----| 0.4
     ///  // +-----|     +----- B
-    ///  // |     | 0.5            
-    ///  // |     +----- C      
-    ///  // |       0.7            
-    ///  // | 0.6 +----- D      
-    ///  // +-----| 0.8            
-    ///  //       +----- E       
+    ///  // |     | 0.5
+    ///  // |     +----- C
+    ///  // |       0.7
+    ///  // | 0.6 +----- D
+    ///  // +-----| 0.8
+    ///  //       +----- E
     ///
     ///  // Compared Tree:
     ///  //               0.3
     ///  //         0.2 +----- A
-    ///  //   0.1 +-----| 0.4     
+    ///  //   0.1 +-----| 0.4
     ///  // +-----|     +----- C
-    ///  // |     | 0.5            
-    ///  // |     +----- B      
-    ///  // |       7.0            
-    ///  // | 0.6 +----- D      
-    ///  // +-----| 0.8            
+    ///  // |     | 0.5
+    ///  // |     +----- B
+    ///  // |       7.0
+    ///  // | 0.6 +----- D
+    ///  // +-----| 0.8
     ///  //       +----- E
     ///  //
     ///  // We just switched the B and C labels, so we should have 1
@@ -1213,7 +1213,7 @@ impl Tree {
     ///
     ///  let reftree = Tree::from_newick("(((A:0.3,B:0.4):0.2,C:0.5):0.1,(D:0.7,E:0.8):0.6);").unwrap();
     ///  let cmptree = Tree::from_newick("(((A:0.3,C:0.4):0.2,B:0.5):0.1,(D:7.0,E:0.8):0.6);").unwrap();
-    ///  
+    ///
     ///  // Get branch comparison including terminal branches
     ///  let (refset, cmpset, common) = reftree.compare_branch_lengths(&cmptree, true).unwrap();
     ///
@@ -1307,7 +1307,7 @@ impl Tree {
 }
 
 /// Methods to find paths in a [`Tree`] as well as measure distances between [`Node`] objects.
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -1637,7 +1637,7 @@ impl Tree {
 }
 
 /// Methods to manipulate and alter the [`Tree`] object.
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -1894,7 +1894,7 @@ impl Tree {
 }
 
 /// Methods to read and write [`Tree`] objects to and from files or [`String`] objects.
-///   
+///
 /// ----
 /// ----
 impl Tree {
@@ -3152,7 +3152,7 @@ mod tests {
     #[test]
     // Branch score distances according to
     // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    fn khuner_felsenstein_treedist() {
+    fn kuhner_felsenstein_treedist() {
         let trees = [
             "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
             "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
@@ -3345,11 +3345,11 @@ mod tests {
 
             println!(
                 "[{i0}, {i1}] c:{:?} ==? t:{}",
-                t0.khuner_felsenstein(&t1).unwrap(),
+                t0.kuhner_felsenstein(&t1).unwrap(),
                 rfs[i0][i1]
             );
 
-            assert_eq!(t0.khuner_felsenstein(&t1).unwrap(), rfs[i0][i1])
+            assert_eq!(t0.kuhner_felsenstein(&t1).unwrap(), rfs[i0][i1])
         }
     }
 
