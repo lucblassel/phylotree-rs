@@ -87,6 +87,11 @@ __pycache__/
 # C extensions
 *.so
 
+# Pixi
+.pixi/
+pixi.lock
+pixi.toml
+
 # Distribution / packaging
 .Python
 build/
