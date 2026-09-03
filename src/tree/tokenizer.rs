@@ -93,7 +93,7 @@ pub trait Tokenizer {
 ///
 /// Input is decoded incrementally as UTF-8 and token spans are reported as
 /// half-open byte ranges into the original stream.
-struct NewickTokenizer<R: Read> {
+pub(crate) struct NewickTokenizer<R: Read> {
     reader: BufReader<R>,
     byte_offset: usize,
     peeked_token: Option<SpannedToken>,
