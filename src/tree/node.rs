@@ -44,8 +44,13 @@ pub struct Node {
     pub parent: Option<NodeId>,
     /// Indices of child nodes
     pub children: Vec<NodeId>,
-    /// length of branch between parent and node
+    /// Length of the branch between this node and its parent.
     pub parent_edge: Option<EdgeLength>,
+    /// Support value associated with the branch leading to this node.
+    ///
+    /// The value is stored without normalization because both fractions and
+    /// percentages are common in phylogenetic formats.
+    pub support: Option<f64>,
     /// Optional comment attached to node
     pub comment: Option<String>,
     /// lenght of branches between node and children
@@ -67,6 +72,7 @@ impl Node {
             parent: None,
             children: vec![],
             parent_edge: None,
+            support: None,
             child_edges: None,
             subtree_distances: RefCell::new(None),
             comment: None,
@@ -83,6 +89,7 @@ impl Node {
             parent: None,
             children: vec![],
             parent_edge: None,
+            support: None,
             child_edges: None,
             subtree_distances: RefCell::new(None),
             comment: None,
@@ -186,7 +193,7 @@ impl Node {
     pub(crate) fn rescale_edges(&mut self, factor: f64) {
         self.parent_edge = self.parent_edge.map(|edge| edge * factor);
         if let Some(edges) = &mut self.child_edges {
-            for (_, v) in edges.iter_mut() {
+            for v in edges.values_mut() {
                 *v *= factor;
             }
         }
@@ -202,65 +209,9 @@ impl Node {
         self.parent.is_none()
     }
 
-    fn format_name(&self) -> String {
-        self.name.clone().unwrap_or_default()
-    }
-
-    fn format_length(&self) -> String {
-        self.parent_edge
-            .map(|v| format!(":{v}"))
-            .unwrap_or_default()
-    }
-
-    fn format_comment(&self) -> String {
-        self.comment
-            .clone()
-            .map(|v| format!("[{v}]"))
-            .unwrap_or_default()
-    }
-
-    /// Returns String with node in newick format
-    pub fn to_newick(&self, format: NewickFormat) -> String {
-        let mut repr = String::new();
-
-        match format {
-            NewickFormat::AllFields
-            | NewickFormat::NoComments
-            | NewickFormat::OnlyNames
-            | NewickFormat::LeafLengthsAllNames => repr += &self.format_name(),
-            NewickFormat::LeafLengthsLeafNames
-            | NewickFormat::InternalLengthsLeafNames
-            | NewickFormat::AllLengthsLeafNames => {
-                if self.is_tip() {
-                    repr += &self.format_name()
-                }
-            }
-            _ => (),
-        }
-
-        match format {
-            NewickFormat::AllFields
-            | NewickFormat::NoComments
-            | NewickFormat::OnlyLengths
-            | NewickFormat::AllLengthsLeafNames => repr += &self.format_length(),
-            NewickFormat::InternalLengthsLeafNames => {
-                if !self.is_tip() {
-                    repr += &self.format_length()
-                }
-            }
-            NewickFormat::LeafLengthsLeafNames | NewickFormat::LeafLengthsAllNames => {
-                if self.is_tip() {
-                    repr += &self.format_length()
-                }
-            }
-            _ => (),
-        }
-
-        if let NewickFormat::AllFields = format {
-            repr += &self.format_comment()
-        }
-
-        repr
+    /// Returns this node's fields in Newick format, excluding its children.
+    pub fn to_newick(&self, format: NewickFormat) -> Result<String, super::TreeError> {
+        super::newick::serialize_node(self, format)
     }
 }
 
@@ -283,7 +234,16 @@ impl PartialEq for Node {
             _ => false,
         };
 
-        self.name == other.name && self.children.len() == other.children.len() && parent_edges_equal
+        let supports_equal = match (self.support, other.support) {
+            (None, None) => true,
+            (Some(s1), Some(s2)) => (s1 - s2).abs() < f64::EPSILON,
+            _ => false,
+        };
+
+        self.name == other.name
+            && self.children.len() == other.children.len()
+            && parent_edges_equal
+            && supports_equal
     }
 }
 
@@ -308,12 +268,13 @@ impl Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Comments[{:?}] Children({:?})",
+            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Support[{:?}] Comments[{:?}] Children({:?})",
             self.parent_edge,
             self.name,
             self.id,
             self.parent,
             self.depth,
+            self.support,
             self.comment,
             self.children,
         )

@@ -32,6 +32,7 @@ python = ["pyo3"]
 
 [dependencies]
 accurate = "0.3.1"
+ariadne = "0.5.1"
 clap = { version = "4.1.13", features = ["derive"] }
 clap_complete = { version = "4.4.4", optional = true }
 fixedbitset = "0.4.2"
@@ -47,6 +48,7 @@ serde = { version = "1.0.164", features = ["derive"] }
 thiserror = "1.0.40"
 tinytemplate = { version = "1.2.1", optional = true }
 trait-set = "0.3.0"
+utf8-chars = "3.0.7"
 utf8-read = "0.4.0"
 vec_map = "0.8.2"
 

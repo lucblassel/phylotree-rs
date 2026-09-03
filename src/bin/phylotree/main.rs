@@ -21,14 +21,40 @@ use std::{
     fmt::Display,
     fs::{self, File},
     io,
-    io::{BufWriter, Write},
+    io::{BufWriter, IsTerminal, Write},
     path::Path,
+    process,
 };
 use tinytemplate::TinyTemplate;
 
 /// contains the struct representing the command line arguments
 /// parsed by [`clap`] and used to execute this binary
 pub mod cli;
+mod newick_diagnostic;
+
+fn read_tree(path: &Path) -> Tree {
+    let source = fs::read_to_string(path).unwrap_or_else(|error| {
+        eprintln!("error: could not read '{}': {error}", path.display());
+        process::exit(1);
+    });
+
+    Tree::from_newick(&source).unwrap_or_else(|error| {
+        let source_name = path.display().to_string();
+        let color = io::stderr().is_terminal();
+        let render_result = newick_diagnostic::write_newick_error(
+            io::stderr().lock(),
+            &source_name,
+            &source,
+            &error,
+            color,
+        );
+        if let Err(render_error) = render_result {
+            eprintln!("error: {error}");
+            eprintln!("error: could not render source diagnostic: {render_error}");
+        }
+        process::exit(2);
+    })
+}
 
 fn print_stats_header(name: bool) {
     if name {
@@ -47,9 +73,7 @@ where
     res.map_or_else(|_| "-".into(), |v| format!("{v}"))
 }
 
-fn print_stats(path: &Path, name: bool) {
-    let tree = Tree::from_file(path).unwrap();
-
+fn print_stats(path: &Path, tree: &Tree, name: bool) {
     let name = if name {
         format!("{:?}\t", path)
     } else {
@@ -79,17 +103,38 @@ fn main() {
             trees,
             shape,
             distribution,
+            internal_names,
         } => {
             let generate = |tips: usize,
                             brlens: bool,
                             distr: Distr,
-                            shape: TreeShape|
+                            shape: TreeShape,
+                            internal_names: bool|
              -> Result<Tree, TreeError> {
-                match shape {
+                let mut tree = match shape {
                     TreeShape::Yule => generate_yule(tips, brlens, distr),
                     TreeShape::Ete3 => generate_tree(tips, brlens, distr),
                     TreeShape::Caterpillar => generate_caterpillar(tips, brlens, distr),
+                }?;
+
+                if internal_names {
+                    // Rename root
+                    let root = tree.get_root()?;
+
+                    let mut c = 0;
+                    for id in tree.preorder(&root)? {
+                        if tree.get(&id)?.is_tip() {
+                            continue;
+                        }
+
+                        tree.get_mut(&id)?.set_name(format!("Int_{c}"));
+                        c += 1;
+                    }
+
+                    tree.get_mut(&root)?.set_name("Root".to_string());
                 }
+
+                Ok(tree)
             };
 
             if let Some(ntrees) = trees {
@@ -103,11 +148,14 @@ fn main() {
 
                 for i in 1..=ntrees {
                     let output = output.join(format!("{i}_{tips}_tips.nwk"));
-                    let random = generate(tips, branch_lengths, distribution, shape).unwrap();
+                    let random =
+                        generate(tips, branch_lengths, distribution, shape, internal_names)
+                            .unwrap();
                     random.to_file(&output).unwrap()
                 }
             } else {
-                let random = generate(tips, branch_lengths, distribution, shape).unwrap();
+                let random =
+                    generate(tips, branch_lengths, distribution, shape, internal_names).unwrap();
                 if let Some(output) = output {
                     random.to_file(&output).unwrap()
                 } else {
@@ -116,21 +164,22 @@ fn main() {
             }
         }
         cli::Commands::Stats { trees } => {
-            let print_name = trees.len() > 1;
+            let parsed_trees: Vec<_> = trees.iter().map(|path| (path, read_tree(path))).collect();
+            let print_name = parsed_trees.len() > 1;
             print_stats_header(print_name);
-            for tree in trees {
-                print_stats(&tree, print_name)
+            for (path, tree) in &parsed_trees {
+                print_stats(path, tree, print_name)
             }
         }
         cli::Commands::Compare { reftree, tocompare } => {
             // Read reference tree
-            let reftree = Tree::from_file(&reftree).unwrap();
+            let reftree = read_tree(&reftree);
             let ref_parts = reftree.get_partitions().unwrap();
 
             // Print header
             println!("tree\tpath\treference\tcommon\tcompared\trf\tnorm_rf\trf_w\tbranch_score");
             for (i, cmp_path) in tocompare.into_iter().enumerate() {
-                let compare = Tree::from_file(&cmp_path).unwrap();
+                let compare = read_tree(&cmp_path);
 
                 let other_parts = compare.get_partitions().unwrap();
 
@@ -157,7 +206,7 @@ fn main() {
             square,
             output,
         } => {
-            let tree = Tree::from_file(&tree).unwrap();
+            let tree = read_tree(&tree);
             let dm = tree.distance_matrix().unwrap();
             if let Some(output) = output {
                 dm.to_file(&output, square).unwrap();
@@ -172,7 +221,7 @@ fn main() {
             exclude_tips,
             output,
         } => {
-            let mut tree = Tree::from_file(&tree).unwrap();
+            let mut tree = read_tree(&tree);
             let mut n = 0;
             for node_idx in tree.preorder(&tree.get_root().unwrap()).unwrap().iter() {
                 let node = tree.get_mut(node_idx).unwrap();
@@ -208,7 +257,7 @@ fn main() {
             }
         }
         cli::Commands::Remove { tree, tips, output } => {
-            let mut tree = Tree::from_file(&tree).unwrap();
+            let mut tree = read_tree(&tree);
             for tip_name in tips.iter() {
                 let node = tree.get_by_name(tip_name).unwrap();
                 if !node.is_tip() {
@@ -227,7 +276,7 @@ fn main() {
             }
         }
         cli::Commands::Distance { tree, tips, output } => {
-            let tree = Tree::from_file(&tree).unwrap();
+            let tree = read_tree(&tree);
             let mut writer = BufWriter::new(match output {
                 Some(path) => Box::new(File::create(&path).unwrap()) as Box<dyn Write>,
                 None => Box::new(io::stdout()) as Box<dyn Write>,
@@ -251,7 +300,7 @@ fn main() {
             }
         }
         cli::Commands::Resolve { tree, output } => {
-            let mut tree = Tree::from_file(&tree).unwrap();
+            let mut tree = read_tree(&tree);
 
             tree.resolve().unwrap();
 
@@ -268,7 +317,7 @@ fn main() {
             output,
             verbose,
         } => {
-            let mut tree = Tree::from_file(&tree).unwrap();
+            let mut tree = read_tree(&tree);
 
             // Get duplicated sequence names
             let mut alignment = needletail::parse_fastx_file(alignment).unwrap();
@@ -371,7 +420,7 @@ fn main() {
             padding,
             output,
         } => {
-            let tree = Tree::from_file(&tree).unwrap();
+            let tree = read_tree(&tree);
             let mut layout = draw::radial_layout(&tree).unwrap();
 
             let mut min = f64::INFINITY;
@@ -439,14 +488,14 @@ fn main() {
                         let name = p.file_name().and_then(|n| n.to_str()).unwrap();
                         let output = out.clone().join(name);
 
-                        let mut tree = Tree::from_file(&p).unwrap();
+                        let mut tree = read_tree(&p);
                         tree.rescale(factor);
                         tree.to_file(&output).unwrap();
                     })
                     .progress()
                     .collect_vec();
             } else {
-                let mut tree = Tree::from_file(&trees[0]).unwrap();
+                let mut tree = read_tree(&trees[0]);
                 tree.rescale(factor);
                 if let Some(out) = output {
                     tree.to_file(&out).unwrap();

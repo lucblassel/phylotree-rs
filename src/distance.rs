@@ -899,7 +899,7 @@ a    0  17 21 31 23
 b    17 0  30 34 21
 c    21 30 0  28 39
 d    31 34 28 0  43
-e    23 21 39 43 0 
+e    23 21 39 43 0
 ";
         let dm = DistanceMatrix::<f64>::from_phylip_strict(p_str, true).unwrap();
         let built = dm.upgma().unwrap();

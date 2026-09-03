@@ -1,6 +1,7 @@
 # Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,rust,macos
 # Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,rust,macos
 
+
 # Added
 *.nwk
 *.newick
@@ -9,6 +10,9 @@ test*/
 *.mat
 *.csv
 matrix_test/
+
+# Keep test files
+!src/tree/fixtures/ete3/*.nwk
 
 ### macOS ###
 # General
