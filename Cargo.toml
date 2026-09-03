@@ -47,6 +47,7 @@ serde = "1.0.164"
 thiserror = "1.0.40"
 tinytemplate = "1.2.1"
 trait-set = "0.3.0"
+utf8-chars = "3.0.7"
 utf8-read = "0.4.0"
 
 [dependencies.pyo3]
