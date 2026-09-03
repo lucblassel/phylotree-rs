@@ -19,7 +19,7 @@ use super::newick_serializer::NewickSerializer;
 use super::node::{Node, NodeError};
 use super::parser::NewickParser;
 use super::tokenizer::NewickTokenizer;
-use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NodeId};
+use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NewickParseOptions, NodeId};
 
 use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
 
@@ -1935,6 +1935,35 @@ impl Tree {
         Ok(tree)
     }
 
+    /// Reads a Newick-formatted string using explicit parsing options.
+    ///
+    /// Unlike [`Tree::from_newick`], this method can interpret convention-based
+    /// internal labels and comments as branch support values.
+    ///
+    /// # Example
+    /// ```
+    /// use phylotree::tree::{InternalNodeLabelMode, NewickParseOptions, Tree};
+    ///
+    /// let options = NewickParseOptions {
+    ///     internal_node_labels: InternalNodeLabelMode::NumericSupport,
+    ///     ..Default::default()
+    /// };
+    /// let tree = Tree::from_newick_with_options("(A,B)95;", options).unwrap();
+    /// let root = tree.get_root().unwrap();
+    ///
+    /// assert_eq!(tree.get(&root).unwrap().support, Some(95.0));
+    /// ```
+    pub fn from_newick_with_options(
+        newick: &str,
+        options: NewickParseOptions,
+    ) -> Result<Self, NewickParseError> {
+        let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
+        let nodes = NewickParser::with_options(&mut tokenizer, options).parse()?;
+        let mut tree = Self::new();
+        tree.nodes = nodes;
+        Ok(tree)
+    }
+
     /// Writes the tree to a newick file
     pub fn to_file(&self, path: &Path) -> Result<(), TreeError> {
         match fs::write(path, self.to_newick()?) {
@@ -1945,8 +1974,16 @@ impl Tree {
 
     /// Creates a tree from a newick file
     pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
+        Self::from_file_with_options(path, NewickParseOptions::default())
+    }
+
+    /// Creates a tree from a Newick file using explicit parsing options.
+    pub fn from_file_with_options(
+        path: &Path,
+        options: NewickParseOptions,
+    ) -> Result<Self, NewickParseError> {
         let newick_string = fs::read_to_string(path)?;
-        Self::from_newick(&newick_string)
+        Self::from_newick_with_options(&newick_string, options)
     }
 
     /// Outputs a Nexus formatted string of the tree
@@ -2323,6 +2360,21 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             assert_eq!(newick, tree.to_newick().unwrap());
         }
+    }
+
+    #[test]
+    fn reads_branch_support_with_explicit_options() {
+        let options = NewickParseOptions {
+            internal_node_labels: crate::tree::InternalNodeLabelMode::NumericSupport,
+            support_comments: crate::tree::SupportCommentMode::Nhx,
+        };
+        let tree = Tree::from_newick_with_options("((A,B)95,C)[&&NHX:B=99];", options).unwrap();
+        let root_id = tree.get_root().unwrap();
+        let root = tree.get(&root_id).unwrap();
+        let inner = tree.get(&root.children[0]).unwrap();
+
+        assert_eq!(root.support, Some(99.0));
+        assert_eq!(inner.support, Some(95.0));
     }
 
     #[ignore]

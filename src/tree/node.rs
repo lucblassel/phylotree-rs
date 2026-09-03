@@ -46,8 +46,13 @@ pub struct Node {
     pub parent: Option<NodeId>,
     /// Indices of child nodes
     pub children: Vec<NodeId>,
-    /// length of branch between parent and node
+    /// Length of the branch between this node and its parent.
     pub parent_edge: Option<EdgeLength>,
+    /// Support value associated with the branch leading to this node.
+    ///
+    /// The value is stored without normalization because both fractions and
+    /// percentages are common in phylogenetic formats.
+    pub support: Option<f64>,
     /// Optional comment attached to node
     pub comment: Option<String>,
     /// lenght of branches between node and children
@@ -69,6 +74,7 @@ impl Node {
             parent: None,
             children: vec![],
             parent_edge: None,
+            support: None,
             child_edges: None,
             subtree_distances: RefCell::new(None),
             comment: None,
@@ -85,6 +91,7 @@ impl Node {
             parent: None,
             children: vec![],
             parent_edge: None,
+            support: None,
             child_edges: None,
             subtree_distances: RefCell::new(None),
             comment: None,
@@ -232,7 +239,16 @@ impl PartialEq for Node {
             _ => false,
         };
 
-        self.name == other.name && self.children.len() == other.children.len() && parent_edges_equal
+        let supports_equal = match (self.support, other.support) {
+            (None, None) => true,
+            (Some(s1), Some(s2)) => (s1 - s2).abs() < f64::EPSILON,
+            _ => false,
+        };
+
+        self.name == other.name
+            && self.children.len() == other.children.len()
+            && parent_edges_equal
+            && supports_equal
     }
 }
 
@@ -257,12 +273,13 @@ impl Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Comments[{:?}] Children({:?})",
+            "({:?}) {:?} Id[{}] Parent[{:?}] Depth[{:?}] Support[{:?}] Comments[{:?}] Children({:?})",
             self.parent_edge,
             self.name,
             self.id,
             self.parent,
             self.depth,
+            self.support,
             self.comment,
             self.children,
         )

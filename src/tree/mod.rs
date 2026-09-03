@@ -15,7 +15,9 @@ mod tree_impl;
 
 pub use self::newick_serializer::NewickFormat;
 pub use self::node::{Node, NodeError};
-pub use self::parser::NewickParseError;
+pub use self::parser::{
+    InternalNodeLabelMode, NewickParseError, NewickParseOptions, SupportCommentMode,
+};
 pub use self::tokenizer::{NewickToken, Span, TokenizerError};
 pub use self::tree_impl::{Comparison, Tree, TreeError};
 
