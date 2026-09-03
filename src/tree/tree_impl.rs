@@ -2,6 +2,7 @@ use accurate::sum::NaiveSum;
 use accurate::traits::*;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+#[cfg(not(target_arch = "wasm32"))]
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::VecDeque;
@@ -9,9 +10,10 @@ use std::iter::zip;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    fs,
-    path::Path,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::{fs, path::Path};
+use vec_map::VecMap;
 
 use thiserror::Error;
 
@@ -98,7 +100,7 @@ pub struct Comparison {
     pub norm_rf: f64,
     /// Weighted Robinson Foulds
     pub weighted_rf: f64,
-    /// Khuner Felsenstein Branch Score
+    /// Kuhner Felsenstein Branch Score
     pub branch_score: f64,
 }
 
@@ -240,14 +242,14 @@ impl Tree {
     pub fn get_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
             .iter()
-            .find(|node| node.name.is_some() && node.name == Some(String::from(name)))
+            .find(|node| node.name.as_deref().is_some_and(|n| n == name))
     }
 
     /// Get a mutable reference to a node in the tree by name
     pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
         self.nodes
             .iter_mut()
-            .find(|node| node.name.is_some() && node.name == Some(String::from(name)))
+            .find(|node| node.name.as_deref().is_some_and(|n| n == name))
     }
 
     /// Search nodes in the tree with a closure.
@@ -1042,8 +1044,8 @@ impl Tree {
         Ok(dist)
     }
 
-    /// Computes the khuner felsenstein branch score between two trees,
-    /// [(Khuner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
+    /// Computes the kuhner felsenstein branch score between two trees,
+    /// [(Kuhner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
     /// The distance is computed by taking the squared difference of branch lengths for
     /// matched bipartitions between the two trees, plus squared branch lenghts for unique bipartitions.
     /// The branch score is then derived by taking the square root of that total sum:
@@ -1055,7 +1057,7 @@ impl Tree {
     /// }
     /// $$
     /// See also [Tree::compare_topologies()]
-    pub fn khuner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
+    pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -1090,7 +1092,7 @@ impl Tree {
     /// let rf = tree1.robinson_foulds(&tree2).unwrap() as f64;
     /// let norm_rf = tree1.robinson_foulds_norm(&tree2).unwrap();
     /// let weighted_rf = tree1.weighted_robinson_foulds(&tree2).unwrap();
-    /// let branch_score = tree1.khuner_felsenstein(&tree2).unwrap();
+    /// let branch_score = tree1.kuhner_felsenstein(&tree2).unwrap();
     ///
     /// let comparison = tree1.compare_topologies(&tree2).unwrap();
     ///
@@ -1538,7 +1540,7 @@ impl Tree {
         };
 
         for current_node in self.levelorder(&self.get_root()?)?.iter().rev() {
-            let mut node_cache: HashMap<_, _, BuildIdentityHasher> = HashMap::default();
+            let mut node_cache = VecMap::new();
 
             let parent = self.get(current_node)?;
             if parent.is_tip() {
@@ -1560,7 +1562,7 @@ impl Tree {
                     .iter()
                 {
                     let len = child_len + distance;
-                    node_cache.insert(*leaf, len);
+                    node_cache.insert(leaf, len);
                 }
             }
 
@@ -1586,8 +1588,8 @@ impl Tree {
                         let distance1 = node_cache.get(leaf1).unwrap();
                         let distance2 = node_cache.get(leaf2).unwrap();
 
-                        let mut i = get_leaf_index(*leaf1)?;
-                        let mut j = get_leaf_index(*leaf2)?;
+                        let mut i = get_leaf_index(leaf1)?;
+                        let mut j = get_leaf_index(leaf2)?;
                         if j < i {
                             std::mem::swap(&mut i, &mut j);
                         }
@@ -1992,6 +1994,7 @@ impl Tree {
     }
 
     /// Writes the tree to a newick file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn to_file(&self, path: &Path) -> Result<(), TreeError> {
         match fs::write(path, self.to_newick()?) {
             Ok(_) => Ok(()),
@@ -2000,6 +2003,7 @@ impl Tree {
     }
 
     /// Creates a tree from a newick file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
         Self::from_file_with_options(path, NewickParseOptions::default())
     }
@@ -2043,6 +2047,7 @@ END;
     }
 
     /// Recursive function that adds node representation to a printable tree builder
+    #[cfg(not(target_arch = "wasm32"))]
     fn print_nodes(
         &self,
         root_idx: &NodeId,
@@ -2070,6 +2075,7 @@ END;
     }
 
     /// Print a debug view of the tree to the console
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn print_debug(&self) -> Result<(), TreeError> {
         let root = self.get_root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));
@@ -2082,6 +2088,7 @@ END;
     }
 
     /// Print the tree to the console
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn print(&self) -> Result<(), TreeError> {
         let root = self.get_root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));
@@ -2093,25 +2100,6 @@ END;
         Ok(())
     }
 }
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct IdentityHasher(usize);
-
-impl core::hash::Hasher for IdentityHasher {
-    fn finish(&self) -> u64 {
-        self.0 as u64
-    }
-
-    fn write(&mut self, _bytes: &[u8]) {
-        unimplemented!("IdentityHasher only supports usize keys")
-    }
-
-    fn write_usize(&mut self, i: usize) {
-        self.0 = i;
-    }
-}
-
-type BuildIdentityHasher = core::hash::BuildHasherDefault<IdentityHasher>;
 
 impl Default for Tree {
     fn default() -> Self {
@@ -3006,7 +2994,7 @@ mod tests {
     #[test]
     // Branch score distances according to
     // https://evolution.genetics.washington.edu/phylip/doc/treedist.html
-    fn khuner_felsenstein_treedist() {
+    fn kuhner_felsenstein_treedist() {
         let trees = [
             "(A:0.1,(B:0.1,(H:0.1,(D:0.1,(J:0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1):0.1);",
             "(A:0.1,(B:0.1,(D:0.1,((J:0.1,H:0.1):0.1,(((G:0.1,E:0.1):0.1,(F:0.1,I:0.1):0.1):0.1,C:0.1):0.1):0.1):0.1):0.1);",
@@ -3199,11 +3187,11 @@ mod tests {
 
             println!(
                 "[{i0}, {i1}] c:{:?} ==? t:{}",
-                t0.khuner_felsenstein(&t1).unwrap(),
+                t0.kuhner_felsenstein(&t1).unwrap(),
                 rfs[i0][i1]
             );
 
-            assert_eq!(t0.khuner_felsenstein(&t1).unwrap(), rfs[i0][i1])
+            assert_eq!(t0.kuhner_felsenstein(&t1).unwrap(), rfs[i0][i1])
         }
     }
 

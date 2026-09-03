@@ -88,7 +88,7 @@ class Tree:
           - rf: The Robinson-Foulds distance
           - norm_rf: The normalized Robinson-Foulds distance
           - weighted_rf: The Robinson-Foulds distance, weighted by branch lengths
-          - branch_score: The Khuner-Felsenstein branch score
+          - branch_score: The Kuhner-Felsenstein branch score
         """
         return self._rs.compare(other._rs)
 

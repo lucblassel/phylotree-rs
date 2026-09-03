@@ -88,7 +88,7 @@ impl Tree {
     }
 
     fn is_binary(&self) -> bool {
-        self.tree.is_binary()
+        self.tree.is_binary().unwrap_or(false)
     }
 
     fn is_rooted(&self) -> bool {
@@ -96,7 +96,7 @@ impl Tree {
     }
 
     fn height(&self) -> Option<f64> {
-        self.tree.height()
+        self.tree.height().ok()
     }
 
     fn n_tips(&self) -> usize {
@@ -108,7 +108,7 @@ impl Tree {
     }
 
     fn diameter(&self) -> Option<f64> {
-        self.tree.diameter()
+        self.tree.diameter().ok()
     }
 
     fn n_cherries(&self) -> Result<usize, TreeError> {

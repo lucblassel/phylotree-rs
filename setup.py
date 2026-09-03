@@ -1,12 +1,15 @@
 from setuptools import setup
 from setuptools_rust import Binding, RustExtension
-import tomllib as toml
+import re
 
 
 def version():
-    with open("Cargo.toml", "rb") as file:
-        cargo = toml.load(file)
-    return cargo["package"]["version"]
+    with open("Cargo.toml", "r") as file:
+        content = file.read()
+    match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    raise ValueError("Could not find version in Cargo.toml")
 
 
 def readme():

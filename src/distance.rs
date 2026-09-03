@@ -4,10 +4,10 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
-    fs,
-    path::Path,
     str::FromStr,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use std::{fs, path::Path};
 
 use itertools::Itertools;
 use num_traits::{zero, Float, Zero};
@@ -278,6 +278,7 @@ where
     }
 
     /// Writes the matrix to a phylip file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn to_file(&self, path: &Path, square: bool) -> Result<(), MatrixError> {
         match fs::write(path, self.to_phylip(square)?) {
             Ok(_) => Ok(()),
@@ -418,6 +419,7 @@ where
     }
 
     /// Reads the matrix from a phylip file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path, square: bool) -> Result<Self, PhylipParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip_strict(&newick_string, square)
