@@ -147,7 +147,7 @@ where
             return Err(MatrixError::SizeError {
                 size: {
                     let delta = (8.0 * (n_pairs as f64) + 1.).sqrt() as usize;
-                    (delta + 1) / 2
+                    delta.div_ceil(2)
                 },
                 n_taxa: n,
             });
@@ -366,7 +366,7 @@ where
         }
 
         let mut matrix = Self::new_with_size(size);
-        matrix.set_taxa(names.iter().cloned().map(|v| v.to_string()).collect_vec())?;
+        matrix.set_taxa(names.iter().map(|v| v.to_string()).collect_vec())?;
 
         let mut seen = HashSet::new();
 
@@ -897,7 +897,7 @@ a    0  17 21 31 23
 b    17 0  30 34 21
 c    21 30 0  28 39
 d    31 34 28 0  43
-e    23 21 39 43 0 
+e    23 21 39 43 0
 ";
         let dm = DistanceMatrix::<f64>::from_phylip_strict(p_str, true).unwrap();
         let built = dm.upgma().unwrap();
