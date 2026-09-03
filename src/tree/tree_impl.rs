@@ -74,6 +74,18 @@ pub enum TreeError {
     /// There was a [`MatrixError`] when extracting distance matrix
     #[error("Could not convert to matrix")]
     MatrixError(#[from] MatrixError),
+    /// An internal node name and support value were both selected for the Newick label position.
+    #[error("Node {0} cannot serialize both its name and support as an internal-node label")]
+    ConflictingNewickNodeLabel(NodeId),
+    /// A preserved support annotation conflicts with the node's support value.
+    #[error("Node {0} has conflicting Newick support values")]
+    ConflictingNewickSupport(NodeId),
+    /// A preserved support annotation selected for serialization is not numeric.
+    #[error("Node {0} has an invalid Newick support annotation")]
+    InvalidNewickSupportComment(NodeId),
+    /// A custom support key contains characters that cannot be serialized safely.
+    #[error("Invalid Newick support comment key '{0}'")]
+    InvalidNewickSupportKey(String),
     /// General error
     #[error("Encountered an error: {0}")]
     GeneralError(&'static str),
@@ -1889,11 +1901,12 @@ impl Tree {
     /// assert_eq!(tree.to_newick().unwrap(), newick);
     /// ```
     pub fn to_newick(&self) -> Result<String, TreeError> {
-        NewickSerializer::new(self, NewickFormat::AllFields).serialize()
+        NewickSerializer::new(self, NewickFormat::AllFields.options()).serialize()
     }
 
-    /// Writes the tree as a newick formatted string with a specified
-    /// output format from [`NewickFormat`].
+    /// Writes the tree as a Newick-formatted string using a [`NewickFormat`]
+    /// compatibility preset or custom serialization options.
+    ///
     /// # Example
     /// ```
     /// use phylotree::tree::{Tree, NewickFormat};
@@ -1911,8 +1924,30 @@ impl Tree {
     ///     "(A,B,(C,D):0.5):0.6;"
     /// );
     /// ```
+    ///
+    /// Custom options can independently select attributes and support output:
+    /// ```
+    /// use phylotree::tree::{
+    ///     InternalNodeLabelMode, NewickFormat, NewickParseOptions,
+    ///     NewickSerializeOptions, NewickSupportFormat, Tree,
+    /// };
+    ///
+    /// let tree = Tree::from_newick_with_options(
+    ///     "(A,B)95;",
+    ///     NewickParseOptions {
+    ///         internal_node_labels: InternalNodeLabelMode::NumericSupport,
+    ///         ..Default::default()
+    ///     },
+    /// ).unwrap();
+    /// let format = NewickFormat::Custom(NewickSerializeOptions {
+    ///     support: NewickSupportFormat::InternalNodeLabel,
+    ///     ..Default::default()
+    /// });
+    ///
+    /// assert_eq!(tree.to_formatted_newick(format).unwrap(), "(A,B)95;");
+    /// ```
     pub fn to_formatted_newick(&self, format: NewickFormat) -> Result<String, TreeError> {
-        NewickSerializer::new(self, format).serialize()
+        NewickSerializer::new(self, format.options()).serialize()
     }
 
     /// Read a newick formatted string and build a [`Tree`] struct from it.
@@ -2330,7 +2365,7 @@ mod tests {
         for (format, expected) in cases {
             assert_eq!(
                 expected,
-                tree.to_formatted_newick(format).unwrap(),
+                tree.to_formatted_newick(format.clone()).unwrap(),
                 "Failed to write newick for format: {format:?}"
             )
         }

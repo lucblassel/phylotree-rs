@@ -13,7 +13,10 @@ mod parser;
 mod tokenizer;
 mod tree_impl;
 
-pub use self::newick_serializer::NewickFormat;
+pub use self::newick_serializer::{
+    NewickBranchLengthFormat, NewickCommentFormat, NewickFormat, NewickNameFormat,
+    NewickSerializeOptions, NewickSupportFormat,
+};
 pub use self::node::{Node, NodeError};
 pub use self::parser::{
     InternalNodeLabelMode, NewickParseError, NewickParseOptions, SupportCommentMode,

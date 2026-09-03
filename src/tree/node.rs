@@ -215,7 +215,7 @@ impl Node {
     }
 
     /// Returns this node's fields in Newick format, excluding its children.
-    pub fn to_newick(&self, format: NewickFormat) -> String {
+    pub fn to_newick(&self, format: NewickFormat) -> Result<String, super::TreeError> {
         super::newick_serializer::serialize_node(self, format)
     }
 }
