@@ -3,6 +3,7 @@
 ## Unreleased
 ### Added
 #### Lib
+- Added a shared, value-semantic `TaxonIndex` for trees and tree lists, along with taxon validation, bitset-backed bipartition frequencies, topology frequencies, and most-frequent-topology summaries.
 - Added configurable parsing and serialization of branch support using numeric internal-node labels and NHX, BEAST, or custom comment keys.
 - Added a `TreeList` collection with iterator support and parsing of consecutive Newick trees from strings, readers, and files.
 #### Bin

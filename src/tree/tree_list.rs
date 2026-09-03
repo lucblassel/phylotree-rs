@@ -1,11 +1,108 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+use fixedbitset::FixedBitSet;
+use thiserror::Error;
+
 use super::newick::{NewickParser, NewickTokenizer};
+use super::taxon_index::TaxonIndex;
 use super::{NewickParseError, NewickParseOptions, Tree, TreeError};
+
+/// A canonical nontrivial split of the taxa in a [`TaxonIndex`].
+///
+/// Equality and hashing use the taxon-to-bit mapping and the underlying bitset.
+/// Taxon labels are only accessed when presenting the partition to a user.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Bipartition {
+    taxon_index: TaxonIndex,
+    bits: FixedBitSet,
+}
+
+impl Bipartition {
+    pub(crate) fn new(taxon_index: TaxonIndex, bits: FixedBitSet) -> Self {
+        Self { taxon_index, bits }
+    }
+
+    /// Returns the index that defines this partition's bit positions.
+    pub fn taxon_index(&self) -> &TaxonIndex {
+        &self.taxon_index
+    }
+
+    /// Returns whether another bipartition uses the same taxon-to-bit mapping.
+    pub fn is_compatible(&self, other: &Self) -> bool {
+        self.taxon_index.is_compatible(&other.taxon_index)
+    }
+
+    /// Returns the number of taxa on the stored canonical side of the split.
+    pub fn len(&self) -> usize {
+        self.bits.count_ones(..)
+    }
+
+    /// Returns `true` if the stored side of the split contains no taxa.
+    pub fn is_empty(&self) -> bool {
+        self.bits.is_clear()
+    }
+
+    /// Iterates over taxon labels on the stored canonical side of the split.
+    pub fn taxa(&self) -> impl Iterator<Item = &str> {
+        self.bits
+            .ones()
+            .map(|index| self.taxon_index.taxon(index).unwrap())
+    }
+
+    /// Iterates over taxon labels on the other side of the split.
+    pub fn complement_taxa(&self) -> impl Iterator<Item = &str> {
+        self.taxon_index
+            .taxa()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.bits.contains(*index))
+            .map(|(_, taxon)| taxon.as_str())
+    }
+}
+
+/// The observed frequency of a distinct tree topology.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TopologyFrequency {
+    /// Index of the first tree observed with this topology.
+    pub representative: usize,
+    /// Number of trees with this topology.
+    pub count: usize,
+    /// Proportion of trees with this topology.
+    pub frequency: f64,
+}
+
+/// Errors produced by operations involving multiple trees.
+#[derive(Debug, Error)]
+pub enum TreeListError {
+    /// A tree cannot participate in the requested operation.
+    #[error("tree {index} is invalid: {source}")]
+    InvalidTree {
+        /// Index of the invalid tree.
+        index: usize,
+        /// Underlying tree error.
+        #[source]
+        source: TreeError,
+    },
+    /// A tree has a different taxon set from the first tree in the list.
+    #[error("tree {index} has a different taxon set")]
+    DifferentTaxa {
+        /// Index of the tree with different taxa.
+        index: usize,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct TopologyKey {
+    rooted: bool,
+    partitions: Vec<FixedBitSet>,
+    root_partitions: Vec<FixedBitSet>,
+}
 
 /// An ordered, in-memory collection of phylogenetic trees.
 ///
@@ -13,6 +110,7 @@ use super::{NewickParseError, NewickParseOptions, Tree, TreeError};
 #[derive(Debug, Clone, Default)]
 pub struct TreeList {
     trees: Vec<Tree>,
+    taxon_index: RefCell<Option<TaxonIndex>>,
 }
 
 impl TreeList {
@@ -25,6 +123,7 @@ impl TreeList {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             trees: Vec::with_capacity(capacity),
+            ..Self::default()
         }
     }
 
@@ -44,7 +143,163 @@ impl TreeList {
     /// assert_eq!(tree_list[1].n_leaves(), 3);
     /// ```
     pub fn from_trees(trees: Vec<Tree>) -> Self {
-        Self { trees }
+        Self {
+            trees,
+            ..Self::default()
+        }
+    }
+
+    fn invalidate_taxon_index(&mut self) {
+        *self.taxon_index.get_mut() = None;
+    }
+
+    fn invalid_tree(index: usize, source: TreeError) -> TreeListError {
+        TreeListError::InvalidTree { index, source }
+    }
+
+    /// Returns the shared taxon index after validating every tree's taxa.
+    ///
+    /// The empty list has an empty index. Compatible member trees are rebound to
+    /// the same shared allocation so subsequent compatibility checks are cheap.
+    pub fn taxon_index(&self) -> Result<TaxonIndex, TreeListError> {
+        if let Some(taxon_index) = self.taxon_index.borrow().as_ref() {
+            return Ok(taxon_index.clone());
+        }
+
+        let taxon_index = match self.trees.first() {
+            Some(tree) => tree
+                .taxon_index()
+                .map_err(|error| Self::invalid_tree(0, error))?,
+            None => TaxonIndex::empty(),
+        };
+        for (index, tree) in self.trees.iter().enumerate().skip(1) {
+            let current = tree
+                .taxon_index()
+                .map_err(|error| Self::invalid_tree(index, error))?;
+            if !taxon_index.is_compatible(&current) {
+                return Err(TreeListError::DifferentTaxa { index });
+            }
+        }
+        for (index, tree) in self.trees.iter().enumerate() {
+            tree.bind_taxon_index(taxon_index.clone())
+                .map_err(|error| Self::invalid_tree(index, error))?;
+        }
+
+        *self.taxon_index.borrow_mut() = Some(taxon_index.clone());
+        Ok(taxon_index)
+    }
+
+    /// Validates that every tree has the same uniquely named set of taxa.
+    pub fn validate_same_taxa(&self) -> Result<(), TreeListError> {
+        self.taxon_index().map(|_| ())
+    }
+
+    /// Counts how many trees contain each nontrivial bipartition.
+    pub fn partition_counts(&self) -> Result<HashMap<Bipartition, usize>, TreeListError> {
+        let taxon_index = self.taxon_index()?;
+        let mut counts: HashMap<FixedBitSet, usize> = HashMap::new();
+
+        for (index, tree) in self.trees.iter().enumerate() {
+            let partitions = tree
+                .get_partitions()
+                .map_err(|error| Self::invalid_tree(index, error))?;
+            for bits in partitions {
+                *counts.entry(bits).or_insert(0) += 1;
+            }
+        }
+        Ok(counts
+            .into_iter()
+            .map(|(bits, count)| (Bipartition::new(taxon_index.clone(), bits), count))
+            .collect())
+    }
+
+    /// Returns the proportion of trees containing each nontrivial bipartition.
+    pub fn partition_frequencies(&self) -> Result<HashMap<Bipartition, f64>, TreeListError> {
+        if self.is_empty() {
+            self.validate_same_taxa()?;
+            return Ok(HashMap::new());
+        }
+
+        let denominator = self.len() as f64;
+        Ok(self
+            .partition_counts()?
+            .into_iter()
+            .map(|(partition, count)| (partition, count as f64 / denominator))
+            .collect())
+    }
+
+    fn topology_key(tree: &Tree, index: usize) -> Result<TopologyKey, TreeListError> {
+        let rooted = tree
+            .is_rooted()
+            .map_err(|error| Self::invalid_tree(index, error))?;
+        let mut partitions: Vec<_> = tree
+            .get_partitions()
+            .map_err(|error| Self::invalid_tree(index, error))?
+            .into_iter()
+            .collect();
+        partitions.sort_unstable();
+
+        let mut root_partitions = if rooted {
+            tree.get_root_partitions()
+                .map_err(|error| Self::invalid_tree(index, error))?
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        root_partitions.sort_unstable();
+
+        Ok(TopologyKey {
+            rooted,
+            partitions,
+            root_partitions,
+        })
+    }
+
+    /// Returns one frequency record per distinct topology, most frequent first.
+    ///
+    /// Branch lengths, node names, comments, support values, and child order do
+    /// not affect topology identity. Root placement is significant for rooted trees.
+    pub fn topology_frequencies(&self) -> Result<Vec<TopologyFrequency>, TreeListError> {
+        self.validate_same_taxa()?;
+        let mut counts: HashMap<TopologyKey, (usize, usize)> = HashMap::new();
+
+        for (index, tree) in self.trees.iter().enumerate() {
+            let key = Self::topology_key(tree, index)?;
+            counts
+                .entry(key)
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((index, 1));
+        }
+
+        let denominator = self.len() as f64;
+        let mut frequencies: Vec<_> = counts
+            .into_values()
+            .map(|(representative, count)| TopologyFrequency {
+                representative,
+                count,
+                frequency: count as f64 / denominator,
+            })
+            .collect();
+        frequencies.sort_by(|left, right| {
+            right
+                .count
+                .cmp(&left.count)
+                .then_with(|| left.representative.cmp(&right.representative))
+        });
+        Ok(frequencies)
+    }
+
+    /// Returns the most frequent topology, or `None` for an empty list.
+    ///
+    /// Ties are resolved in favor of the topology encountered first.
+    pub fn most_frequent_topology(&self) -> Result<Option<TopologyFrequency>, TreeListError> {
+        Ok(self.topology_frequencies()?.into_iter().next())
+    }
+
+    /// Returns the number of distinct topologies in the list.
+    pub fn n_topologies(&self) -> Result<usize, TreeListError> {
+        Ok(self.topology_frequencies()?.len())
     }
 
     /// Returns the number of trees in the list.
@@ -69,7 +324,12 @@ impl TreeList {
 
     /// Returns a mutable reference to the tree at `index`, or `None` if it is out of bounds.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Tree> {
-        self.trees.get_mut(index)
+        if index < self.trees.len() {
+            self.invalidate_taxon_index();
+        }
+        let tree = self.trees.get_mut(index)?;
+        tree.reset_bipartition_cache();
+        Some(tree)
     }
 
     /// Returns the first tree, or `None` if the list is empty.
@@ -84,17 +344,25 @@ impl TreeList {
 
     /// Appends a tree to the back of the list.
     pub fn push(&mut self, tree: Tree) {
+        self.invalidate_taxon_index();
         self.trees.push(tree);
     }
 
     /// Removes and returns the last tree, or `None` if the list is empty.
     pub fn pop(&mut self) -> Option<Tree> {
-        self.trees.pop()
+        let tree = self.trees.pop();
+        if tree.is_some() {
+            self.invalidate_taxon_index();
+        }
+        tree
     }
 
     /// Removes all trees from the list.
     pub fn clear(&mut self) {
-        self.trees.clear();
+        if !self.trees.is_empty() {
+            self.trees.clear();
+            self.invalidate_taxon_index();
+        }
     }
 
     /// Returns an iterator over the trees.
@@ -130,6 +398,10 @@ impl TreeList {
     /// assert_eq!(trees[1].length().unwrap(), 10.0);
     /// ```
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Tree> {
+        self.invalidate_taxon_index();
+        for tree in &mut self.trees {
+            tree.reset_bipartition_cache();
+        }
         self.trees.iter_mut()
     }
 
@@ -140,6 +412,10 @@ impl TreeList {
 
     /// Returns the trees as a mutable slice.
     pub fn as_mut_slice(&mut self) -> &mut [Tree] {
+        self.invalidate_taxon_index();
+        for tree in &mut self.trees {
+            tree.reset_bipartition_cache();
+        }
         self.trees.as_mut_slice()
     }
 
@@ -248,7 +524,7 @@ impl TreeList {
             let nodes = NewickParser::with_options(&mut tokenizer, options.clone()).parse_next()?;
             match nodes {
                 Some(nodes) => trees.push(Tree::from_nodes(nodes)),
-                None => return Ok(Self { trees }),
+                None => return Ok(Self::from_trees(trees)),
             }
         }
     }
@@ -343,6 +619,7 @@ impl FromIterator<Tree> for TreeList {
 
 impl Extend<Tree> for TreeList {
     fn extend<T: IntoIterator<Item = Tree>>(&mut self, iter: T) {
+        self.invalidate_taxon_index();
         self.trees.extend(iter);
     }
 }
@@ -384,6 +661,8 @@ impl Index<usize> for TreeList {
 
 impl IndexMut<usize> for TreeList {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.invalidate_taxon_index();
+        self.trees[index].reset_bipartition_cache();
         &mut self.trees[index]
     }
 }
@@ -472,5 +751,132 @@ mod tests {
     fn reports_an_incomplete_last_tree() {
         let error = TreeList::from_newick("(A,B); (A,B)").unwrap_err();
         assert!(matches!(error, NewickParseError::UnexpectedEOF));
+    }
+
+    #[test]
+    fn validates_identical_taxon_sets_independent_of_order() {
+        let trees = TreeList::from_newick("((A,B),C); (C,(B,A));").unwrap();
+        let taxon_index = trees.taxon_index().unwrap();
+
+        assert_eq!(taxon_index.taxa(), &["A", "B", "C"]);
+        assert_eq!(taxon_index.index_of("B"), Some(1));
+        assert_eq!(taxon_index.taxon(2), Some("C"));
+        assert!(trees.validate_same_taxa().is_ok());
+    }
+
+    #[test]
+    fn rejects_different_or_invalid_taxon_sets() {
+        let different = TreeList::from_newick("((A,B),C); ((A,B),D);").unwrap();
+        assert!(matches!(
+            different.validate_same_taxa(),
+            Err(TreeListError::DifferentTaxa { index: 1 })
+        ));
+
+        let unnamed = TreeList::from_newick("((A,B),C); ((A,B),);").unwrap();
+        assert!(matches!(
+            unnamed.validate_same_taxa(),
+            Err(TreeListError::InvalidTree {
+                index: 1,
+                source: TreeError::UnnamedLeaves
+            })
+        ));
+
+        let duplicate = TreeList::from_newick("((A,B),C); ((A,A),C);").unwrap();
+        assert!(matches!(
+            duplicate.validate_same_taxa(),
+            Err(TreeListError::InvalidTree {
+                index: 1,
+                source: TreeError::DuplicateLeafNames
+            })
+        ));
+    }
+
+    #[test]
+    fn counts_and_decodes_bipartitions() {
+        let trees = TreeList::from_newick("((A,B),(C,D)); ((B,A),(D,C)); ((A,C),(B,D));").unwrap();
+        let counts = trees.partition_counts().unwrap();
+        let frequencies = trees.partition_frequencies().unwrap();
+
+        assert_eq!(counts.len(), 2);
+        let ab = counts
+            .iter()
+            .find(|(partition, _)| partition.taxa().collect::<Vec<_>>() == vec!["A", "B"])
+            .unwrap();
+        assert_eq!(*ab.1, 2);
+        assert_eq!(frequencies[ab.0], 2.0 / 3.0);
+        assert_eq!(ab.0.complement_taxa().collect::<Vec<_>>(), vec!["C", "D"]);
+    }
+
+    #[test]
+    fn mutable_access_invalidates_taxon_and_partition_caches() {
+        let mut trees = TreeList::from_newick("((A,B),C); ((A,B),C);").unwrap();
+        trees.partition_counts().unwrap();
+
+        trees[1].get_by_name_mut("C").unwrap().name = Some("D".to_owned());
+
+        assert!(matches!(
+            trees.validate_same_taxa(),
+            Err(TreeListError::DifferentTaxa { index: 1 })
+        ));
+    }
+
+    #[test]
+    fn independently_created_taxon_indices_are_compatible() {
+        let trees = TreeList::from_newick("((A,B),(C,D));").unwrap();
+        let clone = trees.clone();
+        let independent = TreeList::from_newick("((B,A),(D,C));").unwrap();
+
+        let index = trees.taxon_index().unwrap();
+        assert_eq!(index, clone.taxon_index().unwrap());
+        assert!(index.is_compatible(&independent.taxon_index().unwrap()));
+
+        let first = trees[0].bipartitions().unwrap();
+        let second = independent[0].bipartitions().unwrap();
+        assert_eq!(first, second);
+        assert!(first
+            .iter()
+            .next()
+            .unwrap()
+            .is_compatible(second.iter().next().unwrap()));
+        assert_eq!(trees[0].robinson_foulds(&independent[0]).unwrap(), 0);
+    }
+
+    #[test]
+    fn groups_topologies_independent_of_child_order() {
+        let trees = TreeList::from_newick("((A,B),(C,D)); ((D,C),(B,A)); ((A,C),(B,D));").unwrap();
+        let frequencies = trees.topology_frequencies().unwrap();
+
+        assert_eq!(frequencies.len(), 2);
+        assert_eq!(frequencies[0].representative, 0);
+        assert_eq!(frequencies[0].count, 2);
+        assert_eq!(frequencies[0].frequency, 2.0 / 3.0);
+        assert_eq!(
+            trees.most_frequent_topology().unwrap(),
+            Some(frequencies[0])
+        );
+        assert_eq!(trees.n_topologies().unwrap(), 2);
+    }
+
+    #[test]
+    fn rooted_topology_includes_root_placement() {
+        let trees = TreeList::from_newick("((A,B),(C,D)); (A,(B,(C,D)));").unwrap();
+        let frequencies = trees.topology_frequencies().unwrap();
+
+        assert_eq!(frequencies.len(), 2);
+        assert_eq!(frequencies[0].count, 1);
+        assert_eq!(frequencies[1].count, 1);
+        assert_eq!(frequencies[0].representative, 0);
+    }
+
+    #[test]
+    fn empty_list_has_empty_frequency_results() {
+        let trees = TreeList::new();
+
+        assert!(trees.validate_same_taxa().is_ok());
+        assert!(trees.partition_counts().unwrap().is_empty());
+        assert!(trees.partition_frequencies().unwrap().is_empty());
+        assert!(trees.topology_frequencies().unwrap().is_empty());
+        assert_eq!(trees.most_frequent_topology().unwrap(), None);
+        assert_eq!(trees.n_topologies().unwrap(), 0);
     }
 }

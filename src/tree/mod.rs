@@ -10,6 +10,7 @@
 pub mod draw;
 mod newick;
 mod node;
+mod taxon_index;
 mod tree_impl;
 mod tree_list;
 
@@ -19,8 +20,9 @@ pub use self::newick::{
     NewickSupportFormat, NewickToken, Span, SupportCommentMode, TokenizerError,
 };
 pub use self::node::{Node, NodeError};
+pub use self::taxon_index::TaxonIndex;
 pub use self::tree_impl::{Comparison, Tree, TreeError};
-pub use self::tree_list::TreeList;
+pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListError};
 
 /// A type that represents Identifiers of [`Node`] objects
 /// within phylogenetic [`Tree`] object.
