@@ -96,7 +96,7 @@ impl From<std::io::Error> for TokenizerError {
 }
 
 /// A token source consumed by the Newick parser.
-pub trait Tokenizer {
+pub(crate) trait Tokenizer {
     /// Returns and consumes the next token, or `None` at the end of the input.
     fn next_token(&mut self) -> Result<Option<SpannedToken>, TokenizerError>;
 

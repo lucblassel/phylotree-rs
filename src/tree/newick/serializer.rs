@@ -1,4 +1,4 @@
-use super::{Node, NodeId, Tree, TreeError};
+use super::super::{Node, NodeId, Tree, TreeError};
 
 /// Selects which node names are included in Newick output.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -689,11 +689,11 @@ mod tests_ete3_serialization {
     const NW_SIMPLE6: &str = "(H,(A,(B,(C),(T))),D);";
     const NW_FULL: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/tree/fixtures/ete3/nw_full.nwk"
+        "/src/tree/newick/fixtures/ete3/nw_full.nwk"
     ));
     const NW2_FULL: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/tree/fixtures/ete3/nw2_full.nwk"
+        "/src/tree/newick/fixtures/ete3/nw2_full.nwk"
     ));
 
     #[test]

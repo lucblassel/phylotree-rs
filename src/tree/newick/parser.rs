@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use super::{
+    super::{Node, NodeId},
     tokenizer::{NewickToken, Span, SpannedToken, Tokenizer, TokenizerError},
-    Node, NodeId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,7 +160,7 @@ impl From<std::io::Error> for NewickParseError {
     }
 }
 
-pub struct NewickParser<'a, T: Tokenizer> {
+pub(crate) struct NewickParser<'a, T: Tokenizer> {
     tokenizer: &'a mut T,
     nodes: Vec<Node>,
     stack: Vec<NodeId>,
@@ -170,12 +170,12 @@ pub struct NewickParser<'a, T: Tokenizer> {
 }
 
 impl<'a, T: Tokenizer> NewickParser<'a, T> {
-    pub fn new(tokenizer: &'a mut T) -> Self {
+    pub(crate) fn new(tokenizer: &'a mut T) -> Self {
         Self::with_options(tokenizer, NewickParseOptions::default())
     }
 
     /// Creates a parser using explicit convention-dependent parsing options.
-    pub fn with_options(tokenizer: &'a mut T, options: NewickParseOptions) -> Self {
+    pub(crate) fn with_options(tokenizer: &'a mut T, options: NewickParseOptions) -> Self {
         Self {
             tokenizer,
             nodes: Vec::new(),
@@ -186,7 +186,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Node>, NewickParseError> {
+    pub(crate) fn parse(&mut self) -> Result<Vec<Node>, NewickParseError> {
         loop {
             if self.tokenizer.peek()?.is_none() {
                 return Err(NewickParseError::UnexpectedEOF);
@@ -465,7 +465,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::tokenizer::NewickTokenizer;
+    use crate::tree::newick::tokenizer::NewickTokenizer;
 
     pub(super) fn parse(newick: &str) -> Result<Vec<Node>, NewickParseError> {
         parse_with_options(newick, NewickParseOptions::default())
@@ -1010,11 +1010,11 @@ mod tests_ete3_parsing {
     const NW_SIMPLE6: &str = "(H,(A,(B,(C),(T))),D);";
     const NW_FULL: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/tree/fixtures/ete3/nw_full.nwk"
+        "/src/tree/newick/fixtures/ete3/nw_full.nwk"
     ));
     const NW2_FULL: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/tree/fixtures/ete3/nw2_full.nwk"
+        "/src/tree/newick/fixtures/ete3/nw2_full.nwk"
     ));
 
     #[test]

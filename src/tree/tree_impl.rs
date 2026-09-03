@@ -15,10 +15,8 @@ use std::{
 
 use thiserror::Error;
 
-use super::newick_serializer::NewickSerializer;
+use super::newick::{NewickParser, NewickSerializer, NewickTokenizer};
 use super::node::{Node, NodeError};
-use super::parser::NewickParser;
-use super::tokenizer::NewickTokenizer;
 use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NewickParseOptions, NodeId};
 
 use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};

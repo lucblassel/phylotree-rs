@@ -7,21 +7,16 @@
 
 /// A module to draw phylogenetic trees
 pub mod draw;
-mod newick_serializer;
+mod newick;
 mod node;
-mod parser;
-mod tokenizer;
 mod tree_impl;
 
-pub use self::newick_serializer::{
-    NewickBranchLengthFormat, NewickCommentFormat, NewickFormat, NewickNameFormat,
-    NewickSerializeOptions, NewickSupportFormat,
+pub use self::newick::{
+    InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
+    NewickNameFormat, NewickParseError, NewickParseOptions, NewickSerializeOptions,
+    NewickSupportFormat, NewickToken, Span, SupportCommentMode, TokenizerError,
 };
 pub use self::node::{Node, NodeError};
-pub use self::parser::{
-    InternalNodeLabelMode, NewickParseError, NewickParseOptions, SupportCommentMode,
-};
-pub use self::tokenizer::{NewickToken, Span, TokenizerError};
 pub use self::tree_impl::{Comparison, Tree, TreeError};
 
 /// A type that represents Identifiers of [`Node`] objects
