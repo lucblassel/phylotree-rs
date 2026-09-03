@@ -1,3 +1,5 @@
+//! Newick parsing and serialization options, errors, and supporting types.
+
 mod parser;
 mod serializer;
 mod tokenizer;

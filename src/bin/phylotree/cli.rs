@@ -53,6 +53,7 @@ pub enum Commands {
     /// Get statistics about a tree
     Stats {
         /// Input newick file of the tree
+        #[arg(required = true, num_args = 1..)]
         trees: Vec<PathBuf>,
     },
 
@@ -72,6 +73,7 @@ pub enum Commands {
         /// Reference tree
         reftree: PathBuf,
         /// Tree(s) to compare to reference
+        #[arg(required = true, num_args = 1..)]
         tocompare: Vec<PathBuf>,
     },
     /// Output the phylogenetic distance matrix of the tree
@@ -90,6 +92,7 @@ pub enum Commands {
         /// The phylogenetic tree
         tree: PathBuf,
         /// The tips to consider
+        #[arg(required = true, num_args = 2..)]
         tips: Vec<String>,
         /// Tab separated file to save distances to
         #[arg(short, long)]
@@ -124,6 +127,7 @@ pub enum Commands {
         /// The phylogenetic tree
         tree: PathBuf,
         /// Names of tips to remove
+        #[arg(required = true, num_args = 1..)]
         tips: Vec<String>,
         /// File to save the tree to
         #[arg(short, long)]
@@ -177,6 +181,7 @@ pub enum Commands {
         /// If there are multiple input trees, then it will be treated as a directory
         factor: f64,
         /// Path to tree(s) to rescale
+        #[arg(required = true, num_args = 1..)]
         trees: Vec<PathBuf>,
         /// Path to output.
         #[arg(short, long)]
@@ -185,3 +190,48 @@ pub enum Commands {
 }
 
 impl Commands {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    fn assert_parse_error(args: &[&str], expected: ErrorKind) {
+        let error = Args::try_parse_from(args).unwrap_err();
+        assert_eq!(error.kind(), expected);
+    }
+
+    fn assert_missing_required_argument(args: &[&str]) {
+        assert_parse_error(args, ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn stats_requires_at_least_one_tree() {
+        assert_missing_required_argument(&["phylotree", "stats"]);
+    }
+
+    #[test]
+    fn compare_requires_a_reference_and_at_least_one_comparison_tree() {
+        assert_missing_required_argument(&["phylotree", "compare"]);
+        assert_missing_required_argument(&["phylotree", "compare", "reference.nwk"]);
+    }
+
+    #[test]
+    fn distance_requires_at_least_two_tips() {
+        assert_missing_required_argument(&["phylotree", "distance", "tree.nwk"]);
+        assert_parse_error(
+            &["phylotree", "distance", "tree.nwk", "A"],
+            ErrorKind::TooFewValues,
+        );
+    }
+
+    #[test]
+    fn remove_requires_at_least_one_tip() {
+        assert_missing_required_argument(&["phylotree", "remove", "tree.nwk"]);
+    }
+
+    #[test]
+    fn rescale_requires_at_least_one_tree() {
+        assert_missing_required_argument(&["phylotree", "rescale", "2.0"]);
+    }
+}

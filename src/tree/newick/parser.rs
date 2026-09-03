@@ -145,6 +145,25 @@ pub enum NewickParseError {
     },
 }
 
+impl NewickParseError {
+    /// Returns the primary source span associated with this error, when available.
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::TokenizerError {
+                err: TokenizerError::IOError { .. },
+                ..
+            }
+            | Self::UnexpectedEOF => None,
+            Self::TokenizerError { span, .. }
+            | Self::UnexpectedToken { span, .. }
+            | Self::MissingNodeForAttribute { span }
+            | Self::InvalidBranchLength { span, .. }
+            | Self::InvalidSupportValue { span, .. }
+            | Self::ConflictingSupportValues { span, .. } => Some(*span),
+        }
+    }
+}
+
 impl From<TokenizerError> for NewickParseError {
     fn from(err: TokenizerError) -> Self {
         Self::TokenizerError {

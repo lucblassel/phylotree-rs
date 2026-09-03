@@ -35,6 +35,13 @@ pub struct Span {
     pub end: usize,
 }
 
+impl Span {
+    /// Returns this span as a half-open byte range.
+    pub fn range(self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+}
+
 /// A token together with its location in the original input.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpannedToken {
