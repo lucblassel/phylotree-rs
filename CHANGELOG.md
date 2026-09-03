@@ -3,9 +3,15 @@
 ## Unreleased
 ### Added
 #### Lib
+- Added configurable parsing and serialization of branch support using numeric internal-node labels and NHX, BEAST, or custom comment keys.
 #### Bin
+- Added source-aware Newick parse diagnostics with highlighted error spans.
 - Added an option to name internal nodes in simulated trees
 ### Changed
+- Newick labels now follow the format specification: quoted labels must use single quotes, and embedded single quotes must be doubled. Double-quoted labels are no longer interpreted as quoted names.
+- `NewickParseError` now reports structured tokenizer and parser failures, including byte spans where available; its previous coarse-grained variants have been replaced.
+- `Node::to_newick` now returns a `Result` so invalid custom Newick serialization options can be reported.
+- Moved all newick parsing and serialization code into private `tree::newick` module.
 ### Fixed
  - Changing sutree-caching from HashMap to VecMap in distance matrix computation (#13 🙏 @krtab)
 
@@ -80,4 +86,3 @@ Better documentation and README
     - stats: get statistics of a tree
     - compare: compare 2 trees
     - matrix: get distance matrix from tree
-
