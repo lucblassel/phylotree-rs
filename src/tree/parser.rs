@@ -12,30 +12,59 @@ enum ParserState {
     ExpectBranchLength, // After ':'
 }
 
+/// An error encountered while parsing a Newick tree.
 #[derive(Debug, Error)]
-pub(crate) enum ParserError {
+pub enum NewickParseError {
+    /// Tokenization failed before a complete syntax token could be produced.
     #[error("Tokenizer error: {err}")]
-    TokenizerError { err: TokenizerError, span: Span },
+    TokenizerError {
+        /// The underlying tokenizer error.
+        #[source]
+        err: TokenizerError,
+        /// Byte range associated with the error.
+        span: Span,
+    },
+    /// The input ended before the tree was terminated by a semicolon.
     #[error("Unexpected end of file")]
     UnexpectedEOF,
+    /// A valid token appeared where the Newick grammar did not permit it.
     #[error("Unexpected token {token:?}; expected {expected}")]
     UnexpectedToken {
+        /// The token encountered by the parser.
         token: NewickToken,
+        /// Half-open byte range containing the token.
         span: Span,
+        /// Description of the token or construct expected at this position.
         expected: &'static str,
     },
+    /// A node attribute appeared when there was no node to receive it.
     #[error("Cannot parse node attributes without a current node")]
-    MissingNodeForAttribute { span: Span },
+    MissingNodeForAttribute {
+        /// Half-open byte range containing the attribute.
+        span: Span,
+    },
+    /// A branch-length field was not a valid floating-point number.
     #[error("Invalid branch length '{input}'")]
-    InvalidBranchLength { input: String, span: Span },
+    InvalidBranchLength {
+        /// Text found in the branch-length field.
+        input: String,
+        /// Half-open byte range containing the invalid value.
+        span: Span,
+    },
 }
 
-impl From<TokenizerError> for ParserError {
+impl From<TokenizerError> for NewickParseError {
     fn from(err: TokenizerError) -> Self {
         Self::TokenizerError {
             span: err.span(),
             err,
         }
+    }
+}
+
+impl From<std::io::Error> for NewickParseError {
+    fn from(err: std::io::Error) -> Self {
+        TokenizerError::from(err).into()
     }
 }
 
@@ -58,12 +87,15 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Node>, ParserError> {
+    pub fn parse(&mut self) -> Result<Vec<Node>, NewickParseError> {
         loop {
+            if self.tokenizer.peek()?.is_none() {
+                return Err(NewickParseError::UnexpectedEOF);
+            }
             let token = self
                 .tokenizer
                 .next_token()?
-                .ok_or(ParserError::UnexpectedEOF)?;
+                .ok_or(NewickParseError::UnexpectedEOF)?;
 
             let finished = match self.state {
                 ParserState::ExpectChild => self.handle_expect_child(token)?,
@@ -75,7 +107,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                 if let Some(token) = self.tokenizer.next_token()? {
                     return Err(Self::unexpected(token, "end of input"));
                 }
-                return Ok(self.nodes.clone());
+                return Ok(std::mem::take(&mut self.nodes));
             }
         }
     }
@@ -95,7 +127,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         id
     }
 
-    fn add_anonymous_child(&mut self, token: SpannedToken) -> Result<NodeId, ParserError> {
+    fn add_anonymous_child(&mut self, token: SpannedToken) -> Result<NodeId, NewickParseError> {
         let parent = self
             .stack
             .last()
@@ -126,20 +158,20 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         }
     }
 
-    fn unexpected(token: SpannedToken, expected: &'static str) -> ParserError {
-        ParserError::UnexpectedToken {
+    fn unexpected(token: SpannedToken, expected: &'static str) -> NewickParseError {
+        NewickParseError::UnexpectedToken {
             token: token.token,
             span: token.span,
             expected,
         }
     }
 
-    fn current_node_for_attribute(&self, span: Span) -> Result<NodeId, ParserError> {
+    fn current_node_for_attribute(&self, span: Span) -> Result<NodeId, NewickParseError> {
         self.current_node
-            .ok_or(ParserError::MissingNodeForAttribute { span })
+            .ok_or(NewickParseError::MissingNodeForAttribute { span })
     }
 
-    fn handle_expect_child(&mut self, token: SpannedToken) -> Result<bool, ParserError> {
+    fn handle_expect_child(&mut self, token: SpannedToken) -> Result<bool, NewickParseError> {
         match token.token {
             NewickToken::ParenOpen => {
                 let parent = self.stack.last().copied();
@@ -186,7 +218,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         }
     }
 
-    fn handle_expect_attribute(&mut self, token: SpannedToken) -> Result<bool, ParserError> {
+    fn handle_expect_attribute(&mut self, token: SpannedToken) -> Result<bool, NewickParseError> {
         let node = self.current_node_for_attribute(token.span)?;
         match &token.token {
             NewickToken::UnquotedString(name) | NewickToken::QuotedString(name) => {
@@ -230,7 +262,10 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         }
     }
 
-    fn handle_expect_branch_length(&mut self, token: SpannedToken) -> Result<bool, ParserError> {
+    fn handle_expect_branch_length(
+        &mut self,
+        token: SpannedToken,
+    ) -> Result<bool, NewickParseError> {
         let node = self.current_node_for_attribute(token.span)?;
         match token.token {
             NewickToken::Comment(comment) => {
@@ -241,7 +276,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                 let length =
                     input
                         .parse::<f64>()
-                        .map_err(|_| ParserError::InvalidBranchLength {
+                        .map_err(|_| NewickParseError::InvalidBranchLength {
                             input,
                             span: token.span,
                         })?;
@@ -262,7 +297,7 @@ mod tests {
     use super::*;
     use crate::tree::tokenizer::NewickTokenizer;
 
-    pub(super) fn parse(newick: &str) -> Result<Vec<Node>, ParserError> {
+    pub(super) fn parse(newick: &str) -> Result<Vec<Node>, NewickParseError> {
         let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
         NewickParser::new(&mut tokenizer).parse()
     }
@@ -381,14 +416,14 @@ mod tests {
 
     #[test]
     fn requires_a_semicolon_for_unnamed_topology() {
-        assert!(matches!(parse("(,)"), Err(ParserError::UnexpectedEOF)));
+        assert!(matches!(parse("(,)"), Err(NewickParseError::UnexpectedEOF)));
     }
 
     #[test]
     fn rejects_unclosed_or_extra_parentheses() {
         assert!(matches!(
             parse("(,;"),
-            Err(ParserError::UnexpectedToken {
+            Err(NewickParseError::UnexpectedToken {
                 token: NewickToken::SemiColon,
                 span: Span { start: 2, end: 3 },
                 ..
@@ -396,7 +431,7 @@ mod tests {
         ));
         assert!(matches!(
             parse("(,));"),
-            Err(ParserError::UnexpectedToken {
+            Err(NewickParseError::UnexpectedToken {
                 token: NewickToken::ParenClose,
                 span: Span { start: 3, end: 4 },
                 ..
@@ -408,7 +443,7 @@ mod tests {
     fn rejects_tokens_after_the_semicolon() {
         assert!(matches!(
             parse("(,);(,);"),
-            Err(ParserError::UnexpectedToken {
+            Err(NewickParseError::UnexpectedToken {
                 token: NewickToken::ParenOpen,
                 span: Span { start: 4, end: 5 },
                 ..
@@ -569,7 +604,7 @@ mod tests {
     fn rejects_invalid_branch_lengths() {
         assert!(matches!(
             parse("(A:not-a-number)Root;"),
-            Err(ParserError::InvalidBranchLength {
+            Err(NewickParseError::InvalidBranchLength {
                 input,
                 span: Span { start: 3, end: 15 },
             }) if input == "not-a-number"
@@ -580,7 +615,7 @@ mod tests {
     fn rejects_quoted_branch_lengths() {
         assert!(matches!(
             parse("(A:'0.1')Root;"),
-            Err(ParserError::UnexpectedToken {
+            Err(NewickParseError::UnexpectedToken {
                 token: NewickToken::QuotedString(value),
                 span: Span { start: 3, end: 8 },
                 ..
@@ -590,14 +625,14 @@ mod tests {
 
     #[test]
     fn rejects_empty_input() {
-        assert!(matches!(parse(""), Err(ParserError::UnexpectedEOF)));
+        assert!(matches!(parse(""), Err(NewickParseError::UnexpectedEOF)));
     }
 
     #[test]
     fn requires_a_terminating_semicolon() {
         assert!(matches!(
             parse("(A,B)Root"),
-            Err(ParserError::UnexpectedEOF)
+            Err(NewickParseError::UnexpectedEOF)
         ));
     }
 
@@ -609,7 +644,7 @@ mod tests {
 
         assert!(matches!(
             parser.parse(),
-            Err(ParserError::MissingNodeForAttribute {
+            Err(NewickParseError::MissingNodeForAttribute {
                 span: Span { start: 0, end: 4 }
             })
         ));
@@ -623,7 +658,7 @@ mod tests {
 
         assert!(matches!(
             parser.parse(),
-            Err(ParserError::MissingNodeForAttribute {
+            Err(NewickParseError::MissingNodeForAttribute {
                 span: Span { start: 0, end: 3 }
             })
         ));
@@ -633,7 +668,7 @@ mod tests {
     fn propagates_tokenizer_errors_with_their_spans() {
         assert!(matches!(
             parse("'unterminated"),
-            Err(ParserError::TokenizerError {
+            Err(NewickParseError::TokenizerError {
                 err: TokenizerError::UnterminatedQuoteString { .. },
                 span: Span { start: 0, end: 13 },
             })

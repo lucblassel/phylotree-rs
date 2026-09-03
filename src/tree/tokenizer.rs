@@ -4,7 +4,7 @@ use utf8_chars::BufReadCharsExt;
 
 /// A lexical token recognized in a Newick/NHX input stream.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum NewickToken {
+pub enum NewickToken {
     /// `(`
     ParenOpen,
     /// `)`
@@ -28,7 +28,7 @@ pub(crate) enum NewickToken {
 
 /// A half-open byte range (`start..end`) in the original UTF-8 input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Span {
+pub struct Span {
     /// Byte offset of the first byte in the range.
     pub start: usize,
     /// Byte offset immediately after the last byte in the range.
@@ -47,14 +47,32 @@ pub(crate) struct SpannedToken {
 /// An error encountered while reading or tokenizing Newick/NHX input.
 #[derive(Debug, Error)]
 pub enum TokenizerError {
+    /// Reading from the underlying input stream failed.
     #[error("IO Error: {source}")]
-    IOError { source: std::io::Error },
+    IOError {
+        /// The underlying I/O error.
+        source: std::io::Error,
+    },
+    /// A single-quoted string reached the end of input without a closing quote.
     #[error("Unterminated quoted string")]
-    UnterminatedQuoteString { span: Span },
+    UnterminatedQuoteString {
+        /// Byte range from the opening quote to the end of input.
+        span: Span,
+    },
+    /// A bracket-delimited comment reached the end of input without a closing bracket.
     #[error("Unterminated newick comment")]
-    UnterminatedComment { span: Span },
+    UnterminatedComment {
+        /// Byte range from the opening bracket to the end of input.
+        span: Span,
+    },
+    /// A character appeared where it cannot begin a valid token.
     #[error("Invalid character: '{char}'")]
-    InvalidCharacter { char: char, span: Span },
+    InvalidCharacter {
+        /// The invalid character.
+        char: char,
+        /// Byte range containing the invalid character.
+        span: Span,
+    },
 }
 
 impl TokenizerError {

@@ -17,7 +17,9 @@ use thiserror::Error;
 
 use super::newick_serializer::NewickSerializer;
 use super::node::{Node, NodeError};
-use super::{EdgeDepth, EdgeLength, NewickFormat, NodeId};
+use super::parser::NewickParser;
+use super::tokenizer::NewickTokenizer;
+use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NodeId};
 
 use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
 
@@ -75,32 +77,6 @@ pub enum TreeError {
     /// General error
     #[error("Encountered an error: {0}")]
     GeneralError(&'static str),
-}
-
-/// Errors that can occur when parsing newick files.
-#[derive(Error, Debug)]
-pub enum NewickParseError {
-    /// There is whitespace in one of the branch lengths
-    #[error("Cannot have whitespace in number field.")]
-    WhiteSpaceInNumber,
-    /// There is an unclosed bracket in the newick String
-    #[error("Missing a closing bracket.")]
-    UnclosedBracket,
-    /// The newick string is missing a final semi-colon
-    #[error("The tree is missin a semi colon at the end.")]
-    NoClosingSemicolon,
-    /// We are trying to close a subtre but have no parent node.
-    #[error("Parent node of subtree not found")]
-    NoSubtreeParent,
-    /// There was a [`TreeError`] when building a tree fromthe newick string
-    #[error("Problem with building the tree.")]
-    TreeError(#[from] TreeError),
-    /// There was a [`std::num::ParseFloatError`] when parsing branch lengths
-    #[error("Could not parse a branch length")]
-    FloatError(#[from] std::num::ParseFloatError),
-    /// There was a [`std::io::Error`] when reading a newick file
-    #[error("Problem reading file")]
-    IoError(#[from] std::io::Error),
 }
 
 /// Struct to hold tree comparison metrics
@@ -1952,211 +1928,11 @@ impl Tree {
     /// assert_eq!(tree.is_rooted().unwrap(), false);
     /// ```
     pub fn from_newick(newick: &str) -> Result<Self, NewickParseError> {
-        #[derive(Debug, PartialEq)]
-        enum Field {
-            Name,
-            Length,
-            Comment,
-        }
-
-        let mut tree = Tree::new();
-
-        let mut parsing = Field::Name;
-        let mut current_name: Option<String> = None;
-        let mut current_length: Option<String> = None;
-        let mut current_comment: Option<String> = None;
-        let mut current_index: Option<NodeId> = None;
-        let mut parent_stack: Vec<NodeId> = Vec::new();
-
-        let mut open_delimiters = Vec::new();
-        let mut within_quotes = false;
-
-        for c in newick.chars() {
-            // Add character in quotes to name
-            if within_quotes && parsing == Field::Name && c != '"' {
-                if let Some(name) = current_name.as_mut() {
-                    name.push(c)
-                } else {
-                    current_name = Some(c.into())
-                }
-                continue;
-            }
-
-            // Add current character to comment
-            if parsing == Field::Comment && c != ']' {
-                if let Some(comment) = current_comment.as_mut() {
-                    comment.push(c)
-                } else {
-                    current_comment = Some(c.into())
-                }
-                continue;
-            }
-
-            // Skip unquoted whitespace
-            if c.is_whitespace() && !within_quotes {
-                continue;
-            }
-
-            match c {
-                '"' => {
-                    // Enter or close quoted section (name)
-                    // TODO: handle escaped quotes
-                    within_quotes = !within_quotes;
-                    if parsing == Field::Name {
-                        if let Some(name) = current_name.as_mut() {
-                            name.push(c)
-                        } else {
-                            current_name = Some(c.into())
-                        }
-                    }
-                }
-                '[' => {
-                    parsing = Field::Comment;
-                }
-                ']' => {
-                    parsing = Field::Name;
-                }
-                '(' => {
-                    // Start subtree
-                    match parent_stack.last() {
-                        None => parent_stack.push(tree.add(Node::new())),
-                        Some(parent) => {
-                            parent_stack.push(tree.add_child(Node::new(), *parent, None)?)
-                        }
-                    };
-                    open_delimiters.push(0);
-                }
-                ':' => {
-                    // Start parsing length
-                    parsing = Field::Length;
-                }
-                ',' => {
-                    // Add sibling
-                    let node = if let Some(index) = current_index {
-                        tree.get_mut(&index)?
-                    } else {
-                        if let Some(parent) = parent_stack.last() {
-                            current_index = Some(tree.add_child(Node::new(), *parent, None)?);
-                        } else {
-                            unreachable!("Sould not be possible to have named child with no parent")
-                        };
-                        tree.get_mut(current_index.as_ref().unwrap())?
-                    };
-
-                    if let Some(name) = current_name {
-                        node.set_name(name);
-                    }
-
-                    let edge = if let Some(length) = current_length {
-                        Some(length.parse()?)
-                    } else {
-                        None
-                    };
-                    if let Some(parent) = node.parent {
-                        node.set_parent(parent, edge);
-                    }
-
-                    node.comment = current_comment;
-
-                    current_name = None;
-                    current_comment = None;
-                    current_length = None;
-                    current_index = None;
-
-                    parsing = Field::Name;
-                }
-                ')' => {
-                    // Close subtree
-                    open_delimiters.pop();
-                    let node = if let Some(index) = current_index {
-                        tree.get_mut(&index)?
-                    } else {
-                        if let Some(parent) = parent_stack.last() {
-                            current_index = Some(tree.add_child(Node::new(), *parent, None)?);
-                        } else {
-                            unreachable!("Sould not be possible to have named child with no parent")
-                        };
-                        tree.get_mut(current_index.as_ref().unwrap())?
-                    };
-
-                    if let Some(name) = current_name {
-                        node.set_name(name);
-                    }
-
-                    let edge = if let Some(length) = current_length {
-                        Some(length.parse()?)
-                    } else {
-                        None
-                    };
-                    if let Some(parent) = node.parent {
-                        node.set_parent(parent, edge);
-                    }
-
-                    node.comment = current_comment;
-
-                    current_name = None;
-                    current_comment = None;
-                    current_length = None;
-
-                    parsing = Field::Name;
-
-                    if let Some(parent) = parent_stack.pop() {
-                        current_index = Some(parent)
-                    } else {
-                        return Err(NewickParseError::NoSubtreeParent);
-                    }
-                }
-                ';' => {
-                    // Finish parsing the Tree
-                    if !open_delimiters.is_empty() {
-                        return Err(NewickParseError::UnclosedBracket);
-                    }
-                    let node = tree.get_mut(current_index.as_ref().unwrap())?;
-                    node.name = current_name;
-                    node.comment = current_comment;
-                    if let Some(length) = current_length {
-                        node.parent_edge = Some(length.parse()?);
-                    }
-
-                    // Finishing pass to make sure that branch lenghts are set in both children and parents
-                    let ids: Vec<_> = tree.nodes.iter().map(|node| node.id).collect();
-                    for node_id in ids {
-                        if let Some(edge) = tree.get(&node_id)?.parent_edge {
-                            if let Some(parent) = tree.get(&node_id)?.parent {
-                                tree.get_mut(&parent)?.set_child_edge(&node_id, Some(edge));
-                            }
-                        }
-                    }
-
-                    return Ok(tree);
-                }
-                _ => {
-                    // Parse characters in fields
-                    match parsing {
-                        Field::Name => {
-                            if let Some(name) = current_name.as_mut() {
-                                name.push(c)
-                            } else {
-                                current_name = Some(c.into())
-                            }
-                        }
-                        Field::Length => {
-                            if c.is_whitespace() {
-                                return Err(NewickParseError::WhiteSpaceInNumber);
-                            }
-                            if let Some(length) = current_length.as_mut() {
-                                length.push(c)
-                            } else {
-                                current_length = Some(c.into())
-                            }
-                        }
-                        Field::Comment => unimplemented!(),
-                    };
-                }
-            }
-        }
-
-        Err(NewickParseError::NoClosingSemicolon)
+        let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
+        let nodes = NewickParser::new(&mut tokenizer).parse()?;
+        let mut tree = Self::new();
+        tree.nodes = nodes;
+        Ok(tree)
     }
 
     /// Writes the tree to a newick file
@@ -2540,6 +2316,8 @@ mod tests {
             "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;",
             "((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1)F;",
             "(,,(,));",
+            "('hungarian dog':20,('indian elephant':30,'swedish horse':60):20):50;",
+            "('hungarian dog':20[Comment_1],('indian elephant':30,'swedish horse':60[Another interesting comment]):20):50;",
         ];
         for newick in newick_strings {
             let tree = Tree::from_newick(newick).unwrap();
@@ -2557,14 +2335,14 @@ mod tests {
 
     #[test]
     fn read_newick_fails() {
-        let newick_strings = vec![
-            ("((D,E)B,(F,G,C)A;", NewickParseError::UnclosedBracket),
-            ("((D,E)B,(F,G)C)A", NewickParseError::NoClosingSemicolon),
-        ];
-        for (newick, _error) in newick_strings {
-            let tree = Tree::from_newick(newick);
-            assert!(tree.is_err());
-        }
+        assert!(matches!(
+            Tree::from_newick("((D,E)B,(F,G,C)A;"),
+            Err(NewickParseError::UnexpectedToken { .. })
+        ));
+        assert!(matches!(
+            Tree::from_newick("((D,E)B,(F,G)C)A"),
+            Err(NewickParseError::UnexpectedEOF)
+        ));
     }
 
     #[test]

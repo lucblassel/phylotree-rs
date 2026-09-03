@@ -15,7 +15,9 @@ mod tree_impl;
 
 pub use self::newick_serializer::NewickFormat;
 pub use self::node::{Node, NodeError};
-pub use self::tree_impl::{Comparison, NewickParseError, Tree, TreeError};
+pub use self::parser::NewickParseError;
+pub use self::tokenizer::{NewickToken, Span, TokenizerError};
+pub use self::tree_impl::{Comparison, Tree, TreeError};
 
 /// A type that represents Identifiers of [`Node`] objects
 /// within phylogenetic [`Tree`] object.
