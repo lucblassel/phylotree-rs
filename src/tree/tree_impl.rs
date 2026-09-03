@@ -1569,19 +1569,19 @@ impl Tree {
                 let subtree1 = self.get(subtree_roots[0])?;
                 let subtree2 = self.get(subtree_roots[1])?;
 
-                for (leaf1, _) in subtree1
+                for leaf1 in subtree1
                     .subtree_distances
                     .borrow()
                     .as_ref()
                     .ok_or(TreeError::MissingBranchLengths)?
-                    .iter()
+                    .keys()
                 {
-                    for (leaf2, _) in subtree2
+                    for leaf2 in subtree2
                         .subtree_distances
                         .borrow()
                         .as_ref()
                         .ok_or(TreeError::MissingBranchLengths)?
-                        .iter()
+                        .keys()
                     {
                         let distance1 = node_cache.get(leaf1).unwrap();
                         let distance2 = node_cache.get(leaf2).unwrap();

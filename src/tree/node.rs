@@ -198,7 +198,7 @@ impl Node {
     pub(crate) fn rescale_edges(&mut self, factor: f64) {
         self.parent_edge = self.parent_edge.map(|edge| edge * factor);
         if let Some(edges) = &mut self.child_edges {
-            for (_, v) in edges.iter_mut() {
+            for v in edges.values_mut() {
                 *v *= factor;
             }
         }
