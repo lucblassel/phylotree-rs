@@ -1,8 +1,9 @@
 //! Build and manioulate phylogenetic trees.
 //!
-//! This module defines the two essential structs to represent phylogenetic trees:
+//! This module defines the essential structs used to represent phylogenetic trees:
 //!  - The [`Node`] struct that represents a node of a phylogenetic tree.
 //!  - The [`Tree`] struct that holds a collection of [`Node`] objects.
+//!  - The [`TreeList`] struct that holds an ordered collection of [`Tree`] objects.
 //!
 
 /// A module to draw phylogenetic trees
@@ -10,6 +11,7 @@ pub mod draw;
 mod newick;
 mod node;
 mod tree_impl;
+mod tree_list;
 
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
@@ -18,6 +20,7 @@ pub use self::newick::{
 };
 pub use self::node::{Node, NodeError};
 pub use self::tree_impl::{Comparison, Tree, TreeError};
+pub use self::tree_list::TreeList;
 
 /// A type that represents Identifiers of [`Node`] objects
 /// within phylogenetic [`Tree`] object.

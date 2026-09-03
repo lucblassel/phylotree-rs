@@ -138,6 +138,14 @@ impl Tree {
         }
     }
 
+    pub(crate) fn from_nodes(nodes: Vec<Node>) -> Self {
+        Self {
+            nodes,
+            leaf_index: RefCell::new(None),
+            partitions: RefCell::new(None),
+        }
+    }
+
     // ############################
     // # ADDING AND GETTING NODES #
     // ############################
@@ -1959,9 +1967,7 @@ impl Tree {
     pub fn from_newick(newick: &str) -> Result<Self, NewickParseError> {
         let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
         let nodes = NewickParser::new(&mut tokenizer).parse()?;
-        let mut tree = Self::new();
-        tree.nodes = nodes;
-        Ok(tree)
+        Ok(Self::from_nodes(nodes))
     }
 
     /// Reads a Newick-formatted string using explicit parsing options.
@@ -1988,9 +1994,7 @@ impl Tree {
     ) -> Result<Self, NewickParseError> {
         let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
         let nodes = NewickParser::with_options(&mut tokenizer, options).parse()?;
-        let mut tree = Self::new();
-        tree.nodes = nodes;
-        Ok(tree)
+        Ok(Self::from_nodes(nodes))
     }
 
     /// Writes the tree to a newick file
@@ -2009,6 +2013,7 @@ impl Tree {
     }
 
     /// Creates a tree from a Newick file using explicit parsing options.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file_with_options(
         path: &Path,
         options: NewickParseOptions,

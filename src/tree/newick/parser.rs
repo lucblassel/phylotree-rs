@@ -206,10 +206,19 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
     }
 
     pub(crate) fn parse(&mut self) -> Result<Vec<Node>, NewickParseError> {
+        let nodes = self.parse_next()?.ok_or(NewickParseError::UnexpectedEOF)?;
+        if let Some(token) = self.tokenizer.next_token()? {
+            return Err(Self::unexpected(token, "end of input"));
+        }
+        Ok(nodes)
+    }
+
+    pub(crate) fn parse_next(&mut self) -> Result<Option<Vec<Node>>, NewickParseError> {
+        if self.tokenizer.peek()?.is_none() {
+            return Ok(None);
+        }
+
         loop {
-            if self.tokenizer.peek()?.is_none() {
-                return Err(NewickParseError::UnexpectedEOF);
-            }
             let token = self
                 .tokenizer
                 .next_token()?
@@ -222,10 +231,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
             };
 
             if finished {
-                if let Some(token) = self.tokenizer.next_token()? {
-                    return Err(Self::unexpected(token, "end of input"));
-                }
-                return Ok(std::mem::take(&mut self.nodes));
+                return Ok(Some(std::mem::take(&mut self.nodes)));
             }
         }
     }
