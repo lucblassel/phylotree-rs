@@ -19,6 +19,8 @@ use thiserror::Error;
 
 use super::newick::{NewickParser, NewickSerializer, NewickTokenizer};
 use super::node::{Node, NodeError};
+use super::taxon_index::TaxonIndex;
+use super::tree_list::Bipartition;
 use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NewickParseOptions, NodeId};
 
 use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
@@ -111,7 +113,7 @@ type EdgeCompare = (
     Vec<((EdgeDepth, EdgeLength), (EdgeDepth, EdgeLength))>,
 );
 
-type Partition = FixedBitSet;
+pub(crate) type Partition = FixedBitSet;
 type WrappedPartitionMap = HashMap<Partition, (usize, Option<EdgeLength>)>;
 type PartitionMap = HashMap<Partition, (EdgeDepth, EdgeLength)>;
 type PartitionSet = HashSet<Partition>;
@@ -120,7 +122,7 @@ type PartitionSet = HashSet<Partition>;
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
-    leaf_index: RefCell<Option<Vec<String>>>,
+    taxon_index: RefCell<Option<TaxonIndex>>,
     partitions: RefCell<Option<WrappedPartitionMap>>,
 }
 
@@ -133,7 +135,7 @@ impl Tree {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            leaf_index: RefCell::new(None),
+            taxon_index: RefCell::new(None),
             partitions: RefCell::new(None),
         }
     }
@@ -141,7 +143,7 @@ impl Tree {
     pub(crate) fn from_nodes(nodes: Vec<Node>) -> Self {
         Self {
             nodes,
-            leaf_index: RefCell::new(None),
+            taxon_index: RefCell::new(None),
             partitions: RefCell::new(None),
         }
     }
@@ -152,6 +154,7 @@ impl Tree {
 
     /// Add a new node to the tree.
     pub fn add(&mut self, node: Node) -> NodeId {
+        self.reset_bipartition_cache();
         let idx = self.nodes.len();
         let mut node = node;
         node.id = idx;
@@ -222,15 +225,11 @@ impl Tree {
 
     /// Get a mutable reference to a specific Node of the tree
     pub fn get_mut(&mut self, id: &NodeId) -> Result<&mut Node, TreeError> {
-        if *id >= self.nodes.len() {
+        if *id >= self.nodes.len() || self.nodes[*id].deleted {
             return Err(TreeError::NodeNotFound(*id));
         }
-        let node = &mut self.nodes[*id];
-        if node.deleted {
-            return Err(TreeError::NodeNotFound(*id));
-        }
-
-        Ok(node)
+        self.reset_bipartition_cache();
+        Ok(&mut self.nodes[*id])
     }
 
     /// Get a reference to a node in the tree by name.
@@ -255,9 +254,12 @@ impl Tree {
 
     /// Get a mutable reference to a node in the tree by name
     pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
-        self.nodes
-            .iter_mut()
-            .find(|node| node.name.as_deref().is_some_and(|n| n == name))
+        let index = self
+            .nodes
+            .iter()
+            .position(|node| node.name.as_deref().is_some_and(|n| n == name))?;
+        self.reset_bipartition_cache();
+        Some(&mut self.nodes[index])
     }
 
     /// Search nodes in the tree with a closure.
@@ -819,39 +821,70 @@ impl Tree {
     // # GET EDGES IN THE TREE #
     // #########################
 
-    /// Initializes the leaf index
-    fn init_leaf_index(&self) -> Result<(), TreeError> {
+    /// Initializes the taxon index.
+    fn init_taxon_index(&self) -> Result<(), TreeError> {
         if self.nodes.is_empty() {
             return Err(TreeError::IsEmpty);
         }
-        if self.leaf_index.borrow().is_some() {
+        if self.taxon_index.borrow().is_some() {
             return Ok(());
         }
-
-        let names = self.get_leaf_names();
-        if names.len() != self.n_leaves() {
-            return Err(TreeError::UnnamedLeaves);
-        }
-
         if !self.has_unique_tip_names()? {
             return Err(TreeError::DuplicateLeafNames);
         }
 
-        (*self.leaf_index.borrow_mut()) = Some(names.into_iter().flatten().sorted().collect());
-
+        let taxa = self
+            .get_leaf_names()
+            .into_iter()
+            .flatten()
+            .sorted()
+            .collect();
+        *self.taxon_index.borrow_mut() = Some(TaxonIndex::from_sorted_taxa(taxa));
         Ok(())
+    }
+
+    /// Returns the mapping between taxon labels and partition bit positions.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((C,A),B);").unwrap();
+    /// let index = tree.taxon_index().unwrap();
+    ///
+    /// assert_eq!(index.taxa(), &["A", "B", "C"]);
+    /// assert_eq!(index.index_of("C"), Some(2));
+    /// ```
+    pub fn taxon_index(&self) -> Result<TaxonIndex, TreeError> {
+        self.init_taxon_index()?;
+        Ok(self.taxon_index.borrow().as_ref().unwrap().clone())
+    }
+
+    pub(crate) fn bind_taxon_index(&self, taxon_index: TaxonIndex) -> Result<(), TreeError> {
+        let current = self.taxon_index()?;
+        if !current.is_compatible(&taxon_index) {
+            return Err(TreeError::DifferentTipIndices);
+        }
+        *self.taxon_index.borrow_mut() = Some(taxon_index);
+        Ok(())
+    }
+
+    fn require_compatible_taxa(&self, other: &Self) -> Result<(), TreeError> {
+        if self.taxon_index()?.is_compatible(&other.taxon_index()?) {
+            Ok(())
+        } else {
+            Err(TreeError::DifferentTipIndices)
+        }
     }
 
     /// Get the partition corresponding to the branch associated to the node at index
     fn get_partition(&self, index: &NodeId) -> Result<Partition, TreeError> {
-        self.init_leaf_index()?;
+        let taxon_index = self.taxon_index()?;
 
         let subtree_leaves = self.get_subtree_leaves(index)?;
-        let l_index = self.leaf_index.borrow();
         let indices = subtree_leaves
             .iter()
-            .filter_map(|index| self.get(index).unwrap().name.as_ref())
-            .map(|name| l_index.iter().flatten().position(|n| n == name).unwrap());
+            .filter_map(|index| self.get(index).unwrap().name.as_deref())
+            .map(|name| taxon_index.index_of(name).unwrap());
 
         let mut bitset = FixedBitSet::with_capacity(self.n_leaves());
         for index in indices {
@@ -866,15 +899,16 @@ impl Tree {
 
     /// Helper function to view a partition as
     pub fn partition_to_leaves(&self, partition: &Partition) -> Result<String, TreeError> {
-        self.init_leaf_index()?;
-
-        let v = self.leaf_index.borrow().clone().unwrap();
-        Ok(partition.ones().map(|i| v[i].clone()).collect())
+        let taxon_index = self.taxon_index()?;
+        Ok(partition
+            .ones()
+            .map(|index| taxon_index.taxon(index).unwrap())
+            .collect())
     }
 
     /// Caches partitions for distance computation
     fn init_partitions(&self) -> Result<(), TreeError> {
-        self.init_leaf_index()?;
+        self.init_taxon_index()?;
 
         if self.partitions.borrow().is_some() {
             return Ok(());
@@ -913,7 +947,7 @@ impl Tree {
 
     /// Get all partitions of a tree
     pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
-        self.init_leaf_index()?;
+        self.init_taxon_index()?;
         self.init_partitions()?;
 
         Ok(HashSet::from_iter(
@@ -921,9 +955,39 @@ impl Tree {
         ))
     }
 
+    /// Returns all nontrivial bipartitions with their taxon index.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,B),(C,D));").unwrap();
+    /// let partitions = tree.bipartitions().unwrap();
+    /// let partition = partitions.iter().next().unwrap();
+    ///
+    /// assert_eq!(partition.taxa().collect::<Vec<_>>(), vec!["A", "B"]);
+    /// assert_eq!(partition.complement_taxa().collect::<Vec<_>>(), vec!["C", "D"]);
+    /// ```
+    pub fn bipartitions(&self) -> Result<HashSet<Bipartition>, TreeError> {
+        let taxon_index = self.taxon_index()?;
+        Ok(self
+            .get_partitions()?
+            .into_iter()
+            .map(|bits| Bipartition::new(taxon_index.clone(), bits))
+            .collect())
+    }
+
+    pub(crate) fn get_root_partitions(&self) -> Result<PartitionSet, TreeError> {
+        let root = self.get_root()?;
+        self.get(&root)?
+            .children
+            .iter()
+            .map(|child| self.get_partition(child))
+            .collect()
+    }
+
     /// Get all partitions of a tree along with corresponding branch lengths and branch depths
     pub(crate) fn get_partitions_with_lengths(&self) -> Result<PartitionMap, TreeError> {
-        self.init_leaf_index()?;
+        self.init_taxon_index()?;
         self.init_partitions()?;
 
         let mut partitions = HashMap::new();
@@ -940,9 +1004,9 @@ impl Tree {
         (*self.partitions.borrow_mut()) = None;
     }
 
-    /// Empties the leaf index
-    fn reset_leaf_index(&mut self) {
-        (*self.leaf_index.borrow_mut()) = None
+    /// Empties the taxon index.
+    fn reset_taxon_index(&mut self) {
+        *self.taxon_index.borrow_mut() = None;
     }
 
     /// Resets the caches used when computing bipartitions
@@ -950,7 +1014,7 @@ impl Tree {
     /// You should call this if you have computed bipartitions in the tree
     /// and then changed the tree.
     pub fn reset_bipartition_cache(&mut self) {
-        self.reset_leaf_index();
+        self.reset_taxon_index();
         self.reset_partitions();
     }
 
@@ -967,12 +1031,9 @@ impl Tree {
     /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        self.require_compatible_taxa(other)?;
         let partitions_s = self.get_partitions()?;
         let partitions_o = other.get_partitions()?;
-
-        if *(self.leaf_index.borrow()) != *(other.leaf_index.borrow()) {
-            return Err(TreeError::DifferentTipIndices);
-        }
 
         let mut root_s = HashSet::new();
         for i in self.get(&self.get_root()?)?.children.iter() {
@@ -1030,6 +1091,7 @@ impl Tree {
     /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).
     /// See also [Tree::compare_topologies()]
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
+        self.require_compatible_taxa(other)?;
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -1066,6 +1128,7 @@ impl Tree {
     /// $$
     /// See also [Tree::compare_topologies()]
     pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
+        self.require_compatible_taxa(other)?;
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -1110,6 +1173,7 @@ impl Tree {
     /// assert_eq!(branch_score, comparison.branch_score);
     /// ```
     pub fn compare_topologies(&self, other: &Self) -> Result<Comparison, TreeError> {
+        self.require_compatible_taxa(other)?;
         let partitions_s = self.get_partitions_with_lengths()?;
         let partitions_o = other.get_partitions_with_lengths()?;
 
@@ -1491,9 +1555,8 @@ impl Tree {
         let mut matrix = DistanceMatrix::new_with_size(self.n_leaves());
         let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
 
-        self.init_leaf_index()?;
-        let taxa = self.leaf_index.borrow().as_ref().unwrap().clone();
-        matrix.set_taxa(taxa)?;
+        let taxon_index = self.taxon_index()?;
+        matrix.set_taxa(taxon_index.taxa().to_vec())?;
 
         for tip in self.get_leaves().iter() {
             self.distance_matrix_recursive_impl(tip, None, &mut cache[*tip], 0.0)?
@@ -1734,6 +1797,7 @@ impl Tree {
         for node in self.nodes.iter_mut() {
             node.rescale_edges(factor)
         }
+        self.reset_partitions();
     }
 
     /// Randomly resolve multifurcations to binarize the tree
@@ -2742,15 +2806,15 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             let rota = Tree::from_newick(rot_newick).unwrap();
 
-            tree.init_leaf_index().unwrap();
-            rota.init_leaf_index().unwrap();
+            tree.init_taxon_index().unwrap();
+            rota.init_taxon_index().unwrap();
 
             assert_eq!(
                 tree.robinson_foulds(&rota).unwrap(),
                 0,
                 "Ref{:#?}\nRot:{:#?}",
-                tree.leaf_index,
-                rota.leaf_index
+                tree.taxon_index,
+                rota.taxon_index
             );
         }
     }
