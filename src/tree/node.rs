@@ -207,65 +207,9 @@ impl Node {
         self.parent.is_none()
     }
 
-    fn format_name(&self) -> String {
-        self.name.clone().unwrap_or_default()
-    }
-
-    fn format_length(&self) -> String {
-        self.parent_edge
-            .map(|v| format!(":{v}"))
-            .unwrap_or_default()
-    }
-
-    fn format_comment(&self) -> String {
-        self.comment
-            .clone()
-            .map(|v| format!("[{v}]"))
-            .unwrap_or_default()
-    }
-
-    /// Returns String with node in newick format
+    /// Returns this node's fields in Newick format, excluding its children.
     pub fn to_newick(&self, format: NewickFormat) -> String {
-        let mut repr = String::new();
-
-        match format {
-            NewickFormat::AllFields
-            | NewickFormat::NoComments
-            | NewickFormat::OnlyNames
-            | NewickFormat::LeafLengthsAllNames => repr += &self.format_name(),
-            NewickFormat::LeafLengthsLeafNames
-            | NewickFormat::InternalLengthsLeafNames
-            | NewickFormat::AllLengthsLeafNames => {
-                if self.is_tip() {
-                    repr += &self.format_name()
-                }
-            }
-            _ => (),
-        }
-
-        match format {
-            NewickFormat::AllFields
-            | NewickFormat::NoComments
-            | NewickFormat::OnlyLengths
-            | NewickFormat::AllLengthsLeafNames => repr += &self.format_length(),
-            NewickFormat::InternalLengthsLeafNames => {
-                if !self.is_tip() {
-                    repr += &self.format_length()
-                }
-            }
-            NewickFormat::LeafLengthsLeafNames | NewickFormat::LeafLengthsAllNames => {
-                if self.is_tip() {
-                    repr += &self.format_length()
-                }
-            }
-            _ => (),
-        }
-
-        if let NewickFormat::AllFields = format {
-            repr += &self.format_comment()
-        }
-
-        repr
+        super::newick_serializer::serialize_node(self, format)
     }
 }
 
