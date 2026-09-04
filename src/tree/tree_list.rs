@@ -826,6 +826,79 @@ mod tests {
     }
 
     #[test]
+    fn every_mutable_access_path_invalidates_the_taxon_index_cache() {
+        fn cached_list() -> TreeList {
+            let mut trees = TreeList::from_newick("((A,B),C); (C,(B,A));").unwrap();
+            trees.rebuild_taxon_index().unwrap();
+            assert!(trees.cached_taxon_index().is_some());
+            assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_some()));
+            trees
+        }
+
+        fn assert_list_cache_invalidated(trees: &TreeList) {
+            assert!(trees.cached_taxon_index().is_none());
+        }
+
+        let mut trees = cached_list();
+        let tree = trees.get_mut(0).unwrap();
+        assert!(tree.cached_taxon_index().is_none());
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        let _ = &mut trees[0];
+        assert!(trees[0].cached_taxon_index().is_none());
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        let _ = trees.iter_mut();
+        assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_none()));
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        let _ = trees.as_mut_slice();
+        assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_none()));
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        let _: &mut [Tree] = trees.as_mut();
+        assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_none()));
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        let _ = (&mut trees).into_iter();
+        assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_none()));
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        trees.push(Tree::from_newick("((A,B),C);").unwrap());
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        assert!(trees.pop().is_some());
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        trees.clear();
+        assert!(trees.is_empty());
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        trees.extend([Tree::from_newick("((A,B),C);").unwrap()]);
+        assert_list_cache_invalidated(&trees);
+
+        let mut trees = cached_list();
+        assert!(trees.get_mut(trees.len()).is_none());
+        assert!(trees.cached_taxon_index().is_some());
+
+        let mut trees = TreeList::new();
+        trees.rebuild_taxon_index().unwrap();
+        assert!(trees.pop().is_none());
+        assert!(trees.cached_taxon_index().is_some());
+        trees.clear();
+        assert!(trees.cached_taxon_index().is_some());
+    }
+
+    #[test]
     fn list_taxon_index_rebuilding_is_explicit() {
         let mut trees = TreeList::from_newick("((A,B),C); (C,(B,A));").unwrap();
         let root = trees[0].get_root().unwrap();
@@ -900,5 +973,60 @@ mod tests {
         assert!(trees.topology_frequencies().unwrap().is_empty());
         assert_eq!(trees.most_frequent_topology().unwrap(), None);
         assert_eq!(trees.n_topologies().unwrap(), 0);
+    }
+
+    #[test]
+    fn topology_frequencies_are_correct() {
+        let t1 =
+            Tree::from_newick("(((Tip8,Tip4),Tip2),Tip0,(((Tip7,Tip5),Tip3),((Tip9,Tip6),Tip1)));")
+                .unwrap();
+        let t2 =
+            Tree::from_newick("(Tip7,Tip0,(((Tip5,(Tip9,Tip4)),(Tip6,(Tip8,Tip3))),(Tip2,Tip1)));")
+                .unwrap();
+        let t3 =
+            Tree::from_newick("((Tip9,Tip6),Tip0,(Tip5,((Tip3,Tip2),((Tip7,Tip4),(Tip8,Tip1)))));")
+                .unwrap();
+        let newicks = [
+            // 4 rotations of tree 1
+            "(Tip0,(((Tip5,Tip7),Tip3),((Tip9,Tip6),Tip1)),(Tip2,(Tip8,Tip4)));",
+            "(((Tip8,Tip4),Tip2),(((Tip7,Tip5),Tip3),((Tip6,Tip9),Tip1)),Tip0);",
+            "(((Tip1,(Tip9,Tip6)),((Tip5,Tip7),Tip3)),(Tip2,(Tip4,Tip8)),Tip0);",
+            "((Tip2,(Tip8,Tip4)),((Tip3,(Tip5,Tip7)),(Tip1,(Tip9,Tip6))),Tip0);",
+            // 3 rotations of tree 2
+            "(Tip0,(((Tip5,(Tip9,Tip4)),((Tip3,Tip8),Tip6)),(Tip2,Tip1)),Tip7);",
+            "(Tip0,(((Tip5,(Tip4,Tip9)),((Tip3,Tip8),Tip6)),(Tip2,Tip1)),Tip7);",
+            "(Tip0,Tip7,(((Tip5,(Tip9,Tip4)),((Tip3,Tip8),Tip6)),(Tip2,Tip1)));",
+            // 1 rotation of tree 3
+            "((Tip5,((Tip2,Tip3),((Tip4,Tip7),(Tip1,Tip8)))),(Tip6,Tip9),Tip0);",
+        ];
+        let treelist: TreeList = newicks
+            .iter()
+            .map(|n| Tree::from_newick(n).unwrap())
+            .collect();
+
+        let freqs = treelist.topology_frequencies().unwrap();
+
+        // Check that the counts are correct
+        assert_eq!(freqs.len(), 3);
+        assert_eq!(freqs[0].count, 4);
+        assert_eq!(freqs[1].count, 3);
+        assert_eq!(freqs[2].count, 1);
+
+        // Check that topology representatives are correct too
+        assert_eq!(
+            t1.robinson_foulds(treelist.get(freqs[0].representative).unwrap())
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            t2.robinson_foulds(treelist.get(freqs[1].representative).unwrap())
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            t3.robinson_foulds(treelist.get(freqs[2].representative).unwrap())
+                .unwrap(),
+            0
+        );
     }
 }
