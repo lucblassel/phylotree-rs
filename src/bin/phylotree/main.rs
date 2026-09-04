@@ -174,26 +174,24 @@ fn main() {
         cli::Commands::Compare { reftree, tocompare } => {
             // Read reference tree
             let reftree = read_tree(&reftree);
-            let ref_parts = reftree.get_partitions().unwrap();
+            let ref_profile = reftree.bipartition_profile().unwrap();
 
             // Print header
             println!("tree\tpath\treference\tcommon\tcompared\trf\tnorm_rf\trf_w\tbranch_score");
             for (i, cmp_path) in tocompare.into_iter().enumerate() {
                 let compare = read_tree(&cmp_path);
 
-                let other_parts = compare.get_partitions().unwrap();
-
-                let common = ref_parts.intersection(&other_parts).count();
-
-                let stats = reftree.compare_topologies(&compare).unwrap();
+                let other_profile = compare.bipartition_profile().unwrap();
+                let common = ref_profile.common_partition_count(&other_profile).unwrap();
+                let stats = ref_profile.compare(&other_profile).unwrap();
 
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     i,
                     cmp_path.to_str().unwrap_or("-"),
-                    ref_parts.len() - common,
+                    ref_profile.len() - common,
                     common,
-                    other_parts.len() - common,
+                    other_profile.len() - common,
                     stats.rf,
                     stats.norm_rf,
                     stats.weighted_rf,

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::iter::FromIterator;
@@ -9,6 +8,7 @@ use std::path::Path;
 use fixedbitset::FixedBitSet;
 use thiserror::Error;
 
+use super::bipartition::BipartitionProfile;
 use super::newick::{NewickParser, NewickTokenizer};
 use super::taxon_index::TaxonIndex;
 use super::{NewickParseError, NewickParseOptions, Tree, TreeError};
@@ -110,7 +110,7 @@ struct TopologyKey {
 #[derive(Debug, Clone, Default)]
 pub struct TreeList {
     trees: Vec<Tree>,
-    taxon_index: RefCell<Option<TaxonIndex>>,
+    taxon_index: Option<TaxonIndex>,
 }
 
 impl TreeList {
@@ -150,22 +150,14 @@ impl TreeList {
     }
 
     fn invalidate_taxon_index(&mut self) {
-        *self.taxon_index.get_mut() = None;
+        self.taxon_index = None;
     }
 
     fn invalid_tree(index: usize, source: TreeError) -> TreeListError {
         TreeListError::InvalidTree { index, source }
     }
 
-    /// Returns the shared taxon index after validating every tree's taxa.
-    ///
-    /// The empty list has an empty index. Compatible member trees are rebound to
-    /// the same shared allocation so subsequent compatibility checks are cheap.
-    pub fn taxon_index(&self) -> Result<TaxonIndex, TreeListError> {
-        if let Some(taxon_index) = self.taxon_index.borrow().as_ref() {
-            return Ok(taxon_index.clone());
-        }
-
+    fn compute_taxon_index(&self) -> Result<TaxonIndex, TreeListError> {
         let taxon_index = match self.trees.first() {
             Some(tree) => tree
                 .taxon_index()
@@ -180,13 +172,35 @@ impl TreeList {
                 return Err(TreeListError::DifferentTaxa { index });
             }
         }
-        for (index, tree) in self.trees.iter().enumerate() {
+        Ok(taxon_index)
+    }
+
+    /// Returns the stored list-wide taxon index, if it is currently available.
+    pub fn cached_taxon_index(&self) -> Option<&TaxonIndex> {
+        self.taxon_index.as_ref()
+    }
+
+    /// Returns a compatible taxon index after validating every tree's taxa.
+    ///
+    /// The empty list has an empty index. If no index has been stored, this
+    /// method computes one without mutating the list or its trees.
+    pub fn taxon_index(&self) -> Result<TaxonIndex, TreeListError> {
+        self.taxon_index
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| self.compute_taxon_index())
+    }
+
+    /// Recomputes and stores one shared taxon index on the list and its trees.
+    pub fn rebuild_taxon_index(&mut self) -> Result<&TaxonIndex, TreeListError> {
+        self.taxon_index = None;
+        let taxon_index = self.compute_taxon_index()?;
+        for (index, tree) in self.trees.iter_mut().enumerate() {
             tree.bind_taxon_index(taxon_index.clone())
                 .map_err(|error| Self::invalid_tree(index, error))?;
         }
-
-        *self.taxon_index.borrow_mut() = Some(taxon_index.clone());
-        Ok(taxon_index)
+        self.taxon_index = Some(taxon_index);
+        Ok(self.taxon_index.as_ref().unwrap())
     }
 
     /// Validates that every tree has the same uniquely named set of taxa.
@@ -200,11 +214,10 @@ impl TreeList {
         let mut counts: HashMap<FixedBitSet, usize> = HashMap::new();
 
         for (index, tree) in self.trees.iter().enumerate() {
-            let partitions = tree
-                .get_partitions()
+            let profile = BipartitionProfile::from_tree(tree)
                 .map_err(|error| Self::invalid_tree(index, error))?;
-            for bits in partitions {
-                *counts.entry(bits).or_insert(0) += 1;
+            for bits in profile.partition_bits() {
+                *counts.entry(bits.clone()).or_insert(0) += 1;
             }
         }
         Ok(counts
@@ -228,32 +241,22 @@ impl TreeList {
             .collect())
     }
 
-    fn topology_key(tree: &Tree, index: usize) -> Result<TopologyKey, TreeListError> {
-        let rooted = tree
-            .is_rooted()
-            .map_err(|error| Self::invalid_tree(index, error))?;
-        let mut partitions: Vec<_> = tree
-            .get_partitions()
-            .map_err(|error| Self::invalid_tree(index, error))?
-            .into_iter()
-            .collect();
+    fn topology_key(profile: &BipartitionProfile) -> TopologyKey {
+        let mut partitions: Vec<_> = profile.partition_bits().cloned().collect();
         partitions.sort_unstable();
 
-        let mut root_partitions = if rooted {
-            tree.get_root_partitions()
-                .map_err(|error| Self::invalid_tree(index, error))?
-                .into_iter()
-                .collect()
+        let mut root_partitions = if profile.is_rooted() {
+            profile.root_partition_bits().cloned().collect()
         } else {
             Vec::new()
         };
         root_partitions.sort_unstable();
 
-        Ok(TopologyKey {
-            rooted,
+        TopologyKey {
+            rooted: profile.is_rooted(),
             partitions,
             root_partitions,
-        })
+        }
     }
 
     /// Returns one frequency record per distinct topology, most frequent first.
@@ -265,7 +268,9 @@ impl TreeList {
         let mut counts: HashMap<TopologyKey, (usize, usize)> = HashMap::new();
 
         for (index, tree) in self.trees.iter().enumerate() {
-            let key = Self::topology_key(tree, index)?;
+            let profile = BipartitionProfile::from_tree(tree)
+                .map_err(|error| Self::invalid_tree(index, error))?;
+            let key = Self::topology_key(&profile);
             counts
                 .entry(key)
                 .and_modify(|(_, count)| *count += 1)
@@ -818,6 +823,23 @@ mod tests {
             trees.validate_same_taxa(),
             Err(TreeListError::DifferentTaxa { index: 1 })
         ));
+    }
+
+    #[test]
+    fn list_taxon_index_rebuilding_is_explicit() {
+        let mut trees = TreeList::from_newick("((A,B),C); (C,(B,A));").unwrap();
+        let root = trees[0].get_root().unwrap();
+        trees[0].get_mut(&root).unwrap().support = Some(1.0);
+        assert!(trees.cached_taxon_index().is_none());
+        assert!(trees[0].cached_taxon_index().is_none());
+
+        trees.taxon_index().unwrap();
+        assert!(trees.cached_taxon_index().is_none());
+        assert!(trees[0].cached_taxon_index().is_none());
+
+        trees.rebuild_taxon_index().unwrap();
+        assert!(trees.cached_taxon_index().is_some());
+        assert!(trees.iter().all(|tree| tree.cached_taxon_index().is_some()));
     }
 
     #[test]

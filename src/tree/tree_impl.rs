@@ -1,22 +1,20 @@
 use accurate::sum::NaiveSum;
 use accurate::traits::*;
-use fixedbitset::FixedBitSet;
+
 use itertools::Itertools;
 #[cfg(not(target_arch = "wasm32"))]
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet};
 use std::iter::zip;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-};
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs, path::Path};
 use vec_map::VecMap;
 
 use thiserror::Error;
 
+use super::bipartition::{BipartitionProfile, Partition, PartitionMap, PartitionSet};
 use super::newick::{NewickParser, NewickSerializer, NewickTokenizer};
 use super::node::{Node, NodeError};
 use super::taxon_index::TaxonIndex;
@@ -113,17 +111,11 @@ type EdgeCompare = (
     Vec<((EdgeDepth, EdgeLength), (EdgeDepth, EdgeLength))>,
 );
 
-pub(crate) type Partition = FixedBitSet;
-type WrappedPartitionMap = HashMap<Partition, (usize, Option<EdgeLength>)>;
-type PartitionMap = HashMap<Partition, (EdgeDepth, EdgeLength)>;
-type PartitionSet = HashSet<Partition>;
-
 /// A Phylogenetic tree
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
-    taxon_index: RefCell<Option<TaxonIndex>>,
-    partitions: RefCell<Option<WrappedPartitionMap>>,
+    taxon_index: Option<TaxonIndex>,
 }
 
 /// Base methods to add and get [`Node`] objects to and from the [`Tree`].
@@ -135,17 +127,17 @@ impl Tree {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            taxon_index: RefCell::new(None),
-            partitions: RefCell::new(None),
+            taxon_index: None,
         }
     }
 
     pub(crate) fn from_nodes(nodes: Vec<Node>) -> Self {
-        Self {
+        let mut tree = Self {
             nodes,
-            taxon_index: RefCell::new(None),
-            partitions: RefCell::new(None),
-        }
+            taxon_index: None,
+        };
+        tree.taxon_index = tree.compute_taxon_index().ok();
+        tree
     }
 
     // ############################
@@ -821,13 +813,9 @@ impl Tree {
     // # GET EDGES IN THE TREE #
     // #########################
 
-    /// Initializes the taxon index.
-    fn init_taxon_index(&self) -> Result<(), TreeError> {
+    fn compute_taxon_index(&self) -> Result<TaxonIndex, TreeError> {
         if self.nodes.is_empty() {
             return Err(TreeError::IsEmpty);
-        }
-        if self.taxon_index.borrow().is_some() {
-            return Ok(());
         }
         if !self.has_unique_tip_names()? {
             return Err(TreeError::DuplicateLeafNames);
@@ -839,8 +827,12 @@ impl Tree {
             .flatten()
             .sorted()
             .collect();
-        *self.taxon_index.borrow_mut() = Some(TaxonIndex::from_sorted_taxa(taxa));
-        Ok(())
+        Ok(TaxonIndex::from_sorted_taxa(taxa))
+    }
+
+    /// Returns the stored taxon index, if it is currently available.
+    pub fn cached_taxon_index(&self) -> Option<&TaxonIndex> {
+        self.taxon_index.as_ref()
     }
 
     /// Returns the mapping between taxon labels and partition bit positions.
@@ -855,49 +847,28 @@ impl Tree {
     /// assert_eq!(index.index_of("C"), Some(2));
     /// ```
     pub fn taxon_index(&self) -> Result<TaxonIndex, TreeError> {
-        self.init_taxon_index()?;
-        Ok(self.taxon_index.borrow().as_ref().unwrap().clone())
+        self.taxon_index
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| self.compute_taxon_index())
     }
 
-    pub(crate) fn bind_taxon_index(&self, taxon_index: TaxonIndex) -> Result<(), TreeError> {
-        let current = self.taxon_index()?;
-        if !current.is_compatible(&taxon_index) {
+    /// Recomputes and stores the mapping between taxon labels and bit positions.
+    pub fn rebuild_taxon_index(&mut self) -> Result<&TaxonIndex, TreeError> {
+        self.taxon_index = None;
+        self.taxon_index = Some(self.compute_taxon_index()?);
+        Ok(self.taxon_index.as_ref().unwrap())
+    }
+
+    pub(crate) fn bind_taxon_index(&mut self, taxon_index: TaxonIndex) -> Result<(), TreeError> {
+        if !self.taxon_index()?.is_compatible(&taxon_index) {
             return Err(TreeError::DifferentTipIndices);
         }
-        *self.taxon_index.borrow_mut() = Some(taxon_index);
+        self.taxon_index = Some(taxon_index);
         Ok(())
     }
 
-    fn require_compatible_taxa(&self, other: &Self) -> Result<(), TreeError> {
-        if self.taxon_index()?.is_compatible(&other.taxon_index()?) {
-            Ok(())
-        } else {
-            Err(TreeError::DifferentTipIndices)
-        }
-    }
-
-    /// Get the partition corresponding to the branch associated to the node at index
-    fn get_partition(&self, index: &NodeId) -> Result<Partition, TreeError> {
-        let taxon_index = self.taxon_index()?;
-
-        let subtree_leaves = self.get_subtree_leaves(index)?;
-        let indices = subtree_leaves
-            .iter()
-            .filter_map(|index| self.get(index).unwrap().name.as_deref())
-            .map(|name| taxon_index.index_of(name).unwrap());
-
-        let mut bitset = FixedBitSet::with_capacity(self.n_leaves());
-        for index in indices {
-            bitset.insert(index);
-        }
-
-        let mut toggled = bitset.clone();
-        toggled.toggle_range(..);
-
-        Ok(toggled.min(bitset))
-    }
-
-    /// Helper function to view a partition as
+    /// Converts the stored side of a partition to concatenated taxon labels.
     pub fn partition_to_leaves(&self, partition: &Partition) -> Result<String, TreeError> {
         let taxon_index = self.taxon_index()?;
         Ok(partition
@@ -906,53 +877,17 @@ impl Tree {
             .collect())
     }
 
-    /// Caches partitions for distance computation
-    fn init_partitions(&self) -> Result<(), TreeError> {
-        self.init_taxon_index()?;
-
-        if self.partitions.borrow().is_some() {
-            return Ok(());
-        }
-
-        let mut partitions: WrappedPartitionMap = HashMap::new();
-
-        for node in self
-            .nodes
-            .iter()
-            .filter(|n| !(n.deleted || n.parent.is_none() || n.is_tip()))
-        {
-            let part = self.get_partition(&node.id)?;
-
-            if part.count_ones(..) == 1 {
-                continue;
-            }
-
-            let new_len = node.parent_edge;
-            let old_value = partitions.get(&part);
-
-            let len = match (new_len, old_value) {
-                (None, None) => None,
-                (Some(new_len), Some((_, old_len))) => old_len.map(|v| v + new_len),
-                (Some(new_len), None) => Some(new_len),
-                (None, Some((_, old_len))) => *old_len,
-            };
-
-            partitions.insert(part, (node.depth, len));
-        }
-
-        (*self.partitions.borrow_mut()) = Some(partitions);
-
-        Ok(())
+    /// Computes an immutable bipartition profile for repeated comparisons.
+    ///
+    /// Creating a profile does not populate or otherwise modify this tree's
+    /// optional taxon-index cache.
+    pub fn bipartition_profile(&self) -> Result<BipartitionProfile, TreeError> {
+        BipartitionProfile::from_tree(self)
     }
 
-    /// Get all partitions of a tree
+    /// Get all partitions of a tree.
     pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
-        self.init_taxon_index()?;
-        self.init_partitions()?;
-
-        Ok(HashSet::from_iter(
-            self.partitions.borrow().as_ref().unwrap().keys().cloned(),
-        ))
+        Ok(self.bipartition_profile()?.partition_set())
     }
 
     /// Returns all nontrivial bipartitions with their taxon index.
@@ -968,54 +903,26 @@ impl Tree {
     /// assert_eq!(partition.complement_taxa().collect::<Vec<_>>(), vec!["C", "D"]);
     /// ```
     pub fn bipartitions(&self) -> Result<HashSet<Bipartition>, TreeError> {
-        let taxon_index = self.taxon_index()?;
-        Ok(self
-            .get_partitions()?
-            .into_iter()
+        let profile = self.bipartition_profile()?;
+        let taxon_index = profile.taxon_index().clone();
+        Ok(profile
+            .partition_bits()
+            .cloned()
             .map(|bits| Bipartition::new(taxon_index.clone(), bits))
             .collect())
     }
 
-    pub(crate) fn get_root_partitions(&self) -> Result<PartitionSet, TreeError> {
-        let root = self.get_root()?;
-        self.get(&root)?
-            .children
-            .iter()
-            .map(|child| self.get_partition(child))
-            .collect()
-    }
-
-    /// Get all partitions of a tree along with corresponding branch lengths and branch depths
+    /// Get all partitions of a tree along with corresponding branch lengths and branch depths.
     pub(crate) fn get_partitions_with_lengths(&self) -> Result<PartitionMap, TreeError> {
-        self.init_taxon_index()?;
-        self.init_partitions()?;
-
-        let mut partitions = HashMap::new();
-        for (bitset, (depth, len)) in self.partitions.borrow().as_ref().unwrap().iter() {
-            let len = len.ok_or(TreeError::MissingBranchLengths)?;
-            partitions.insert(bitset.clone(), (*depth, len));
-        }
-
-        Ok(partitions)
+        self.bipartition_profile()?.partitions_with_lengths()
     }
 
-    /// Empties the partitions cache
-    fn reset_partitions(&mut self) {
-        (*self.partitions.borrow_mut()) = None;
-    }
-
-    /// Empties the taxon index.
-    fn reset_taxon_index(&mut self) {
-        *self.taxon_index.borrow_mut() = None;
-    }
-
-    /// Resets the caches used when computing bipartitions
-    /// *(i.e. with [`Tree::compare_topologies()`])*.
-    /// You should call this if you have computed bipartitions in the tree
-    /// and then changed the tree.
+    /// Invalidates the cached taxon index.
+    ///
+    /// Bipartitions are no longer cached on trees; use [`Tree::bipartition_profile`]
+    /// to retain a computed representation for repeated comparisons.
     pub fn reset_bipartition_cache(&mut self) {
-        self.reset_taxon_index();
-        self.reset_partitions();
+        self.taxon_index = None;
     }
 
     // #################
@@ -1031,30 +938,8 @@ impl Tree {
     /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
-        self.require_compatible_taxa(other)?;
-        let partitions_s = self.get_partitions()?;
-        let partitions_o = other.get_partitions()?;
-
-        let mut root_s = HashSet::new();
-        for i in self.get(&self.get_root()?)?.children.iter() {
-            root_s.insert(self.get_partition(i)?);
-        }
-        let mut root_o = HashSet::new();
-        for i in other.get(&other.get_root()?)?.children.iter() {
-            root_o.insert(other.get_partition(i)?);
-        }
-
-        let same_root = root_s == root_o;
-
-        let i = partitions_o.intersection(&partitions_s).count();
-        let rf = partitions_o.len() + partitions_s.len() - 2 * i;
-
-        // Hacky...
-        if self.is_rooted()? && rf != 0 && !same_root {
-            Ok(rf + 2)
-        } else {
-            Ok(rf)
-        }
+        self.bipartition_profile()?
+            .robinson_foulds(&other.bipartition_profile()?)
     }
 
     /// Computes the normalized Robinson Foulds distance between two trees
@@ -1068,14 +953,8 @@ impl Tree {
     /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
     pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64, TreeError> {
-        let rf = self.robinson_foulds(other)?;
-
-        let partitions_s = self.get_partitions()?;
-        let partitions_o = other.get_partitions()?;
-
-        let tot = partitions_o.len() + partitions_s.len();
-
-        Ok((rf as f64) / (tot as f64))
+        self.bipartition_profile()?
+            .robinson_foulds_norm(&other.bipartition_profile()?)
     }
 
     /// Computes the weighted Robinson Foulds distance between two trees
@@ -1091,27 +970,8 @@ impl Tree {
     /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).
     /// See also [Tree::compare_topologies()]
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
-        self.require_compatible_taxa(other)?;
-        let partitions_s = self.get_partitions_with_lengths()?;
-        let partitions_o = other.get_partitions_with_lengths()?;
-
-        let mut dist = 0.;
-
-        for (edge, (_, len_s)) in partitions_s.iter() {
-            if let Some((_, len_o)) = partitions_o.get(edge) {
-                dist += (len_s - len_o).abs()
-            } else {
-                dist += len_s
-            }
-        }
-
-        for (edge, (_, len_o)) in partitions_o.iter() {
-            if !partitions_s.contains_key(edge) {
-                dist += len_o
-            }
-        }
-
-        Ok(dist)
+        self.bipartition_profile()?
+            .weighted_robinson_foulds(&other.bipartition_profile()?)
     }
 
     /// Computes the kuhner felsenstein branch score between two trees,
@@ -1128,27 +988,8 @@ impl Tree {
     /// $$
     /// See also [Tree::compare_topologies()]
     pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
-        self.require_compatible_taxa(other)?;
-        let partitions_s = self.get_partitions_with_lengths()?;
-        let partitions_o = other.get_partitions_with_lengths()?;
-
-        let mut dist = 0.;
-
-        for (edge, (_, len_s)) in partitions_s.iter() {
-            if let Some((_, len_o)) = partitions_o.get(edge) {
-                dist += f64::powi(len_s - len_o, 2)
-            } else {
-                dist += f64::powi(*len_s, 2)
-            }
-        }
-
-        for (edge, (_, len_o)) in partitions_o.iter() {
-            if !partitions_s.contains_key(edge) {
-                dist += f64::powi(*len_o, 2)
-            }
-        }
-
-        Ok(dist.sqrt())
+        self.bipartition_profile()?
+            .kuhner_felsenstein(&other.bipartition_profile()?)
     }
 
     /// Compute several the RF metric, the weighted and normalized RF metrics and
@@ -1173,56 +1014,8 @@ impl Tree {
     /// assert_eq!(branch_score, comparison.branch_score);
     /// ```
     pub fn compare_topologies(&self, other: &Self) -> Result<Comparison, TreeError> {
-        self.require_compatible_taxa(other)?;
-        let partitions_s = self.get_partitions_with_lengths()?;
-        let partitions_o = other.get_partitions_with_lengths()?;
-
-        let tot = partitions_o.len() + partitions_s.len();
-
-        let mut intersection = 0.;
-        let mut rf_weight = 0.;
-        let mut kf = 0.;
-
-        for (edge, (_, len_s)) in partitions_s.iter() {
-            if let Some((_, len_o)) = partitions_o.get(edge) {
-                rf_weight += (len_s - len_o).abs();
-                kf += f64::powi(len_s - len_o, 2);
-                intersection += 1.0;
-            } else {
-                rf_weight += len_s;
-                kf += f64::powi(*len_s, 2);
-            }
-        }
-
-        for (edge, (_, len_o)) in partitions_o.iter() {
-            if !partitions_s.contains_key(edge) {
-                rf_weight += len_o;
-                kf += f64::powi(*len_o, 2);
-            }
-        }
-
-        let mut rf = tot as f64 - 2.0 * intersection;
-
-        // Hacky...
-        let mut root_s = HashSet::new();
-        for i in self.get(&self.get_root()?)?.children.iter() {
-            root_s.insert(self.get_partition(i)?);
-        }
-        let mut root_o = HashSet::new();
-        for i in other.get(&other.get_root()?)?.children.iter() {
-            root_o.insert(other.get_partition(i)?);
-        }
-        let same_root = root_s == root_o;
-        if self.is_rooted()? && other.is_rooted()? && rf != 0.0 && !same_root {
-            rf += 2.0;
-        }
-
-        Ok(Comparison {
-            rf,
-            norm_rf: rf / tot as f64,
-            weighted_rf: rf_weight,
-            branch_score: kf.sqrt(),
-        })
+        self.bipartition_profile()?
+            .compare(&other.bipartition_profile()?)
     }
 
     /// Compare sets of branches between 2 trees. This will return 3
@@ -1797,7 +1590,6 @@ impl Tree {
         for node in self.nodes.iter_mut() {
             node.rescale_edges(factor)
         }
-        self.reset_partitions();
     }
 
     /// Randomly resolve multifurcations to binarize the tree
@@ -2806,16 +2598,17 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             let rota = Tree::from_newick(rot_newick).unwrap();
 
-            tree.init_taxon_index().unwrap();
-            rota.init_taxon_index().unwrap();
-
+            let tree_index = tree.taxon_index.clone();
+            let rota_index = rota.taxon_index.clone();
             assert_eq!(
                 tree.robinson_foulds(&rota).unwrap(),
                 0,
                 "Ref{:#?}\nRot:{:#?}",
-                tree.taxon_index,
-                rota.taxon_index
+                tree.taxon_index(),
+                rota.taxon_index()
             );
+            assert_eq!(tree.taxon_index, tree_index);
+            assert_eq!(rota.taxon_index, rota_index);
         }
     }
 

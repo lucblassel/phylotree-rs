@@ -6,6 +6,7 @@
 //!  - The [`TreeList`] struct that holds an ordered collection of [`Tree`] objects.
 //!
 
+mod bipartition;
 /// A module to draw phylogenetic trees
 pub mod draw;
 mod newick;
@@ -14,6 +15,7 @@ mod taxon_index;
 mod tree_impl;
 mod tree_list;
 
+pub use self::bipartition::BipartitionProfile;
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
     NewickNameFormat, NewickParseError, NewickParseOptions, NewickSerializeOptions,
