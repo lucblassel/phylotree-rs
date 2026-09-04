@@ -8,7 +8,7 @@ use std::path::Path;
 use fixedbitset::FixedBitSet;
 use thiserror::Error;
 
-use super::bipartition::BipartitionProfile;
+use super::bipartition::{BipartitionProfile, RobinsonFouldsMode};
 use super::newick::{NewickParser, NewickTokenizer};
 use super::taxon_index::TaxonIndex;
 use super::{NewickParseError, NewickParseOptions, Tree, TreeError};
@@ -101,7 +101,6 @@ pub enum TreeListError {
 struct TopologyKey {
     rooted: bool,
     partitions: Vec<FixedBitSet>,
-    root_partitions: Vec<FixedBitSet>,
 }
 
 /// An ordered, in-memory collection of phylogenetic trees.
@@ -216,8 +215,11 @@ impl TreeList {
         for (index, tree) in self.trees.iter().enumerate() {
             let profile = BipartitionProfile::from_tree(tree)
                 .map_err(|error| Self::invalid_tree(index, error))?;
-            for bits in profile.partition_bits() {
-                *counts.entry(bits.clone()).or_insert(0) += 1;
+            for bits in profile
+                .partition_set(RobinsonFouldsMode::Unrooted)
+                .map_err(|error| Self::invalid_tree(index, error))?
+            {
+                *counts.entry(bits).or_insert(0) += 1;
             }
         }
         Ok(counts
@@ -241,22 +243,19 @@ impl TreeList {
             .collect())
     }
 
-    fn topology_key(profile: &BipartitionProfile) -> TopologyKey {
-        let mut partitions: Vec<_> = profile.partition_bits().cloned().collect();
+    fn topology_key(profile: &BipartitionProfile) -> Result<TopologyKey, TreeError> {
+        let mode = if profile.is_rooted() {
+            RobinsonFouldsMode::Rooted
+        } else {
+            RobinsonFouldsMode::Unrooted
+        };
+        let mut partitions: Vec<_> = profile.partition_set(mode)?.into_iter().collect();
         partitions.sort_unstable();
 
-        let mut root_partitions = if profile.is_rooted() {
-            profile.root_partition_bits().cloned().collect()
-        } else {
-            Vec::new()
-        };
-        root_partitions.sort_unstable();
-
-        TopologyKey {
+        Ok(TopologyKey {
             rooted: profile.is_rooted(),
             partitions,
-            root_partitions,
-        }
+        })
     }
 
     /// Returns one frequency record per distinct topology, most frequent first.
@@ -270,7 +269,8 @@ impl TreeList {
         for (index, tree) in self.trees.iter().enumerate() {
             let profile = BipartitionProfile::from_tree(tree)
                 .map_err(|error| Self::invalid_tree(index, error))?;
-            let key = Self::topology_key(&profile);
+            let key =
+                Self::topology_key(&profile).map_err(|error| Self::invalid_tree(index, error))?;
             counts
                 .entry(key)
                 .and_modify(|(_, count)| *count += 1)
@@ -933,7 +933,10 @@ mod tests {
             .next()
             .unwrap()
             .is_compatible(second.iter().next().unwrap()));
-        assert_eq!(trees[0].robinson_foulds(&independent[0]).unwrap(), 0);
+        assert_eq!(
+            trees[0].unrooted_robinson_foulds(&independent[0]).unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1014,17 +1017,17 @@ mod tests {
 
         // Check that topology representatives are correct too
         assert_eq!(
-            t1.robinson_foulds(treelist.get(freqs[0].representative).unwrap())
+            t1.unrooted_robinson_foulds(treelist.get(freqs[0].representative).unwrap())
                 .unwrap(),
             0
         );
         assert_eq!(
-            t2.robinson_foulds(treelist.get(freqs[1].representative).unwrap())
+            t2.unrooted_robinson_foulds(treelist.get(freqs[1].representative).unwrap())
                 .unwrap(),
             0
         );
         assert_eq!(
-            t3.robinson_foulds(treelist.get(freqs[2].representative).unwrap())
+            t3.unrooted_robinson_foulds(treelist.get(freqs[2].representative).unwrap())
                 .unwrap(),
             0
         );

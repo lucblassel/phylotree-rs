@@ -15,7 +15,7 @@ mod taxon_index;
 mod tree_impl;
 mod tree_list;
 
-pub use self::bipartition::BipartitionProfile;
+pub use self::bipartition::{BipartitionProfile, RobinsonFouldsMode};
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
     NewickNameFormat, NewickParseError, NewickParseOptions, NewickSerializeOptions,

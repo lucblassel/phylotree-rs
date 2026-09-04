@@ -14,7 +14,9 @@ use vec_map::VecMap;
 
 use thiserror::Error;
 
-use super::bipartition::{BipartitionProfile, Partition, PartitionMap, PartitionSet};
+use super::bipartition::{
+    BipartitionProfile, Partition, PartitionMap, PartitionSet, RobinsonFouldsMode,
+};
 use super::newick::{NewickParser, NewickSerializer, NewickTokenizer};
 use super::node::{Node, NodeError};
 use super::taxon_index::TaxonIndex;
@@ -56,6 +58,9 @@ pub enum TreeError {
     /// The trees we want to compare have different tips
     #[error("The trees have different tips indices.")]
     DifferentTipIndices,
+    /// Rooted comparison was requested for at least one unrooted tree.
+    #[error("Rooted comparison requires two rooted trees.")]
+    RootedComparisonRequiresRootedTrees,
     /// The requested node with index [`NodeId`] does not exist in the tree
     #[error("There is no node with index: {0}")]
     NodeNotFound(NodeId),
@@ -880,14 +885,16 @@ impl Tree {
     /// Computes an immutable bipartition profile for repeated comparisons.
     ///
     /// Creating a profile does not populate or otherwise modify this tree's
-    /// optional taxon-index cache.
+    /// optional taxon-index cache. The storage strategy controls whether the
+    /// canonical unrooted split projection is retained by the profile.
     pub fn bipartition_profile(&self) -> Result<BipartitionProfile, TreeError> {
         BipartitionProfile::from_tree(self)
     }
 
     /// Get all partitions of a tree.
     pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
-        Ok(self.bipartition_profile()?.partition_set())
+        self.bipartition_profile()?
+            .partition_set(RobinsonFouldsMode::Unrooted)
     }
 
     /// Returns all nontrivial bipartitions with their taxon index.
@@ -906,8 +913,8 @@ impl Tree {
         let profile = self.bipartition_profile()?;
         let taxon_index = profile.taxon_index().clone();
         Ok(profile
-            .partition_bits()
-            .cloned()
+            .partition_set(RobinsonFouldsMode::Unrooted)?
+            .into_iter()
             .map(|bits| Bipartition::new(taxon_index.clone(), bits))
             .collect())
     }
@@ -929,17 +936,25 @@ impl Tree {
     // # COMPARE TREES #
     // #################
 
-    /// Computes the [Robinson Foulds distance](https://en.wikipedia.org/wiki/Robinson–Foulds_metric)
-    /// [(Robinson & Foulds, 1981)](https://doi.org/10.1016/0025-5564(81)90043-2)
-    /// between two trees. The RF distance is defined as the number of unique bipartitions for each tree:
-    /// $$
-    /// RF = |A\cup B| - |A\cap B|
-    /// $$
-    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
-    /// See also [Tree::compare_topologies()]
-    pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+    /// Computes the Robinson–Foulds distance using an explicit rooted or
+    /// unrooted interpretation.
+    pub fn robinson_foulds(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<usize, TreeError> {
         self.bipartition_profile()?
-            .robinson_foulds(&other.bipartition_profile()?)
+            .robinson_foulds(&other.bipartition_profile()?, mode)
+    }
+
+    /// Computes rooted Robinson–Foulds distance from descendant clades.
+    pub fn rooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        self.robinson_foulds(other, RobinsonFouldsMode::Rooted)
+    }
+
+    /// Computes unrooted Robinson–Foulds distance from canonical splits.
+    pub fn unrooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        self.robinson_foulds(other, RobinsonFouldsMode::Unrooted)
     }
 
     /// Computes the normalized Robinson Foulds distance between two trees
@@ -952,9 +967,13 @@ impl Tree {
     /// $$
     /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
     /// See also [Tree::compare_topologies()]
-    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64, TreeError> {
+    pub fn robinson_foulds_norm(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<f64, TreeError> {
         self.bipartition_profile()?
-            .robinson_foulds_norm(&other.bipartition_profile()?)
+            .robinson_foulds_norm(&other.bipartition_profile()?, mode)
     }
 
     /// Computes the weighted Robinson Foulds distance between two trees
@@ -971,7 +990,7 @@ impl Tree {
     /// See also [Tree::compare_topologies()]
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
         self.bipartition_profile()?
-            .weighted_robinson_foulds(&other.bipartition_profile()?)
+            .weighted_robinson_foulds(&other.bipartition_profile()?, RobinsonFouldsMode::Unrooted)
     }
 
     /// Computes the kuhner felsenstein branch score between two trees,
@@ -989,7 +1008,7 @@ impl Tree {
     /// See also [Tree::compare_topologies()]
     pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
         self.bipartition_profile()?
-            .kuhner_felsenstein(&other.bipartition_profile()?)
+            .kuhner_felsenstein(&other.bipartition_profile()?, RobinsonFouldsMode::Unrooted)
     }
 
     /// Compute several the RF metric, the weighted and normalized RF metrics and
@@ -1001,8 +1020,11 @@ impl Tree {
     /// let tree1 = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let tree2 = Tree::from_newick("(A:0.1,D:0.2,(C:0.3,B:0.4)E:0.5)F;").unwrap();
     ///
-    /// let rf = tree1.robinson_foulds(&tree2).unwrap() as f64;
-    /// let norm_rf = tree1.robinson_foulds_norm(&tree2).unwrap();
+    /// let rf = tree1.unrooted_robinson_foulds(&tree2).unwrap() as f64;
+    /// let norm_rf = tree1.robinson_foulds_norm(
+    ///     &tree2,
+    ///     phylotree::tree::RobinsonFouldsMode::Unrooted,
+    /// ).unwrap();
     /// let weighted_rf = tree1.weighted_robinson_foulds(&tree2).unwrap();
     /// let branch_score = tree1.kuhner_felsenstein(&tree2).unwrap();
     ///
@@ -1015,7 +1037,7 @@ impl Tree {
     /// ```
     pub fn compare_topologies(&self, other: &Self) -> Result<Comparison, TreeError> {
         self.bipartition_profile()?
-            .compare(&other.bipartition_profile()?)
+            .compare(&other.bipartition_profile()?, RobinsonFouldsMode::Unrooted)
     }
 
     /// Compare sets of branches between 2 trees. This will return 3
@@ -1695,7 +1717,7 @@ impl Tree {
     /// tree.merge_children(&a, &b, None, None, None, Some("D".into()));
     ///
     /// let expected = Tree::from_newick("((A,B)D, C);").unwrap();
-    /// assert_eq!(tree.robinson_foulds(&expected).unwrap(), 0);
+    /// assert_eq!(tree.unrooted_robinson_foulds(&expected).unwrap(), 0);
     /// ```
     pub fn merge_children(
         &mut self,
@@ -2601,7 +2623,7 @@ mod tests {
             let tree_index = tree.taxon_index.clone();
             let rota_index = rota.taxon_index.clone();
             assert_eq!(
-                tree.robinson_foulds(&rota).unwrap(),
+                tree.unrooted_robinson_foulds(&rota).unwrap(),
                 0,
                 "Ref{:#?}\nRot:{:#?}",
                 tree.taxon_index(),
@@ -2651,7 +2673,7 @@ mod tests {
             let t0 = Tree::from_newick(trees[i0]).unwrap();
             let t1 = Tree::from_newick(trees[i1]).unwrap();
 
-            assert_eq!(t0.robinson_foulds(&t1).unwrap(), rfs[i0][i1])
+            assert_eq!(t0.unrooted_robinson_foulds(&t1).unwrap(), rfs[i0][i1])
         }
     }
 
@@ -3090,8 +3112,8 @@ mod tests {
             let t2 = Tree::from_newick(newicks[1]).unwrap();
 
             assert_eq!(
-                t1.robinson_foulds(&t2).unwrap(),
-                t1.robinson_foulds(&t2).unwrap()
+                t1.unrooted_robinson_foulds(&t2).unwrap(),
+                t1.unrooted_robinson_foulds(&t2).unwrap()
             )
         }
     }
@@ -3837,7 +3859,7 @@ mod tests_ete3_operations {
             let t1 = Tree::from_newick(nw1).unwrap();
             let t2 = Tree::from_newick(nw2).unwrap();
 
-            let rf = t1.robinson_foulds(&t2).unwrap();
+            let rf = t1.unrooted_robinson_foulds(&t2).unwrap();
 
             // Add information to failure output
             if expected != rf {

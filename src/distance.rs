@@ -905,7 +905,7 @@ e    23 21 39 43 0
         let built = dm.upgma().unwrap();
 
         // Check topologies and branch lengths are the same
-        let rf = expected.robinson_foulds(&built).unwrap();
+        let rf = expected.unrooted_robinson_foulds(&built).unwrap();
         let wrf = expected.weighted_robinson_foulds(&built).unwrap();
         assert_eq!(wrf, 0.0);
         assert_eq!(rf, 0,);

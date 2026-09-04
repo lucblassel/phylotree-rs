@@ -11,6 +11,7 @@
 - Added an option to name internal nodes in simulated trees
 ### Changed
 - Tree comparisons now use explicit immutable `BipartitionProfile` values; comparison-related `RefCell` caches were removed from `Tree` and `TreeList`, and taxon-index rebuilding is explicit.
+- `BipartitionProfile` now stores rooted clades and takes a `BipartitionStorage` strategy controlling whether canonical unrooted splits are retained or derived on demand. Robinson–Foulds comparisons now require an explicit `RobinsonFouldsMode`; rooted RF compares clades and unrooted RF compares canonical splits.
 - Newick labels now follow the format specification: quoted labels must use single quotes, and embedded single quotes must be doubled. Double-quoted labels are no longer interpreted as quoted names.
 - `NewickParseError` now reports structured tokenizer and parser failures, including byte spans where available; its previous coarse-grained variants have been replaced.
 - `Node::to_newick` now returns a `Result` so invalid custom Newick serialization options can be reported.

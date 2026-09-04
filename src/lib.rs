@@ -2,17 +2,17 @@
 
 //! The `phylotree` crate aims to be useful when dealing with phylogenetic trees.
 //! It can be used to build such trees or read then from newick files. this crate
-//! can also be used to compare trees.  
+//! can also be used to compare trees.
 //!
 //! Since phylogenetic trees and phylolgenetic distance matrices are so closely related
 //! this crate can also be used to extract such matrices from phylolgenetic trees as
-//! well as read and write phylip distance matrix files.  
+//! well as read and write phylip distance matrix files.
 //!
 //! # A note on implementation
-//! Recursive data structures can be a pain in rust, which is why this crate exists:  
-//!   
-//! **so you don't have to implement it...**  
-//!   
+//! Recursive data structures can be a pain in rust, which is why this crate exists:
+//!
+//! **so you don't have to implement it...**
+//!
 //! To avoid this problem here the tree is stored as a vector
 //! of nodes, each node has an identifier and accessing and mutating
 //! nodes in a tree is done using these identifiers. As such we can have a
@@ -109,7 +109,7 @@
 //! let tree_orig = Tree::from_newick(newick_orig).unwrap();
 //! let tree_rota = Tree::from_newick(newick_rota).unwrap();
 //!
-//! let rf = tree_orig.robinson_foulds(&tree_rota).unwrap();
+//! let rf = tree_orig.unrooted_robinson_foulds(&tree_rota).unwrap();
 //!
 //! assert_eq!(rf, 0)
 //! ```

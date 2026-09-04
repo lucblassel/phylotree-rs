@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use fixedbitset::FixedBitSet;
 
@@ -16,25 +17,34 @@ struct PartitionData {
     length: Option<EdgeLength>,
 }
 
-/// An immutable, computed bipartition representation of a tree.
+type ProfileMap = HashMap<Partition, PartitionData>;
+
+/// Selects the rooted or unrooted interpretation of tree partitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RobinsonFouldsMode {
+    /// Compare directed descendant clades. Both source trees must be rooted.
+    Rooted,
+    /// Compare unordered canonical splits, ignoring root placement.
+    Unrooted,
+}
+
+/// An immutable, computed clade representation of a tree.
 ///
-/// Profiles are useful when a tree participates in repeated comparisons: the
-/// tree is traversed once when the profile is created, and subsequent
-/// comparisons operate only on hashed [`FixedBitSet`] partitions.
+/// Profiles always store nontrivial descendant clades and lazily retain canonical
+/// unrooted splits after the first unrooted operation.
 #[derive(Debug, Clone)]
 pub struct BipartitionProfile {
     taxon_index: TaxonIndex,
-    partitions: HashMap<Partition, PartitionData>,
-    root_partitions: PartitionSet,
+    rooted_clades: ProfileMap,
+    unrooted_splits: OnceLock<ProfileMap>,
     rooted: bool,
 }
 
 impl BipartitionProfile {
-    /// Computes a profile from an immutable tree without modifying or caching
-    /// anything in the tree.
+    /// Computes a profile from an immutable tree.
     ///
-    /// Retain a profile when comparing one tree to many others so its partitions
-    /// are computed only once:
+    /// Retain a profile when comparing one tree to many others so its lazily
+    /// computed unrooted splits can be reused:
     ///
     /// ```
     /// use phylotree::tree::{BipartitionProfile, Tree, TreeList};
@@ -46,7 +56,7 @@ impl BipartitionProfile {
     /// let reference = BipartitionProfile::from_tree(&reference).unwrap();
     /// let distances: Vec<_> = samples.iter().map(|tree| {
     ///     let sample = BipartitionProfile::from_tree(tree).unwrap();
-    ///     reference.robinson_foulds(&sample).unwrap()
+    ///     reference.unrooted_robinson_foulds(&sample).unwrap()
     /// }).collect();
     ///
     /// assert_eq!(distances[0], 0);
@@ -55,7 +65,7 @@ impl BipartitionProfile {
     pub fn from_tree(tree: &Tree) -> Result<Self, TreeError> {
         let taxon_index = tree.taxon_index()?;
         let root = tree.get_root()?;
-        let mut partitions: HashMap<Partition, PartitionData> = HashMap::new();
+        let mut clades = ProfileMap::new();
         let mut descendant_taxa: HashMap<NodeId, Partition> = HashMap::new();
 
         for node_id in tree.postorder(&root)? {
@@ -70,39 +80,23 @@ impl BipartitionProfile {
                 }
             }
 
-            if node.parent.is_some() && !node.is_tip() {
-                let partition = Self::canonical_partition(descendants.clone());
-                if partition.count_ones(..) > 1 {
-                    let old = partitions.get(&partition).copied();
-                    let length = match (node.parent_edge, old) {
-                        (None, None) => None,
-                        (Some(new), Some(old)) => old.length.map(|old| old + new),
-                        (Some(new), None) => Some(new),
-                        (None, Some(old)) => old.length,
-                    };
-                    partitions.insert(
-                        partition,
-                        PartitionData {
-                            depth: node.get_depth(),
-                            length,
-                        },
-                    );
-                }
+            let clade_size = descendants.count_ones(..);
+            if node.parent.is_some() && !node.is_tip() && clade_size > 1 {
+                clades.insert(
+                    descendants.clone(),
+                    PartitionData {
+                        depth: node.get_depth(),
+                        length: node.parent_edge,
+                    },
+                );
             }
             descendant_taxa.insert(node_id, descendants);
         }
 
-        let root_partitions = tree
-            .get(&root)?
-            .children
-            .iter()
-            .map(|child| Self::canonical_partition(descendant_taxa[child].clone()))
-            .collect();
-
         Ok(Self {
             taxon_index,
-            partitions,
-            root_partitions,
+            rooted_clades: clades,
+            unrooted_splits: OnceLock::new(),
             rooted: tree.is_rooted()?,
         })
     }
@@ -113,6 +107,35 @@ impl BipartitionProfile {
         complement.min(partition)
     }
 
+    fn merge_split(splits: &mut ProfileMap, partition: Partition, data: PartitionData) {
+        use std::collections::hash_map::Entry;
+
+        match splits.entry(partition) {
+            Entry::Vacant(entry) => {
+                entry.insert(data);
+            }
+            Entry::Occupied(mut entry) => {
+                let old = entry.get_mut();
+                old.depth = old.depth.min(data.depth);
+                old.length = match (old.length, data.length) {
+                    (Some(left), Some(right)) => Some(left + right),
+                    _ => None,
+                };
+            }
+        }
+    }
+
+    fn project_unrooted(clades: &ProfileMap) -> ProfileMap {
+        let mut splits = ProfileMap::with_capacity(clades.len());
+        for (clade, data) in clades {
+            let partition = Self::canonical_partition(clade.clone());
+            if partition.count_ones(..) > 1 {
+                Self::merge_split(&mut splits, partition, *data);
+            }
+        }
+        splits
+    }
+
     fn require_compatible(&self, other: &Self) -> Result<(), TreeError> {
         if self.taxon_index.is_compatible(&other.taxon_index) {
             Ok(())
@@ -121,8 +144,22 @@ impl BipartitionProfile {
         }
     }
 
-    fn require_branch_lengths(&self) -> Result<(), TreeError> {
-        if self.partitions.values().all(|data| data.length.is_some()) {
+    fn partitions(&self, mode: RobinsonFouldsMode) -> Result<&ProfileMap, TreeError> {
+        match mode {
+            RobinsonFouldsMode::Rooted => {
+                if !self.rooted {
+                    return Err(TreeError::RootedComparisonRequiresRootedTrees);
+                }
+                Ok(&self.rooted_clades)
+            }
+            RobinsonFouldsMode::Unrooted => Ok(self
+                .unrooted_splits
+                .get_or_init(|| Self::project_unrooted(&self.rooted_clades))),
+        }
+    }
+
+    fn require_branch_lengths(partitions: &ProfileMap) -> Result<(), TreeError> {
+        if partitions.values().all(|data| data.length.is_some()) {
             Ok(())
         } else {
             Err(TreeError::MissingBranchLengths)
@@ -130,7 +167,7 @@ impl BipartitionProfile {
     }
 
     pub(crate) fn partitions_with_lengths(&self) -> Result<PartitionMap, TreeError> {
-        self.partitions
+        self.partitions(RobinsonFouldsMode::Unrooted)?
             .iter()
             .map(|(partition, data)| {
                 let length = data.length.ok_or(TreeError::MissingBranchLengths)?;
@@ -149,116 +186,157 @@ impl BipartitionProfile {
         self.rooted
     }
 
-    /// Returns the number of nontrivial partitions in the profile.
+    /// Returns the number of stored nontrivial descendant clades.
     pub fn len(&self) -> usize {
-        self.partitions.len()
+        self.rooted_clades.len()
     }
 
-    /// Returns `true` if the profile contains no nontrivial partitions.
+    /// Returns `true` if the profile contains no nontrivial descendant clades.
     pub fn is_empty(&self) -> bool {
-        self.partitions.is_empty()
+        self.rooted_clades.is_empty()
     }
 
-    /// Counts partitions shared with another compatible profile.
-    pub fn common_partition_count(&self, other: &Self) -> Result<usize, TreeError> {
+    /// Counts groupings shared with another compatible profile in the selected mode.
+    pub fn common_partition_count(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<usize, TreeError> {
         self.require_compatible(other)?;
-        Ok(self
-            .partitions
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        Ok(left
             .keys()
-            .filter(|partition| other.partitions.contains_key(*partition))
+            .filter(|partition| right.contains_key(*partition))
             .count())
     }
 
-    pub(crate) fn partition_bits(&self) -> impl Iterator<Item = &Partition> {
-        self.partitions.keys()
+    pub(crate) fn partition_set(
+        &self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<PartitionSet, TreeError> {
+        Ok(self.partitions(mode)?.keys().cloned().collect())
     }
 
-    pub(crate) fn root_partition_bits(&self) -> impl Iterator<Item = &Partition> {
-        self.root_partitions.iter()
+    /// Computes the Robinson–Foulds distance in the selected mode.
+    pub fn robinson_foulds(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<usize, TreeError> {
+        self.require_compatible(other)?;
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        let intersection = left
+            .keys()
+            .filter(|partition| right.contains_key(*partition))
+            .count();
+        Ok(left.len() + right.len() - 2 * intersection)
     }
 
-    pub(crate) fn partition_set(&self) -> PartitionSet {
-        self.partitions.keys().cloned().collect()
+    /// Computes rooted Robinson–Foulds distance from descendant clades.
+    pub fn rooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        self.robinson_foulds(other, RobinsonFouldsMode::Rooted)
     }
 
-    /// Computes the Robinson–Foulds distance to another prepared profile.
-    pub fn robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
-        let intersection = self.common_partition_count(other)?;
-        let rf = self.partitions.len() + other.partitions.len() - 2 * intersection;
-        let same_root = self.root_partitions == other.root_partitions;
+    /// Computes unrooted Robinson–Foulds distance from canonical splits.
+    pub fn unrooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
+        self.robinson_foulds(other, RobinsonFouldsMode::Unrooted)
+    }
 
-        if self.rooted && other.rooted && rf != 0 && !same_root {
-            Ok(rf + 2)
+    /// Computes normalized Robinson–Foulds distance in the selected mode.
+    pub fn robinson_foulds_norm(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<f64, TreeError> {
+        self.require_compatible(other)?;
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        let intersection = left
+            .keys()
+            .filter(|partition| right.contains_key(*partition))
+            .count();
+        let total = left.len() + right.len();
+        if total == 0 {
+            Ok(0.0)
         } else {
-            Ok(rf)
+            Ok((total - 2 * intersection) as f64 / total as f64)
         }
     }
 
-    /// Computes the normalized Robinson–Foulds distance to another profile.
-    pub fn robinson_foulds_norm(&self, other: &Self) -> Result<f64, TreeError> {
-        let rf = self.robinson_foulds(other)?;
-        let total = self.partitions.len() + other.partitions.len();
-        Ok(rf as f64 / total as f64)
-    }
-
-    /// Computes the weighted Robinson–Foulds distance to another profile.
-    pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
+    /// Computes weighted Robinson–Foulds distance in the selected mode.
+    pub fn weighted_robinson_foulds(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<f64, TreeError> {
         self.require_compatible(other)?;
-        self.require_branch_lengths()?;
-        other.require_branch_lengths()?;
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        Self::require_branch_lengths(left)?;
+        Self::require_branch_lengths(right)?;
         let mut distance = 0.0;
 
-        for (partition, left) in &self.partitions {
-            let left_length = left.length.unwrap();
-            distance += match other.partitions.get(partition) {
-                Some(right) => (left_length - right.length.unwrap()).abs(),
+        for (partition, left_data) in left.iter() {
+            let left_length = left_data.length.unwrap();
+            distance += match right.get(partition) {
+                Some(right_data) => (left_length - right_data.length.unwrap()).abs(),
                 None => left_length,
             };
         }
-        for (partition, right) in &other.partitions {
-            if !self.partitions.contains_key(partition) {
-                distance += right.length.unwrap();
+        for (partition, right_data) in right.iter() {
+            if !left.contains_key(partition) {
+                distance += right_data.length.unwrap();
             }
         }
         Ok(distance)
     }
 
-    /// Computes the Kuhner–Felsenstein branch score to another profile.
-    pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
+    /// Computes the Kuhner–Felsenstein branch score in the selected mode.
+    pub fn kuhner_felsenstein(
+        &self,
+        other: &Self,
+        mode: RobinsonFouldsMode,
+    ) -> Result<f64, TreeError> {
         self.require_compatible(other)?;
-        self.require_branch_lengths()?;
-        other.require_branch_lengths()?;
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        Self::require_branch_lengths(left)?;
+        Self::require_branch_lengths(right)?;
         let mut distance = 0.0;
 
-        for (partition, left) in &self.partitions {
-            let left_length = left.length.unwrap();
-            distance += match other.partitions.get(partition) {
-                Some(right) => f64::powi(left_length - right.length.unwrap(), 2),
+        for (partition, left_data) in left.iter() {
+            let left_length = left_data.length.unwrap();
+            distance += match right.get(partition) {
+                Some(right_data) => f64::powi(left_length - right_data.length.unwrap(), 2),
                 None => f64::powi(left_length, 2),
             };
         }
-        for (partition, right) in &other.partitions {
-            if !self.partitions.contains_key(partition) {
-                distance += f64::powi(right.length.unwrap(), 2);
+        for (partition, right_data) in right.iter() {
+            if !left.contains_key(partition) {
+                distance += f64::powi(right_data.length.unwrap(), 2);
             }
         }
         Ok(distance.sqrt())
     }
 
     /// Computes topology and branch-length comparison metrics in one pass.
-    pub fn compare(&self, other: &Self) -> Result<Comparison, TreeError> {
+    pub fn compare(&self, other: &Self, mode: RobinsonFouldsMode) -> Result<Comparison, TreeError> {
         self.require_compatible(other)?;
-        self.require_branch_lengths()?;
-        other.require_branch_lengths()?;
-        let total = self.partitions.len() + other.partitions.len();
+        let left = self.partitions(mode)?;
+        let right = other.partitions(mode)?;
+        Self::require_branch_lengths(left)?;
+        Self::require_branch_lengths(right)?;
+        let total = left.len() + right.len();
         let mut intersection = 0.0;
         let mut weighted_rf = 0.0;
         let mut branch_score = 0.0;
 
-        for (partition, left) in &self.partitions {
-            let left_length = left.length.unwrap();
-            if let Some(right) = other.partitions.get(partition) {
-                let right_length = right.length.unwrap();
+        for (partition, left_data) in left.iter() {
+            let left_length = left_data.length.unwrap();
+            if let Some(right_data) = right.get(partition) {
+                let right_length = right_data.length.unwrap();
                 weighted_rf += (left_length - right_length).abs();
                 branch_score += f64::powi(left_length - right_length, 2);
                 intersection += 1.0;
@@ -267,23 +345,18 @@ impl BipartitionProfile {
                 branch_score += f64::powi(left_length, 2);
             }
         }
-        for (partition, right) in &other.partitions {
-            if !self.partitions.contains_key(partition) {
-                let right_length = right.length.unwrap();
+        for (partition, right_data) in right.iter() {
+            if !left.contains_key(partition) {
+                let right_length = right_data.length.unwrap();
                 weighted_rf += right_length;
                 branch_score += f64::powi(right_length, 2);
             }
         }
 
-        let mut rf = total as f64 - 2.0 * intersection;
-        if self.rooted && other.rooted && rf != 0.0 && self.root_partitions != other.root_partitions
-        {
-            rf += 2.0;
-        }
-
+        let rf = total as f64 - 2.0 * intersection;
         Ok(Comparison {
             rf,
-            norm_rf: rf / total as f64,
+            norm_rf: if total == 0 { 0.0 } else { rf / total as f64 },
             weighted_rf,
             branch_score: branch_score.sqrt(),
         })
@@ -301,10 +374,15 @@ mod tests {
         let first_profile = BipartitionProfile::from_tree(&first).unwrap();
         let second_profile = BipartitionProfile::from_tree(&second).unwrap();
 
-        assert_eq!(first_profile.robinson_foulds(&second_profile).unwrap(), 0);
         assert_eq!(
             first_profile
-                .weighted_robinson_foulds(&second_profile)
+                .robinson_foulds(&second_profile, RobinsonFouldsMode::Rooted)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            first_profile
+                .weighted_robinson_foulds(&second_profile, RobinsonFouldsMode::Unrooted)
                 .unwrap(),
             0.0
         );
@@ -332,8 +410,65 @@ mod tests {
         let second_profile = BipartitionProfile::from_tree(&second).unwrap();
 
         assert!(matches!(
-            first_profile.robinson_foulds(&second_profile),
+            first_profile.robinson_foulds(&second_profile, RobinsonFouldsMode::Unrooted),
             Err(TreeError::DifferentTipIndices)
         ));
+    }
+
+    #[test]
+    fn storage_strategies_produce_identical_unrooted_results() {
+        let first = Tree::from_newick("((A,B),(C,D));").unwrap();
+        let second = Tree::from_newick("((A,C),(B,D));").unwrap();
+        let first_clades = BipartitionProfile::from_tree(&first).unwrap();
+        let first_cached = BipartitionProfile::from_tree(&first).unwrap();
+        let second_clades = BipartitionProfile::from_tree(&second).unwrap();
+        let second_cached = BipartitionProfile::from_tree(&second).unwrap();
+
+        let expected = first_clades
+            .unrooted_robinson_foulds(&second_clades)
+            .unwrap();
+        assert_eq!(
+            first_clades
+                .unrooted_robinson_foulds(&second_cached)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            first_cached
+                .unrooted_robinson_foulds(&second_clades)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            first_cached
+                .unrooted_robinson_foulds(&second_cached)
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn rooted_rf_detects_root_placement_while_unrooted_rf_ignores_it() {
+        let first = Tree::from_newick("((A,B),(C,D));").unwrap();
+        let second = Tree::from_newick("(A,(B,(C,D)));").unwrap();
+        let first = BipartitionProfile::from_tree(&first).unwrap();
+        let second = BipartitionProfile::from_tree(&second).unwrap();
+
+        assert_eq!(first.unrooted_robinson_foulds(&second).unwrap(), 0);
+        assert_eq!(first.rooted_robinson_foulds(&second).unwrap(), 2);
+    }
+
+    #[test]
+    fn rooted_rf_rejects_an_unrooted_tree() {
+        let rooted = Tree::from_newick("((A,B),(C,D));").unwrap();
+        let unrooted = Tree::from_newick("(A,B,(C,D));").unwrap();
+        let rooted = BipartitionProfile::from_tree(&rooted).unwrap();
+        let unrooted = BipartitionProfile::from_tree(&unrooted).unwrap();
+
+        assert!(matches!(
+            rooted.rooted_robinson_foulds(&unrooted),
+            Err(TreeError::RootedComparisonRequiresRootedTrees)
+        ));
+        assert_eq!(rooted.unrooted_robinson_foulds(&unrooted).unwrap(), 0);
     }
 }

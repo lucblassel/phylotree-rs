@@ -11,7 +11,7 @@ use phylotree::{
     generate_caterpillar, generate_tree, generate_yule,
     tree::{
         draw::{self, Layout, Node},
-        Tree, TreeError,
+        RobinsonFouldsMode, Tree, TreeError,
     },
     TreeShape,
 };
@@ -182,8 +182,12 @@ fn main() {
                 let compare = read_tree(&cmp_path);
 
                 let other_profile = compare.bipartition_profile().unwrap();
-                let common = ref_profile.common_partition_count(&other_profile).unwrap();
-                let stats = ref_profile.compare(&other_profile).unwrap();
+                let common = ref_profile
+                    .common_partition_count(&other_profile, RobinsonFouldsMode::Unrooted)
+                    .unwrap();
+                let stats = ref_profile
+                    .compare(&other_profile, RobinsonFouldsMode::Unrooted)
+                    .unwrap();
 
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
