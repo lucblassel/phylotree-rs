@@ -306,13 +306,13 @@ pub fn generate_caterpillar(
     let sampler = Sampler::new(sampler_type);
 
     let mut parent: NodeId = 0.into();
-    for i in 1..n_leaves {
+    for i in 0..n_leaves - 1 {
         let parent_bkp = parent;
 
         let l1: Option<f64> = brlens.then_some(sampler.sample(&mut rng));
         let l2: Option<f64> = brlens.then_some(sampler.sample(&mut rng));
 
-        if i == n_leaves - 1 {
+        if i == n_leaves - 2 {
             // Adding tip
             tree.add_child(Node::new_named(&format!("Tip_{i}")), parent, l1)?;
             tree.add_child(Node::new_named(&format!("Tip_{}", i + 1)), parent, l2)?;

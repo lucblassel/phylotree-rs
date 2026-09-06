@@ -510,7 +510,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 6. [ ] Make compound mutations atomic on error.
 7. [ ] Correct binary-tree validation.
 8. [ ] Make branch-length versus edge-count semantics explicit.
-9. [ ] Validate random-tree generator sizes.
+9. [x] Validate random-tree generator sizes.
 10. [ ] Fix Newick comment round trips and non-finite numeric handling.
 11. [x] Remove incomplete or panic-only public APIs.
 12. [ ] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
