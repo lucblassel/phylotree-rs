@@ -199,6 +199,10 @@ pub fn generate_tree(
     brlens: bool,
     sampler_type: Distr,
 ) -> Result<Tree, TreeError> {
+    if n_leaves < 3 {
+        return Err(TreeError::InvalidTreeSize(n_leaves));
+    }
+
     let mut tree = Tree::new();
     // Add root
     tree.add(Node::default());
@@ -244,6 +248,10 @@ pub fn generate_yule(
     brlens: bool,
     sampler_type: Distr,
 ) -> Result<Tree, TreeError> {
+    if n_leaves < 3 {
+        return Err(TreeError::InvalidTreeSize(n_leaves));
+    }
+
     // Initialize tree
     let mut tree = Tree::new();
     let root = tree.add(Node::default());
@@ -287,6 +295,10 @@ pub fn generate_caterpillar(
     brlens: bool,
     sampler_type: Distr,
 ) -> Result<Tree, TreeError> {
+    if n_leaves < 3 {
+        return Err(TreeError::InvalidTreeSize(n_leaves));
+    }
+
     let mut tree = Tree::new();
     tree.add(Node::default());
 
@@ -312,4 +324,66 @@ pub fn generate_caterpillar(
     }
 
     Ok(tree)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        distr::Distr,
+        generate_caterpillar, generate_tree, generate_yule,
+        tree::{Tree, TreeError},
+    };
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_invalid_sizes() {
+        for size in [0, 1, 2] {
+            matches!(
+                generate_tree(size, false, Distr::Uniform),
+                Err(TreeError::InvalidTreeSize(_)),
+            );
+            matches!(
+                generate_yule(size, false, Distr::Uniform),
+                Err(TreeError::InvalidTreeSize(_)),
+            );
+            matches!(
+                generate_caterpillar(size, false, Distr::Uniform),
+                Err(TreeError::InvalidTreeSize(_)),
+            );
+        }
+    }
+
+    #[test]
+    fn test_requested_size() {
+        for size in [10, 100, 3, 3000] {
+            let tree = generate_tree(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, tree.n_leaves());
+
+            let tree = generate_yule(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, tree.n_leaves());
+
+            let tree = generate_caterpillar(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, tree.n_leaves());
+        }
+    }
+
+    fn n_unique_names(tree: &Tree) -> usize {
+        let names: HashSet<String> =
+            HashSet::from_iter(tree.leaf_names().into_iter().map(|v| v.unwrap()));
+        names.len()
+    }
+
+    #[test]
+    fn test_unique_tip_names() {
+        for size in [10, 100, 3, 3000] {
+            let tree = generate_tree(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, n_unique_names(&tree));
+
+            let tree = generate_yule(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, n_unique_names(&tree));
+
+            let tree = generate_caterpillar(size, false, Distr::Uniform).unwrap();
+            assert_eq!(size, n_unique_names(&tree));
+        }
+    }
 }

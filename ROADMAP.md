@@ -81,19 +81,19 @@ The generators currently handle zero and one leaf inconsistently. `generate_tree
 
 Relevant code: `src/lib.rs` and the CLI argument definitions.
 
-- [ ] Define the minimum supported leaf count.
-- [ ] Return a dedicated typed error for unsupported sizes.
-- [ ] Apply the same rules to every generator.
-- [ ] Make one-leaf behavior consistent, including tip naming.
-- [ ] Make tip numbering consistent across generators.
-- [ ] Enforce the same range in CLI argument validation.
-- [ ] Remove arithmetic that can underflow for invalid sizes.
+- [x] Define the minimum supported leaf count.
+- [x] Return a dedicated typed error for unsupported sizes.
+- [x] Apply the same rules to every generator.
+- [x] Make one-leaf behavior consistent, including tip naming.
+- [x] Make tip numbering consistent across generators.
+- [x] Enforce the same range in CLI argument validation.
+- [x] Remove arithmetic that can underflow for invalid sizes.
 
 **Regression tests**
 
-- [ ] Test sizes 0, 1, and 2 for every generator.
-- [ ] Confirm valid generated trees have the requested number of live leaves.
-- [ ] Confirm all generated leaves have unique names.
+- [x] Test sizes 0, 1, and 2 for every generator.
+- [x] Confirm valid generated trees have the requested number of live leaves.
+- [x] Confirm all generated leaves have unique names.
 
 ### 1.4 Remove public unconditional panics
 
@@ -502,8 +502,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 ## Recommended execution order
 
-1. [ ] Fix `DistanceMatrix::to_map` and matrix construction invariants.
-2. [ ] Make PHYLIP parsing strict and panic-free.
+1. [x] Fix `DistanceMatrix::to_map` and matrix construction invariants.
+2. [x] Make PHYLIP parsing strict and panic-free.
 3. [ ] Define tree invariants and add a reusable test checker.
 4. [ ] Fix tombstone filtering and live node counts.
 5. [ ] Repair depths after topology mutations.
@@ -512,9 +512,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 8. [ ] Make branch-length versus edge-count semantics explicit.
 9. [ ] Validate random-tree generator sizes.
 10. [ ] Fix Newick comment round trips and non-finite numeric handling.
-11. [ ] Remove incomplete or panic-only public APIs.
+11. [x] Remove incomplete or panic-only public APIs.
 12. [ ] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
-13. [ ] Introduce the `NodeId` newtype and normalize node-ID signatures.
+13. [x] Introduce the `NodeId` newtype and normalize node-ID signatures.
 14. [ ] Remove unsound equality and private representation leaks.
 15. [ ] Perform the focused naming and error-enum cleanup.
 16. [ ] Add regression, panic-resistance, and deep-tree tests.

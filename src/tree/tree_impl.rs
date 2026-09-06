@@ -91,6 +91,9 @@ pub enum TreeError {
     /// A custom support key contains characters that cannot be serialized safely.
     #[error("Invalid Newick support comment key '{0}'")]
     InvalidNewickSupportKey(String),
+    /// Tried to generate a tree with too little tips
+    #[error("Tree must have at least 3 tips, got {0}")]
+    InvalidTreeSize(usize),
     /// General error
     #[error("Encountered an error: {0}")]
     GeneralError(&'static str),

@@ -21,8 +21,8 @@ pub struct Args {
 pub enum Commands {
     /// Generate random tree(s)
     Generate {
-        /// Number of tips in the generated tree
-        #[arg(short, long, default_value_t = 20)]
+        /// Number of tips in the generated tree (>= 3)
+        #[arg(short, long, default_value_t = 20, value_parser = valid_tips_number)]
         tips: usize,
 
         /// Generate uniform branch lengths
@@ -187,6 +187,14 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+}
+
+fn valid_tips_number(s: &str) -> Result<usize, String> {
+    let requested_n_tips: usize = s.parse().map_err(|_| format!("`{s}` is not a number"))?;
+    if requested_n_tips < 3 {
+        return Err(format!("Cannot generate a tree with less than 3 leaves."));
+    }
+    Ok(requested_n_tips)
 }
 
 impl Commands {}
