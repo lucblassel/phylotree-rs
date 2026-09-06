@@ -2,7 +2,7 @@
 //!
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::{Debug, Display},
     str::FromStr,
 };
@@ -31,9 +31,27 @@ pub enum MatrixError {
     /// We are trying to add more taxa than we allocated space in the matrix for
     #[error("You added more taxa than there is room for in the matrix.")]
     SizeExceeded,
-    /// Too small to be a distance matrix
-    #[error("You need at least 2 taxa for a valid distance matrix.")]
-    InvalidSize,
+    /// The compact lower triangle has the wrong number of distances.
+    #[error(
+        "Distance matrix for {taxa} taxa requires {expected} distances, but received {actual}"
+    )]
+    DistanceCountMismatch {
+        /// Number of taxa in the matrix.
+        taxa: usize,
+        /// Required number of pairwise distances.
+        expected: usize,
+        /// Supplied number of pairwise distances.
+        actual: usize,
+    },
+    /// The number of taxa is too large to represent its pair count as a [`usize`].
+    #[error("Distance matrix for {taxa} taxa is too large")]
+    MatrixTooLarge {
+        /// Number of taxa requested.
+        taxa: usize,
+    },
+    /// Taxon labels must uniquely identify matrix rows and columns.
+    #[error("Duplicate taxon label '{0}'")]
+    DuplicateTaxon(String),
     /// We are trying to access a distance between two taxa that does not
     /// exist in the matrix
     #[error("Missing distance between {0} and {1}.")]
@@ -44,7 +62,15 @@ pub enum MatrixError {
     /// We are trying to access a taxon that does not exist
     #[error("Missing taxon {0}")]
     MissingTaxon(String),
-    /// We are trying to get the pair index for the same leaf
+    /// A matrix index is outside the valid range.
+    #[error("Matrix index {index} is out of bounds for a matrix with {size} taxa")]
+    IndexOutOfBounds {
+        /// Requested row or column index.
+        index: usize,
+        /// Number of taxa in the matrix.
+        size: usize,
+    },
+    /// We are trying to get the compact pair index for the same leaf.
     #[error("Pair index only exists for pairs of different leaves")]
     IndexError,
     /// We are trying to set a non zero distance for an identical taxa pair
@@ -76,14 +102,35 @@ where
     #[error("Row {0} is empty.")]
     EmptyRow(usize),
     /// There was an error when reading a distance.
-    #[error("Could not parse distance from file.")]
-    DistParseError,
-    /// There is a missing distance from one of the matrix rows
+    #[error("Could not parse distance '{value}' at row {row}, column {column}")]
+    DistParseError {
+        /// One-based matrix row.
+        row: usize,
+        /// One-based distance column within the row.
+        column: usize,
+        /// Input token that could not be parsed.
+        value: String,
+    },
+    /// A parsed distance is not finite.
+    #[error("Distance at row {row}, column {column} is not finite")]
+    NonFiniteDistance {
+        /// One-based matrix row.
+        row: usize,
+        /// One-based distance column within the row.
+        column: usize,
+    },
+    /// There are too few distances in one of the matrix rows.
     #[error("Missing distance from matrix row {0}")]
     MissingDistance(usize),
+    /// There are too many distances in one of the matrix rows.
+    #[error("Unexpected extra distance in matrix row {0}")]
+    UnexpectedDistance(usize),
     /// The size of the matrix and the number of rows do not match
     #[error("Size and number of rows do not match: {0} rows for size {1}")]
     SizeAndRowsMismatch(usize, usize),
+    /// Taxon labels must be unique.
+    #[error("Duplicate taxon label '{0}'")]
+    DuplicateTaxon(String),
     /// A value on the diagonal is non 0
     #[error("Non 0 diagonal distance for taxa {0}")]
     NonZeroDiagonalValue(String),
@@ -104,13 +151,11 @@ where
 #[derive(Debug, Clone)]
 /// A phylogenetic distance matrix
 pub struct DistanceMatrix<T> {
-    /// Number of taxa in the matrix
-    pub size: usize,
-    /// Identifiers of the taxa
-    pub taxa: Vec<String>,
-    /// Distances between taxa
+    /// Identifiers of the taxa. Its length defines the matrix dimensions.
+    taxa: Vec<String>,
+    /// Distances in row-major order over the strict lower triangle.
     matrix: Vec<T>,
-    /// Distance value for identical taxa
+    /// Distance value for identical taxa.
     zero: T,
 }
 
@@ -118,65 +163,92 @@ impl<T> DistanceMatrix<T>
 where
     T: PairwiseDist,
 {
-    /// Create a new distance matrix for a certain number of sequences
-    pub fn new(taxa: Vec<String>, matrix: &[T]) -> Self {
-        Self {
-            size: taxa.len(),
-            taxa,
-            matrix: matrix.to_vec(),
-            zero: zero(),
-        }
+    /// Creates a distance matrix from taxon labels and a compact lower triangle.
+    ///
+    /// The distances must be in row-major order over the strict lower triangle,
+    /// containing exactly `n * (n - 1) / 2` values for `n` taxa.
+    pub fn new(taxa: Vec<String>, matrix: &[T]) -> Result<Self, MatrixError> {
+        Self::from_precomputed(taxa, matrix.to_vec())
     }
 
-    /// Create an empty distance matrix with a given size
-    pub fn new_with_size(size: usize) -> Result<Self, MatrixError> {
-        if size == 0 {
-            return Err(MatrixError::InvalidSize);
-        }
-        Ok(Self {
-            size,
-            taxa: Vec::with_capacity(size),
-            matrix: vec![zero(); size * (size - 1) / 2],
-            zero: zero(),
-        })
+    /// Creates a zero-filled distance matrix for the supplied taxa.
+    pub fn zeros(taxa: Vec<String>) -> Result<Self, MatrixError> {
+        let n_pairs = Self::pair_count(taxa.len())?;
+        Self::from_precomputed(taxa, vec![zero(); n_pairs])
     }
 
-    /// Create a distance matrix from pre-computed values. The `matrix` parameter
-    /// represents the upper triangle of the distance matrix as a single vector.
-    /// The matrix index to vector index formula can be found in the [`DistanceMatrix.get_index`]
-    /// function.
+    pub(crate) fn pair_count(size: usize) -> Result<usize, MatrixError> {
+        let (left, right) = if size & 1 == 0 {
+            (size / 2, size.saturating_sub(1))
+        } else {
+            (size.saturating_sub(1) / 2, size)
+        };
+        left.checked_mul(right)
+            .ok_or(MatrixError::MatrixTooLarge { taxa: size })
+    }
+
+    fn validate_taxa(taxa: &[String]) -> Result<(), MatrixError> {
+        let mut seen = HashMap::with_capacity(taxa.len());
+        for (index, taxon) in taxa.iter().enumerate() {
+            if seen.insert(taxon.as_str(), index).is_some() {
+                return Err(MatrixError::DuplicateTaxon(taxon.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Creates a checked distance matrix without cloning its compact storage.
+    ///
+    /// Values are stored in row-major order over the strict lower triangle.
     pub(crate) fn from_precomputed(taxa: Vec<String>, matrix: Vec<T>) -> Result<Self, MatrixError> {
-        // Check that taxa and distances are coherent
-        let n = taxa.len();
-        let n_pairs = (n * (n - 1)) / 2;
-        if matrix.len() != n_pairs {
-            return Err(MatrixError::SizeError {
-                size: {
-                    let delta = (8.0 * (n_pairs as f64) + 1.).sqrt() as usize;
-                    delta.div_ceil(2)
-                },
-                n_taxa: n,
+        Self::validate_taxa(&taxa)?;
+        let expected = Self::pair_count(taxa.len())?;
+        if matrix.len() != expected {
+            return Err(MatrixError::DistanceCountMismatch {
+                taxa: taxa.len(),
+                expected,
+                actual: matrix.len(),
             });
         }
 
         Ok(Self {
-            size: taxa.len(),
             taxa,
             matrix,
             zero: zero(),
         })
     }
 
-    /// Set the taxa of the matrix
+    /// Replaces the taxon labels without changing matrix dimensions or values.
     pub fn set_taxa(&mut self, taxa: Vec<String>) -> Result<(), MatrixError> {
-        if taxa.len() != self.size {
+        if taxa.len() != self.len() {
             return Err(MatrixError::SizeError {
-                size: self.size,
+                size: self.len(),
                 n_taxa: taxa.len(),
             });
         }
+        Self::validate_taxa(&taxa)?;
         self.taxa = taxa;
         Ok(())
+    }
+
+    /// Returns the number of taxa in the matrix.
+    pub fn len(&self) -> usize {
+        self.taxa.len()
+    }
+
+    /// Returns `true` if the matrix contains no taxa.
+    pub fn is_empty(&self) -> bool {
+        self.taxa.is_empty()
+    }
+
+    /// Returns the taxon labels in matrix order.
+    pub fn taxa(&self) -> &[String] {
+        &self.taxa
+    }
+
+    /// Returns the compact strict lower-triangle storage.
+    pub fn as_slice(&self) -> &[T] {
+        &self.matrix
     }
 
     /// Get numerical index associated to taxon identifier
@@ -187,24 +259,33 @@ where
             .ok_or_else(|| MatrixError::MissingTaxon(id.to_string()))
     }
 
-    /// Get the index in the distance vector for 2 sequences
-    fn get_pair_index(&self, taxon1: &str, taxon2: &str) -> Result<usize, MatrixError> {
-        if taxon1 == taxon2 {
-            return Err(MatrixError::IndexError);
-        }
-
-        let i = self.get_taxa_index(taxon1)?;
-        let j = self.get_taxa_index(taxon2)?;
-
-        self.tril_to_vec_index(i, j)
-    }
-
     // Convert (row,col) matrix index to lower triangular linear index
     fn tril_to_vec_index(&self, i: usize, j: usize) -> Result<usize, MatrixError> {
-        if i == j || i >= self.size || j >= self.size {
+        self.validate_index(i)?;
+        self.validate_index(j)?;
+        if i == j {
             Err(MatrixError::IndexError)
         } else {
-            Ok(tril_to_rowvec_index(self.size, i, j))
+            Ok(tril_to_rowvec_index(self.len(), i, j))
+        }
+    }
+
+    fn validate_index(&self, index: usize) -> Result<(), MatrixError> {
+        if index < self.len() {
+            Ok(())
+        } else {
+            Err(MatrixError::IndexOutOfBounds {
+                index,
+                size: self.len(),
+            })
+        }
+    }
+
+    fn distance_by_index_unchecked(&self, i: usize, j: usize) -> &T {
+        if i == j {
+            &self.zero
+        } else {
+            &self.matrix[tril_to_rowvec_index(self.len(), i, j)]
         }
     }
 
@@ -213,64 +294,80 @@ where
         if k >= self.matrix.len() {
             Err(MatrixError::IndexError)
         } else {
-            Ok(rowvec_to_tril_index(self.size, k))
+            Ok(rowvec_to_tril_index(self.len(), k))
         }
     }
 
-    /// Get the distance between two sequences
+    /// Gets the distance between two taxa by matrix index.
+    pub fn get_by_index(&self, i: usize, j: usize) -> Result<&T, MatrixError> {
+        self.validate_index(i)?;
+        self.validate_index(j)?;
+        Ok(self.distance_by_index_unchecked(i, j))
+    }
+
+    /// Gets the distance between two taxa by label.
     pub fn get(&self, id_1: &str, id_2: &str) -> Result<&T, MatrixError> {
-        if id_1 == id_2 {
-            Ok(&self.zero)
-        } else {
-            let idx = self.get_pair_index(id_1, id_2)?;
-            Ok(&self.matrix[idx])
-        }
+        let i = self.get_taxa_index(id_1)?;
+        let j = self.get_taxa_index(id_2)?;
+        self.get_by_index(i, j)
     }
 
-    /// Set the distance between two sequences
-    pub fn set(&mut self, id_1: &str, id_2: &str, dist: T) -> Result<(), MatrixError> {
-        if id_1 == id_2 {
-            return if dist != self.zero {
-                Err(MatrixError::NonZeroIdenticalDistance)
-            } else {
+    /// Sets the distance between two taxa by matrix index.
+    pub fn set_by_index(&mut self, i: usize, j: usize, dist: T) -> Result<(), MatrixError> {
+        self.validate_index(i)?;
+        self.validate_index(j)?;
+        if i == j {
+            return if dist == self.zero {
                 Ok(())
+            } else {
+                Err(MatrixError::NonZeroIdenticalDistance)
             };
         }
 
-        let idx = self.get_pair_index(id_1, id_2)?;
+        let idx = self.tril_to_vec_index(i, j)?;
         self.matrix[idx] = dist;
         Ok(())
+    }
+
+    /// Sets the distance between two taxa by label.
+    pub fn set(&mut self, id_1: &str, id_2: &str, dist: T) -> Result<(), MatrixError> {
+        let i = self.get_taxa_index(id_1)?;
+        let j = self.get_taxa_index(id_2)?;
+        self.set_by_index(i, j, dist)
     }
 
     /// Get the distance matrix as a HashMap containing taxa pairs as keys
     /// and pairwise distances as values. This contains 2 copies of each distance
     /// (one for each permutation of the pair of names), and diagonal zero entries.
     pub fn to_map(&self) -> HashMap<(String, String), T> {
-        HashMap::from_iter(self.taxa.iter().cartesian_product(self.taxa.iter()).map(
-            |(taxon1, taxon2)| {
+        HashMap::from_iter(self.taxa.iter().enumerate().flat_map(|(i, taxon1)| {
+            self.taxa.iter().enumerate().map(move |(j, taxon2)| {
                 (
                     (taxon1.clone(), taxon2.clone()),
-                    *(self.get(taxon1, taxon2).unwrap()),
+                    *self.distance_by_index_unchecked(i, j),
                 )
-            },
-        ))
+            })
+        }))
     }
 
     /// Outputs a matrix as a phylip formatted string
     pub fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
+        if self.is_empty() {
+            return Ok("0\n".to_owned());
+        }
+
         let body = self
             .taxa
             .iter()
             .enumerate()
             .map(|(i, name)| {
-                let lim = if square { self.size } else { i };
+                let lim = if square { self.len() } else { i };
                 let row_s = (0..lim)
                     .map(|j| {
                         let d = if i == j {
                             zero()
                         } else {
-                            let idx = self.tril_to_vec_index(i, j).unwrap();
-                            self.matrix[idx]
+                            *self.distance_by_index_unchecked(i, j)
                         };
                         format!("{d}")
                     })
@@ -283,7 +380,7 @@ where
             })
             .join("\n");
 
-        Ok(format!("{}\n{body}\n", self.size))
+        Ok(format!("{}\n{body}\n", self.len()))
     }
 
     /// Writes the matrix to a phylip file
@@ -304,7 +401,14 @@ where
         let mut fields = row.split_whitespace();
         let name = fields.next().ok_or(PhylipParseError::EmptyRow(row_num))?;
         let dists = fields
-            .map(|d| d.parse().map_err(|_| PhylipParseError::DistParseError))
+            .enumerate()
+            .map(|(column, d)| {
+                d.parse().map_err(|_| PhylipParseError::DistParseError {
+                    row: row_num + 1,
+                    column: column + 1,
+                    value: d.to_owned(),
+                })
+            })
             .take(if tril { row_num } else { size })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -323,7 +427,7 @@ where
             .map_err(PhylipParseError::SizeParseError)?;
 
         let mut taxa = vec![];
-        let mut max_v = Vec::with_capacity(size * (size - 1) / 2);
+        let mut max_v = Vec::with_capacity(Self::pair_count(size)?);
 
         for (i, line) in lines.enumerate() {
             let (name, dists) = Self::read_phylip_row(line, i, size, true)?;
@@ -343,58 +447,90 @@ where
         Ok(Self::from_precomputed(taxa, max_v)?)
     }
 
-    /// Build a distance matrix from a phylip formatted string, checks that the phylip matrix is
-    /// symmetric
+    /// Builds a distance matrix from a PHYLIP-formatted string.
+    ///
+    /// The parser requires exactly the declared number of rows and exactly the
+    /// expected number of distances in every row. Square matrices must have a
+    /// zero diagonal and exact symmetry. All parsed distances must be finite.
     pub fn from_phylip_strict(phylip: &str, square: bool) -> Result<Self, PhylipParseError<T>> {
         let mut lines = phylip.lines();
         let size = lines
             .next()
             .ok_or(PhylipParseError::EmptyMatrixFile)?
+            .trim()
             .parse()
             .map_err(PhylipParseError::SizeParseError)?;
+        let input_rows: Vec<_> = lines.collect();
 
-        let mut names = vec![];
-        let mut rows = vec![];
-
-        for (i, line) in lines.enumerate() {
-            let (name, dists) = Self::read_phylip_row(line, i, size, false)?;
-
-            if square && dists.len() != size || !square && dists.len() != i {
-                return Err(PhylipParseError::MissingDistance(i + 1));
-            }
-
-            if square && dists[i] != zero() {
-                return Err(PhylipParseError::NonZeroDiagonalValue(name.to_string()));
-            }
-
-            names.push(name);
-            rows.push(dists);
+        if input_rows.len() != size {
+            return Err(PhylipParseError::SizeAndRowsMismatch(
+                input_rows.len(),
+                size,
+            ));
         }
 
-        if names.len() != size {
-            return Err(PhylipParseError::SizeAndRowsMismatch(names.len(), size));
+        let mut names = Vec::with_capacity(size);
+        let mut rows = Vec::with_capacity(size);
+        let mut seen_names = HashMap::with_capacity(size);
+
+        for (row_index, line) in input_rows.into_iter().enumerate() {
+            let mut fields = line.split_whitespace();
+            let name = fields
+                .next()
+                .ok_or(PhylipParseError::EmptyRow(row_index + 1))?;
+            if seen_names.insert(name, row_index).is_some() {
+                return Err(PhylipParseError::DuplicateTaxon(name.to_owned()));
+            }
+
+            let mut distances = Vec::new();
+            for (column_index, value) in fields.enumerate() {
+                let distance =
+                    value
+                        .parse::<T>()
+                        .map_err(|_| PhylipParseError::DistParseError {
+                            row: row_index + 1,
+                            column: column_index + 1,
+                            value: value.to_owned(),
+                        })?;
+                if !distance.is_finite() {
+                    return Err(PhylipParseError::NonFiniteDistance {
+                        row: row_index + 1,
+                        column: column_index + 1,
+                    });
+                }
+                distances.push(distance);
+            }
+
+            let expected = if square { size } else { row_index };
+            if distances.len() < expected {
+                return Err(PhylipParseError::MissingDistance(row_index + 1));
+            }
+            if distances.len() > expected {
+                return Err(PhylipParseError::UnexpectedDistance(row_index + 1));
+            }
+
+            names.push(name.to_owned());
+            rows.push(distances);
         }
 
-        let mut matrix = Self::new_with_size(size)?;
-        matrix.set_taxa(names.iter().map(|v| v.to_string()).collect_vec())?;
-
-        let mut seen = HashSet::new();
-
-        for (n1, row) in names.iter().zip(rows) {
-            for (n2, dist) in names.iter().zip(row) {
-                if seen.contains(&(n2.to_string(), n1.to_string())) {
-                    let known = matrix.get(n1, n2)?;
-                    if *known != dist {
-                        return Err(PhylipParseError::NonSymmetric(*known, dist));
+        if square {
+            for i in 0..size {
+                if rows[i][i] != zero() {
+                    return Err(PhylipParseError::NonZeroDiagonalValue(names[i].clone()));
+                }
+                for (j, previous_row) in rows.iter().enumerate().take(i) {
+                    if rows[i][j] != previous_row[i] {
+                        return Err(PhylipParseError::NonSymmetric(rows[i][j], previous_row[i]));
                     }
-                } else {
-                    seen.insert((n1.to_string(), n2.to_string()));
-                    matrix.set(n1, n2, dist)?;
                 }
             }
         }
 
-        Ok(matrix)
+        let mut compact = Vec::with_capacity(Self::pair_count(size)?);
+        for (i, row) in rows.into_iter().enumerate() {
+            compact.extend(row.into_iter().take(i));
+        }
+        Ok(Self::from_precomputed(names, compact)?)
     }
 
     /// Find smallest distance in the distance matrix as well as the
@@ -470,11 +606,11 @@ where
     pub fn upgma(&self) -> Result<Tree, MatrixError> {
         // Setup
         let mut dm = (*self).clone();
-        let mut card = vec![1; dm.size];
-        //let mut taxa = self.taxa.clone();
-        let mut merged = vec![false; dm.size];
-        let mut heights = vec![0.; dm.size];
-        let mut n_clusters = self.size;
+        let size = self.len();
+        let mut card = vec![1; size];
+        let mut merged = vec![false; size];
+        let mut heights = vec![0.; size];
+        let mut n_clusters = size;
 
         // Build starting star tree
         let mut tree = Tree::new();
@@ -630,16 +766,14 @@ s5    5  10  15
 
     fn build_matrix() -> DistanceMatrix<f32> {
         let names = [("s1", 1.0), ("s2", 2.0), ("s3", 3.0), ("s5", 5.0)];
-        let mut matrix = DistanceMatrix::new_with_size(names.len()).unwrap();
-        matrix
-            .set_taxa(
-                names
-                    .iter()
-                    .cloned()
-                    .map(|(n, _)| n.to_string())
-                    .collect_vec(),
-            )
-            .unwrap();
+        let mut matrix = DistanceMatrix::zeros(
+            names
+                .iter()
+                .cloned()
+                .map(|(n, _)| n.to_string())
+                .collect_vec(),
+        )
+        .unwrap();
 
         for pair in names.iter().combinations(2) {
             let (n1, d1) = pair[0];
@@ -648,6 +782,164 @@ s5    5  10  15
         }
 
         matrix
+    }
+
+    #[test]
+    fn checked_construction_preserves_matrix_invariants() {
+        let empty = DistanceMatrix::<f32>::new(vec![], &[]).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        assert!(empty.taxa().is_empty());
+        assert!(empty.as_slice().is_empty());
+        assert!(empty.to_map().is_empty());
+        assert_eq!(empty.to_phylip(true).unwrap(), "0\n");
+
+        let singleton = DistanceMatrix::<f32>::new(vec!["A".into()], &[]).unwrap();
+        assert_eq!(singleton.len(), 1);
+        assert_eq!(*singleton.get("A", "A").unwrap(), 0.0);
+        assert_eq!(
+            singleton.to_map().get(&("A".into(), "A".into())),
+            Some(&0.0)
+        );
+
+        assert!(matches!(
+            DistanceMatrix::<f32>::new(vec!["A".into(), "B".into()], &[]),
+            Err(MatrixError::DistanceCountMismatch {
+                taxa: 2,
+                expected: 1,
+                actual: 0,
+            })
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::new(vec!["A".into()], &[1.0]),
+            Err(MatrixError::DistanceCountMismatch {
+                taxa: 1,
+                expected: 0,
+                actual: 1,
+            })
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::new(vec!["A".into(), "A".into()], &[1.0]),
+            Err(MatrixError::DuplicateTaxon(taxon)) if taxon == "A"
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::pair_count(usize::MAX),
+            Err(MatrixError::MatrixTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn indexed_and_named_access_validate_inputs() {
+        let mut matrix =
+            DistanceMatrix::<f32>::new(vec!["A".into(), "B".into(), "C".into()], &[1.0, 2.0, 3.0])
+                .unwrap();
+
+        assert_eq!(*matrix.get_by_index(0, 0).unwrap(), 0.0);
+        assert_eq!(*matrix.get_by_index(0, 2).unwrap(), 2.0);
+        assert_eq!(*matrix.get_by_index(2, 0).unwrap(), 2.0);
+        assert!(matches!(
+            matrix.get_by_index(3, 0),
+            Err(MatrixError::IndexOutOfBounds { index: 3, size: 3 })
+        ));
+        assert!(matches!(
+            matrix.get("missing", "missing"),
+            Err(MatrixError::MissingTaxon(taxon)) if taxon == "missing"
+        ));
+
+        matrix.set_by_index(0, 2, 4.0).unwrap();
+        assert_eq!(*matrix.get("A", "C").unwrap(), 4.0);
+        assert_eq!(*matrix.get("C", "A").unwrap(), 4.0);
+        assert!(matches!(
+            matrix.set_by_index(1, 1, 1.0),
+            Err(MatrixError::NonZeroIdenticalDistance)
+        ));
+        assert!(matrix.set_by_index(1, 1, 0.0).is_ok());
+
+        let original_taxa = matrix.taxa().to_vec();
+        assert!(matches!(
+            matrix.set_taxa(vec!["A".into(), "A".into(), "C".into()]),
+            Err(MatrixError::DuplicateTaxon(taxon)) if taxon == "A"
+        ));
+        assert_eq!(matrix.taxa(), original_taxa);
+    }
+
+    #[test]
+    fn to_map_contains_both_directions_and_diagonal_zeroes() {
+        let matrix = DistanceMatrix::<f32>::new(vec!["A".into(), "B".into()], &[2.5]).unwrap();
+        let map = matrix.to_map();
+
+        assert_eq!(map.len(), 4);
+        assert_eq!(map.get(&("A".into(), "A".into())), Some(&0.0));
+        assert_eq!(map.get(&("B".into(), "B".into())), Some(&0.0));
+        assert_eq!(map.get(&("A".into(), "B".into())), Some(&2.5));
+        assert_eq!(map.get(&("B".into(), "A".into())), Some(&2.5));
+    }
+
+    #[test]
+    fn strict_phylip_accepts_empty_and_singleton_matrices() {
+        let empty = DistanceMatrix::<f32>::from_phylip_strict("0\n", true).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.to_phylip(true).unwrap(), "0\n");
+
+        let square = DistanceMatrix::<f32>::from_phylip_strict("1\nA 0\n", true).unwrap();
+        assert_eq!(square.taxa(), &["A"]);
+        assert_eq!(*square.get("A", "A").unwrap(), 0.0);
+
+        let triangle = DistanceMatrix::<f32>::from_phylip_strict("1\nA\n", false).unwrap();
+        assert_eq!(triangle.taxa(), &["A"]);
+        assert_eq!(triangle.to_phylip(false).unwrap(), "1\nA\n");
+    }
+
+    #[test]
+    fn strict_phylip_rejects_wrong_row_and_column_counts() {
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("1\nA 0\nB 0\n", true),
+            Err(PhylipParseError::SizeAndRowsMismatch(2, 1))
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 1\n", true),
+            Err(PhylipParseError::SizeAndRowsMismatch(1, 2))
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0\nB 1 0\n", true),
+            Err(PhylipParseError::MissingDistance(1))
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 1 2\nB 1 0\n", true),
+            Err(PhylipParseError::UnexpectedDistance(1))
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 1 bad\nB 1 0\n", true),
+            Err(PhylipParseError::DistParseError {
+                row: 1,
+                column: 3,
+                ..
+            })
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA\n\n", false),
+            Err(PhylipParseError::EmptyRow(2))
+        ));
+    }
+
+    #[test]
+    fn strict_phylip_rejects_duplicate_nonfinite_and_invalid_square_values() {
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 1\nA 1 0\n", true),
+            Err(PhylipParseError::DuplicateTaxon(taxon)) if taxon == "A"
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 NaN\nB NaN 0\n", true),
+            Err(PhylipParseError::NonFiniteDistance { row: 1, column: 2 })
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 1 2\nB 2 0\n", true),
+            Err(PhylipParseError::NonZeroDiagonalValue(taxon)) if taxon == "A"
+        ));
+        assert!(matches!(
+            DistanceMatrix::<f32>::from_phylip_strict("2\nA 0 1\nB 2 0\n", true),
+            Err(PhylipParseError::NonSymmetric(2.0, 1.0))
+        ));
     }
 
     #[test]

@@ -1358,11 +1358,9 @@ impl Tree {
     /// ```
     pub fn distance_matrix_recursive(&self) -> Result<DistanceMatrix<EdgeLength>, TreeError> {
         let size = self.nodes.len();
-        let mut matrix = DistanceMatrix::new_with_size(self.n_leaves())?;
-        let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
-
         let taxon_index = self.taxon_index()?;
-        matrix.set_taxa(taxon_index.taxa().to_vec())?;
+        let mut matrix = DistanceMatrix::zeros(taxon_index.taxa().to_vec())?;
+        let mut cache: Vec<Vec<_>> = vec![vec![f64::INFINITY; size]; size];
 
         for &tip in self.leaves().iter() {
             self.distance_matrix_recursive_impl(tip, None, &mut cache[tip.index()], 0.0)?
@@ -1402,7 +1400,8 @@ impl Tree {
         leaf_order.sort_by(|&a, &b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
 
         let n = self.n_leaves();
-        let mut pairwise_vec = vec![NaiveSum::zero(); n * (n - 1) / 2];
+        let n_pairs = DistanceMatrix::<f64>::pair_count(n)?;
+        let mut pairwise_vec = vec![NaiveSum::zero(); n_pairs];
 
         let leaf_idx_to_leaf_order = self
             .nodes

@@ -10,6 +10,9 @@
 - Added source-aware Newick parse diagnostics with highlighted error spans.
 - Added an option to name internal nodes in simulated trees
 ### Changed
+- `DistanceMatrix` now preserves its shape and taxon-label invariants by construction: its fields are private, its size is derived from its taxa, `new` validates compact lower-triangle data and returns a `Result`, and `zeros`, `len`, `is_empty`, `taxa`, `as_slice`, `get_by_index`, and `set_by_index` provide checked construction and access.
+- Replaced the `NodeId` type alias with a tree-local newtype, added lossless conversions to and from `usize`, and changed node-ID arguments to be passed by value.
+- Renamed several tree query methods for a more concise and consistent API: `get_root` to `root`, `get_leaves` to `leaves`, `get_leaf_names` to `leaf_names`, `get_subtree` to `subtree`, `get_descendants` to `descendants`, `get_subtree_leaves` to `subtree_leaves`, and `cherries` to `n_cherries`.
 - Tree comparisons now use explicit immutable `BipartitionProfile` values; comparison-related `RefCell` caches were removed from `Tree` and `TreeList`, and taxon-index rebuilding is explicit.
 - `BipartitionProfile` now stores rooted clades and takes a `BipartitionStorage` strategy controlling whether canonical unrooted splits are retained or derived on demand. Robinson–Foulds comparisons now require an explicit `RobinsonFouldsMode`; rooted RF compares clades and unrooted RF compares canonical splits.
 - Newick labels now follow the format specification: quoted labels must use single quotes, and embedded single quotes must be doubled. Double-quoted labels are no longer interpreted as quoted names.
@@ -17,7 +20,9 @@
 - `Node::to_newick` now returns a `Result` so invalid custom Newick serialization options can be reported.
 - Moved all newick parsing and serialization code into private `tree::newick` module.
 ### Fixed
- - Changing sutree-caching from HashMap to VecMap in distance matrix computation (#13 🙏 @krtab)
+- Strict PHYLIP parsing now rejects extra or missing rows and columns, malformed trailing values, duplicate taxa, non-finite distances, non-zero diagonals, and asymmetric square matrices without panicking.
+- Distance-matrix name lookups now validate that a same-name diagonal taxon exists before returning zero.
+- Changing sutree-caching from HashMap to VecMap in distance matrix computation (#13 🙏 @krtab)
 
 ## v0.1.3 - 2024-12-11
 ### Added

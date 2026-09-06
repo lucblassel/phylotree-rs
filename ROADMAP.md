@@ -29,11 +29,11 @@ A beta is ready when:
 
 Relevant code: `src/distance.rs`.
 
-- [ ] Decide whether `to_map` returns all ordered pairs, including diagonal zeroes, or only unique off-diagonal pairs.
-- [ ] Document that representation explicitly.
-- [ ] Remove the internal `unwrap` and implement the selected behavior without panicking.
-- [ ] Add tests for empty, one-taxon, and multi-taxon matrices.
-- [ ] Test diagonal, symmetric, and off-diagonal entries explicitly.
+- [x] Decide whether `to_map` returns all ordered pairs, including diagonal zeroes, or only unique off-diagonal pairs.
+- [x] Document that representation explicitly.
+- [x] Remove the internal `unwrap` and implement the selected behavior without panicking.
+- [x] Add tests for empty, one-taxon, and multi-taxon matrices.
+- [x] Test diagonal, symmetric, and off-diagonal entries explicitly.
 
 **Acceptance criteria**
 
@@ -47,28 +47,28 @@ Relevant code: `src/distance.rs`.
 
 Relevant code: `src/distance.rs`.
 
-- [ ] Reject extra rows before indexing by row number.
-- [ ] Parse complete rows rather than silently truncating extra columns.
-- [ ] Require the exact expected number of values per row.
-- [ ] Reject too few and too many rows.
-- [ ] Reject duplicate taxon labels.
-- [ ] Validate diagonal values in square matrices without unchecked indexing.
-- [ ] Confirm and document whether non-finite values are accepted; preferably reject `NaN` and infinities.
-- [ ] Audit parser code for indexing and `unwrap` calls reachable from malformed input.
+- [x] Reject extra rows before indexing by row number.
+- [x] Parse complete rows rather than silently truncating extra columns.
+- [x] Require the exact expected number of values per row.
+- [x] Reject too few and too many rows.
+- [x] Reject duplicate taxon labels.
+- [x] Validate diagonal values in square matrices without unchecked indexing.
+- [x] Reject non-finite values in strict PHYLIP input.
+- [x] Audit parser code for indexing and `unwrap` calls reachable from malformed input.
 
 **Regression tests**
 
-- [ ] Empty input.
-- [ ] Declared size zero.
-- [ ] Missing rows.
-- [ ] Extra rows.
-- [ ] Missing columns.
-- [ ] Extra columns.
-- [ ] Malformed trailing columns.
-- [ ] Non-zero diagonal.
-- [ ] Asymmetric square matrix.
-- [ ] Duplicate taxon labels.
-- [ ] Non-finite distances.
+- [x] Empty input.
+- [x] Declared size zero.
+- [x] Missing rows.
+- [x] Extra rows.
+- [x] Missing columns.
+- [x] Extra columns.
+- [x] Malformed trailing columns.
+- [x] Non-zero diagonal.
+- [x] Asymmetric square matrix.
+- [x] Duplicate taxon labels.
+- [x] Non-finite distances.
 
 **Acceptance criteria**
 
@@ -101,9 +101,9 @@ Relevant code: `src/lib.rs` and the CLI argument definitions.
 
 Relevant code: `src/distance.rs`.
 
-- [ ] Remove the method from the public API for the beta, hide it behind an explicitly experimental feature, or return a typed unsupported-operation error.
-- [ ] Do not leave `todo!`, `unimplemented!`, or unconditional `panic!` in public safe library methods.
-- [ ] Audit public library methods for input-reachable `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, and `unreachable` calls.
+- [x] Remove the method from the public API for the beta, hide it behind an explicitly experimental feature, or return a typed unsupported-operation error.
+- [x] Do not leave `todo!`, `unimplemented!`, or unconditional `panic!` in public safe library methods.
+- [x] Audit public library methods for input-reachable `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, and `unreachable` calls.
 
 Implementing neighbor joining is not required for this beta roadmap; removing or explicitly hiding the incomplete API is sufficient.
 
@@ -308,27 +308,27 @@ Relevant code: `src/tree/node.rs` and `src/tree/tree_impl.rs`.
 
 Relevant code: `src/tree/mod.rs` and all node-ID call sites.
 
-- [ ] Replace the alias with a small `Copy` newtype.
-- [ ] Keep the inner storage index private where practical.
-- [ ] Implement the traits needed for maps, sets, formatting, and indexing.
-- [ ] Accept `NodeId` by value rather than `&NodeId` in public methods.
-- [ ] Document that IDs are tree-local.
+- [x] Replace the alias with a small `Copy` newtype.
+- [x] Keep the inner storage index private where practical.
+- [x] Implement ordering, hashing, formatting, and lossless `usize` conversion traits, plus an explicit storage-index accessor.
+- [x] Accept `NodeId` by value rather than `&NodeId` in public methods.
+- [x] Document that IDs are tree-local.
 - [ ] Document whether IDs remain stable after prune, compression, and other mutations.
 
 ### 3.3 Make `DistanceMatrix` states valid by construction
 
 Relevant code: `src/distance.rs`.
 
-- [ ] Make `size` and `taxa` private.
-- [ ] Expose `len`, `is_empty`, and `taxa` accessors.
-- [ ] Replace unchecked public construction with a checked constructor returning `Result`.
-- [ ] Validate compact matrix length against `n * (n - 1) / 2`.
-- [ ] Handle sizes zero and one without underflow.
-- [ ] Use checked arithmetic for compact storage size.
-- [ ] Reject duplicate taxon labels.
-- [ ] Validate taxon existence before returning a same-taxon distance of zero.
-- [ ] Add index-based accessors so algorithms do not repeatedly scan names.
-- [ ] Keep any unchecked constructor private and name it explicitly.
+- [x] Remove the redundant stored `size` field and make `taxa` private.
+- [x] Expose `len`, `is_empty`, and `taxa` accessors.
+- [x] Replace unchecked public construction with a checked constructor returning `Result`.
+- [x] Validate compact matrix length against `n * (n - 1) / 2`.
+- [x] Handle sizes zero and one without underflow.
+- [x] Use checked arithmetic for compact storage size.
+- [x] Reject duplicate taxon labels.
+- [x] Validate taxon existence before returning a same-taxon distance of zero.
+- [x] Add index-based accessors so algorithms do not repeatedly scan names.
+- [x] Keep compact construction checked internally; no unchecked constructor is exposed.
 
 **Acceptance criteria**
 
