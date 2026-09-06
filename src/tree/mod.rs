@@ -15,8 +15,6 @@ mod taxon_index;
 mod tree_impl;
 mod tree_list;
 
-use tinytemplate::format;
-
 pub use self::bipartition::{BipartitionProfile, RobinsonFouldsMode};
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
@@ -28,20 +26,47 @@ pub use self::taxon_index::TaxonIndex;
 pub use self::tree_impl::{Comparison, Tree, TreeError};
 pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListError};
 
-/// A type that represents Identifiers of [`Node`] objects
-/// within phylogenetic [`Tree`] object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// An identifier for a [`Node`] within a phylogenetic [`Tree`].
+///
+/// Node IDs are local to the tree that created them. Use [`NodeId::index`] when
+/// an underlying storage index is required, or the [`From`] conversions to move
+/// between `NodeId` and [`usize`].
+///
+/// ```
+/// use phylotree::tree::NodeId;
+///
+/// let id = NodeId::from(3);
+/// assert_eq!(id.index(), 3);
+/// assert_eq!(usize::from(id), 3);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(usize);
 
+impl NodeId {
+    /// Returns the underlying storage index.
+    #[inline]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
 impl From<usize> for NodeId {
+    #[inline]
     fn from(value: usize) -> Self {
         Self(value)
     }
 }
 
+impl From<NodeId> for usize {
+    #[inline]
+    fn from(value: NodeId) -> Self {
+        value.index()
+    }
+}
+
 impl std::fmt::Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        self.index().fmt(f)
     }
 }
 /// A type that represents branch lengths between [`Node`] objects

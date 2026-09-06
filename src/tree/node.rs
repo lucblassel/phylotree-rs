@@ -178,7 +178,7 @@ impl Node {
             None => {
                 return Err(NodeError::HasNoChild {
                     parent: self.id,
-                    child: child,
+                    child,
                 })
             }
         };

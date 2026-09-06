@@ -74,16 +74,16 @@ pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
     let mut t = vec![0.; tree.size()];
     let mut x = vec![(0., 0.); tree.size()];
 
-    let root = tree.get_root()?;
+    let root = tree.root()?;
 
     // Get subtree sizes
     for &v in tree.postorder(root)?.iter() {
         let node = tree.get(v)?;
         if node.is_tip() {
-            l[v.0] = 1_f64
+            l[v.index()] = 1_f64
         } else {
             for w_ in node.children.iter() {
-                l[v.0] += l[w_.0];
+                l[v.index()] += l[w_.index()];
             }
         }
     }
@@ -97,18 +97,18 @@ pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
                 .parent
                 .ok_or(TreeError::from(NodeError::HasNoParent(v)))?;
 
-            x[v.0] = (
-                x[u.0].0 + d * f64::cos(t[v.0] + w[v.0] / 2.),
-                x[u.0].1 + d * f64::sin(t[v.0] + w[v.0] / 2.),
+            x[v.index()] = (
+                x[u.index()].0 + d * f64::cos(t[v.index()] + w[v.index()] / 2.),
+                x[u.index()].1 + d * f64::sin(t[v.index()] + w[v.index()] / 2.),
             );
         }
 
-        let mut n = t[v.0];
+        let mut n = t[v.index()];
 
         for w_ in node.children.iter() {
-            w[w_.0] = (l[w_.0] * 2. * PI) / l[root.0];
-            t[w_.0] = n;
-            n += w[w_.0];
+            w[w_.index()] = (l[w_.index()] * 2. * PI) / l[root.index()];
+            t[w_.index()] = n;
+            n += w[w_.index()];
         }
     }
 
@@ -121,8 +121,8 @@ pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
             .ok_or(TreeError::from(NodeError::HasNoParent(v)))?;
         let name = tree.get(v)?.name.clone();
 
-        let line_start = x[u.0];
-        let line_end = x[v.0];
+        let line_start = x[u.index()];
+        let line_end = x[v.index()];
 
         layout.branches.push(Branch {
             xstart: line_start.0,

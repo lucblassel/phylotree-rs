@@ -313,7 +313,7 @@ where
 
     /// Build a distance matrix from the lower triangle of a phylip file.
     /// Does not enforce symmetry in the phylip file, it should be faster than
-    /// [from_phylip_strict]. Also does not check if all the rows are the same size
+    /// [`DistanceMatrix::from_phylip_strict`]. Also does not check if all the rows are the same size
     pub fn from_phylip_tril(phylip: &str) -> Result<Self, PhylipParseError<T>> {
         let mut lines = phylip.lines();
         let size: usize = lines

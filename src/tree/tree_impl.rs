@@ -190,7 +190,7 @@ impl Tree {
         parent: NodeId,
         edge: Option<EdgeLength>,
     ) -> Result<NodeId, TreeError> {
-        if parent.0 >= self.nodes.len() {
+        if parent.index() >= self.nodes.len() {
             return Err(TreeError::NodeNotFound(parent));
         }
 
@@ -209,10 +209,10 @@ impl Tree {
 
     /// Get a reference to a specific Node of the tree
     pub fn get(&self, id: NodeId) -> Result<&Node, TreeError> {
-        if id.0 >= self.nodes.len() {
+        if id.index() >= self.nodes.len() {
             return Err(TreeError::NodeNotFound(id));
         }
-        let node = &self.nodes[id.0];
+        let node = &self.nodes[id.index()];
         if node.deleted {
             return Err(TreeError::NodeNotFound(id));
         }
@@ -222,11 +222,11 @@ impl Tree {
 
     /// Get a mutable reference to a specific Node of the tree
     pub fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, TreeError> {
-        if id.0 >= self.nodes.len() || self.nodes[id.0].deleted {
+        if id.index() >= self.nodes.len() || self.nodes[id.index()].deleted {
             return Err(TreeError::NodeNotFound(id));
         }
         self.reset_bipartition_cache();
-        Ok(&mut self.nodes[id.0])
+        Ok(&mut self.nodes[id.index()])
     }
 
     /// Get a reference to a node in the tree by name.
@@ -285,7 +285,7 @@ impl Tree {
 
     /// Gets the root node. In the case of unrooted trees this node is a "virtual root"
     /// that has exactly 3 children.
-    pub fn get_root(&self) -> Result<NodeId, TreeError> {
+    pub fn root(&self) -> Result<NodeId, TreeError> {
         self.nodes
             .iter()
             .filter(|&node| node.parent.is_none())
@@ -303,9 +303,9 @@ impl Tree {
     /// let left = tree.add_child(Node::new(), root_idx, None).unwrap();
     /// let right = tree.add_child(Node::new(), root_idx, None).unwrap();
     ///
-    /// assert_eq!(tree.get_leaves(), vec![left, right]);
+    /// assert_eq!(tree.leaves(), vec![left, right]);
     /// ```
-    pub fn get_leaves(&self) -> Vec<NodeId> {
+    pub fn leaves(&self) -> Vec<NodeId> {
         self.nodes
             .iter()
             .filter(|&node| !node.deleted && node.is_tip())
@@ -322,14 +322,14 @@ impl Tree {
     /// let _ = tree.add_child(Node::new_named("left"), root_idx, None).unwrap();
     /// let _ = tree.add_child(Node::new_named("right"), root_idx, None).unwrap();
     ///
-    /// let names: Vec<_> = tree.get_leaf_names()
+    /// let names: Vec<_> = tree.leaf_names()
     ///     .into_iter()
     ///     .flatten()
     ///     .collect();
     /// assert_eq!(names, vec!["left", "right"]);
     /// ```
-    pub fn get_leaf_names(&self) -> Vec<Option<String>> {
-        self.get_leaves()
+    pub fn leaf_names(&self) -> Vec<Option<String>> {
+        self.leaves()
             .iter()
             .map(|leaf_id| self.get(*leaf_id).unwrap().name.clone())
             .collect()
@@ -341,7 +341,7 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let subtree: Vec<_> = tree.get_subtree(sub_root.id)
+    /// let subtree: Vec<_> = tree.subtree(sub_root.id)
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -350,11 +350,11 @@ impl Tree {
     ///
     /// assert_eq!(subtree, vec!["E", "C", "D"])
     /// ```
-    pub fn get_subtree(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
+    pub fn subtree(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![root];
 
         for child in self.get(root)?.children.iter() {
-            indices.extend(self.get_subtree(*child)?);
+            indices.extend(self.subtree(*child)?);
         }
 
         Ok(indices)
@@ -366,7 +366,7 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let subtree: Vec<_> = tree.get_descendants(sub_root.id)
+    /// let subtree: Vec<_> = tree.descendants(sub_root.id)
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -375,11 +375,11 @@ impl Tree {
     ///
     /// assert_eq!(subtree, vec!["C", "D"])
     /// ```
-    pub fn get_descendants(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
+    pub fn descendants(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut indices = vec![];
 
         for child in self.get(root)?.children.iter() {
-            indices.extend(self.get_subtree(*child)?);
+            indices.extend(self.subtree(*child)?);
         }
 
         Ok(indices)
@@ -391,7 +391,7 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let sub_leaves: Vec<_> = tree.get_subtree_leaves(sub_root.id)
+    /// let sub_leaves: Vec<_> = tree.subtree_leaves(sub_root.id)
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -400,9 +400,9 @@ impl Tree {
     ///
     /// assert_eq!(sub_leaves, vec!["C", "D"])
     /// ```
-    pub fn get_subtree_leaves(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
+    pub fn subtree_leaves(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
         Ok(self
-            .get_subtree(root)?
+            .subtree(root)?
             .into_iter()
             .filter(|id| self.get(*id).unwrap().is_tip())
             .collect())
@@ -424,7 +424,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let preorder: Vec<_> = tree.preorder(tree.get_root().unwrap())
+    /// let preorder: Vec<_> = tree.preorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -448,7 +448,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let postorder: Vec<_> = tree.postorder(tree.get_root().unwrap())
+    /// let postorder: Vec<_> = tree.postorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -474,7 +474,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let inorder: Vec<_> = tree.inorder(tree.get_root().unwrap())
+    /// let inorder: Vec<_> = tree.inorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -517,7 +517,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let levelorder: Vec<_> = tree.levelorder(tree.get_root().unwrap())
+    /// let levelorder: Vec<_> = tree.levelorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name.clone())
@@ -571,7 +571,7 @@ impl Tree {
 
     /// Checks if the tree is rooted (i.e. the root node exists and has exactly 2 children)
     pub fn is_rooted(&self) -> Result<bool, TreeError> {
-        let root_id = self.get_root()?;
+        let root_id = self.root()?;
 
         Ok(!self.nodes.is_empty() && self.get(root_id)?.children.len() == 2)
     }
@@ -579,7 +579,7 @@ impl Tree {
     /// Checks if all the tips have unique names (This check assumes that all tips have a name)
     pub fn has_unique_tip_names(&self) -> Result<bool, TreeError> {
         let mut names = HashSet::new();
-        for name in self.get_leaf_names() {
+        for name in self.leaf_names() {
             if let Some(name) = name {
                 names.insert(name);
             } else {
@@ -616,9 +616,9 @@ impl Tree {
             return Err(TreeError::IsNotRooted);
         }
 
-        let root = self.get_root()?;
+        let root = self.root()?;
 
-        self.get_leaves()
+        self.leaves()
             .iter()
             .map(|&leaf| {
                 let (edge_sum, num_edges) = self.get_distance(root, leaf).unwrap();
@@ -643,7 +643,7 @@ impl Tree {
     /// assert_eq!(tree_no_brlen.diameter().unwrap(), 3.);
     /// ```
     pub fn diameter(&self) -> Result<EdgeLength, TreeError> {
-        self.get_leaves()
+        self.leaves()
             .iter()
             .combinations(2)
             .map(|pair| {
@@ -690,7 +690,7 @@ impl Tree {
     }
 
     /// Computes the number of cherries in a tree
-    pub fn cherries(&self) -> Result<usize, TreeError> {
+    pub fn n_cherries(&self) -> Result<usize, TreeError> {
         if !self.is_binary()? {
             return Err(TreeError::IsNotBinary);
         }
@@ -725,9 +725,9 @@ impl Tree {
         let mut colless = 0;
 
         for node in self.nodes.iter().filter(|node| !node.is_tip()) {
-            let left = self.get_subtree_leaves(node.children[0])?.len();
+            let left = self.subtree_leaves(node.children[0])?.len();
             let right = if node.children.len() > 1 {
-                self.get_subtree_leaves(node.children[1])?.len()
+                self.subtree_leaves(node.children[1])?.len()
             } else {
                 0
             };
@@ -774,7 +774,7 @@ impl Tree {
         self.check_rooted_binary()?;
 
         Ok(self
-            .get_leaves()
+            .leaves()
             .iter()
             .map(|&tip_idx| self.get(tip_idx).unwrap().depth)
             .sum())
@@ -826,12 +826,7 @@ impl Tree {
             return Err(TreeError::DuplicateLeafNames);
         }
 
-        let taxa = self
-            .get_leaf_names()
-            .into_iter()
-            .flatten()
-            .sorted()
-            .collect();
+        let taxa = self.leaf_names().into_iter().flatten().sorted().collect();
         Ok(TaxonIndex::from_sorted_taxa(taxa))
     }
 
@@ -1169,7 +1164,7 @@ impl Tree {
             return Err(TreeError::DuplicateLeafNames);
         }
 
-        Ok(HashMap::from_iter(self.get_leaves().iter().map(|&idx| {
+        Ok(HashMap::from_iter(self.leaves().iter().map(|&idx| {
             let node = self.get(idx).unwrap();
             (node.name.clone().unwrap(), (node.depth, node.parent_edge))
         })))
@@ -1312,7 +1307,7 @@ impl Tree {
         currlength: f64,
     ) -> Result<(), TreeError> {
         if prev.is_some() && self.get(current)?.is_tip() {
-            lengths[current.0] = currlength;
+            lengths[current.index()] = currlength;
             return Ok(());
         }
 
@@ -1369,13 +1364,13 @@ impl Tree {
         let taxon_index = self.taxon_index()?;
         matrix.set_taxa(taxon_index.taxa().to_vec())?;
 
-        for &tip in self.get_leaves().iter() {
-            self.distance_matrix_recursive_impl(tip, None, &mut cache[tip.0], 0.0)?
+        for &tip in self.leaves().iter() {
+            self.distance_matrix_recursive_impl(tip, None, &mut cache[tip.index()], 0.0)?
         }
 
-        for pair in self.get_leaves().iter().combinations(2) {
+        for pair in self.leaves().iter().combinations(2) {
             let (&i1, &i2) = (pair[0], pair[1]);
-            let d = cache[i1.0][i2.0];
+            let d = cache[i1.index()][i2.index()];
             let name1 = self.get(i1)?.name.clone().unwrap();
             let name2 = self.get(i2)?.name.clone().unwrap();
 
@@ -1403,7 +1398,7 @@ impl Tree {
     /// assert_eq!(phylip, matrix.to_phylip(true).unwrap())
     /// ```
     pub fn distance_matrix(&self) -> Result<DistanceMatrix<f64>, TreeError> {
-        let mut leaf_order = self.get_leaves();
+        let mut leaf_order = self.leaves();
         leaf_order.sort_by(|&a, &b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
 
         let n = self.n_leaves();
@@ -1418,15 +1413,15 @@ impl Tree {
 
         // Converts the node index of a leaf to its index in the leaf_order array
         let get_leaf_index = |leaf: NodeId| -> Result<usize, TreeError> {
-            leaf_idx_to_leaf_order[leaf.0].ok_or(TreeError::NodeNotFound(leaf))
+            leaf_idx_to_leaf_order[leaf.index()].ok_or(TreeError::NodeNotFound(leaf))
         };
 
-        for &current_node in self.levelorder(self.get_root()?)?.iter().rev() {
+        for &current_node in self.levelorder(self.root()?)?.iter().rev() {
             let mut node_cache = VecMap::new();
 
             let parent = self.get(current_node)?;
             if parent.is_tip() {
-                node_cache.insert(current_node.0, 0.);
+                node_cache.insert(current_node.index(), 0.);
             }
 
             // Compute distances from current node to descendant leaves
@@ -1668,14 +1663,15 @@ impl Tree {
     /// ```
     pub fn ladderize(&mut self) -> Result<(), TreeError> {
         let mut descendant_counter = vec![0; self.nodes.len()];
-        let root = self.get_root()?;
+        let root = self.root()?;
         // Go from tips to root
         for node_id in self.levelorder(root)?.into_iter().rev() {
             let node = self.get_mut(node_id)?;
             for child in node.children.iter() {
-                descendant_counter[node_id.0] += descendant_counter[child.0] + 1;
+                descendant_counter[node_id.index()] += descendant_counter[child.index()] + 1;
             }
-            node.children.sort_by_key(|v| descendant_counter[v.0]);
+            node.children
+                .sort_by_key(|node_id| descendant_counter[node_id.index()]);
         }
 
         Ok(())
@@ -1695,7 +1691,7 @@ impl Tree {
 
     /// Recompute node depths and set them correctly.
     pub fn reset_depths(&mut self) -> Result<(), TreeError> {
-        let root = self.get_root()?;
+        let root = self.root()?;
         self.reset_depth_impl(root, 0)
     }
 
@@ -1858,7 +1854,7 @@ impl Tree {
     ///     ..Default::default()
     /// };
     /// let tree = Tree::from_newick_with_options("(A,B)95;", options).unwrap();
-    /// let root = tree.get_root().unwrap();
+    /// let root = tree.root().unwrap();
     ///
     /// assert_eq!(tree.get(root).unwrap().support, Some(95.0));
     /// ```
@@ -1956,7 +1952,7 @@ END;
     /// Print a debug view of the tree to the console
     #[cfg(not(target_arch = "wasm32"))]
     pub fn print_debug(&self) -> Result<(), TreeError> {
-        let root = self.get_root()?;
+        let root = self.root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));
         for &child_idx in self.get(root)?.children.iter() {
             self.print_nodes(child_idx, &mut builder, true)?;
@@ -1969,7 +1965,7 @@ END;
     /// Print the tree to the console
     #[cfg(not(target_arch = "wasm32"))]
     pub fn print(&self) -> Result<(), TreeError> {
-        let root = self.get_root()?;
+        let root = self.root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));
         for &child_idx in self.get(root)?.children.iter() {
             self.print_nodes(child_idx, &mut builder, false)?;
@@ -2053,7 +2049,7 @@ mod tests {
     fn test_tips() {
         let mut tree = Tree::new();
         tree.add(Node::new_named("root"));
-        assert_eq!(tree.get_leaves(), vec![NodeId(0)]);
+        assert_eq!(tree.leaves(), vec![NodeId(0)]);
 
         tree.add_child(Node::new_named("A"), NodeId(0), Some(0.1))
             .unwrap(); // 1
@@ -2062,14 +2058,14 @@ mod tests {
         tree.add_child(Node::new_named("E"), NodeId(0), Some(0.5))
             .unwrap(); // 3
 
-        assert_eq!(tree.get_leaves(), node_ids_from_usize(&vec![1, 2, 3]));
+        assert_eq!(tree.leaves(), node_ids_from_usize(&[1, 2, 3]));
 
         tree.add_child(Node::new_named("C"), NodeId(3), Some(0.3))
             .unwrap(); // 4
         tree.add_child(Node::new_named("D"), NodeId(3), Some(0.4))
             .unwrap(); // 5
 
-        assert_eq!(tree.get_leaves(), node_ids_from_usize(&vec![1, 2, 4, 5]));
+        assert_eq!(tree.leaves(), node_ids_from_usize(&[1, 2, 4, 5]));
     }
 
     #[test]
@@ -2188,7 +2184,7 @@ mod tests {
     #[test]
     fn get_correct_leaves() {
         let tree = build_simple_tree().unwrap();
-        let values: Vec<_> = get_values(&(tree.get_leaves()), &tree)
+        let values: Vec<_> = get_values(&(tree.leaves()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -2276,7 +2272,7 @@ mod tests {
             support_comments: crate::tree::SupportCommentMode::Nhx,
         };
         let tree = Tree::from_newick_with_options("((A,B)95,C)[&&NHX:B=99];", options).unwrap();
-        let root_id = tree.get_root().unwrap();
+        let root_id = tree.root().unwrap();
         let root = tree.get(root_id).unwrap();
         let inner = tree.get(root.children[0]).unwrap();
 
@@ -2326,11 +2322,10 @@ mod tests {
 
         for (newick, root, leaves) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
-            let sub_leaves: Vec<String> =
-                get_values(&tree.get_subtree_leaves(root).unwrap(), &tree)
-                    .iter()
-                    .map(|v| v.clone().unwrap())
-                    .collect();
+            let sub_leaves: Vec<String> = get_values(&tree.subtree_leaves(root).unwrap(), &tree)
+                .iter()
+                .map(|v| v.clone().unwrap())
+                .collect();
 
             assert_eq!(sub_leaves, leaves);
         }
@@ -2384,7 +2379,7 @@ mod tests {
 
         for (newick, true_cherries) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
-            let cherries = tree.cherries();
+            let cherries = tree.n_cherries();
             assert!(cherries.is_ok());
             assert_eq!(cherries.unwrap(), true_cherries);
         }
@@ -2400,8 +2395,8 @@ mod tests {
         dbg!(&tree);
 
         for node in tree.nodes.iter().filter(|node| !node.is_tip()) {
-            let left = tree.get_subtree_leaves(node.children[0]).unwrap();
-            let right = tree.get_subtree_leaves(node.children[1]).unwrap();
+            let left = tree.subtree_leaves(node.children[0]).unwrap();
+            let right = tree.subtree_leaves(node.children[1]).unwrap();
             eprintln!("Node {:?}:", node.name.clone().unwrap());
             eprintln!(
                 "\tLeft: {:?}",
@@ -2539,12 +2534,12 @@ mod tests {
         let tree = build_simple_tree().unwrap();
         eprintln!("{}", tree.to_newick().unwrap());
         dbg!(&tree);
-        let descendants_b: Vec<_> = get_values(&tree.get_descendants(NodeId(1)).unwrap(), &tree)
+        let descendants_b: Vec<_> = get_values(&tree.descendants(NodeId(1)).unwrap(), &tree)
             .into_iter()
             .flatten()
             .sorted()
             .collect();
-        let descendants_g: Vec<_> = get_values(&tree.get_descendants(NodeId(2)).unwrap(), &tree)
+        let descendants_g: Vec<_> = get_values(&tree.descendants(NodeId(2)).unwrap(), &tree)
             .into_iter()
             .flatten()
             .sorted()
@@ -3237,7 +3232,7 @@ mod tests_ete3_operations {
     #[test]
     fn traversals() {
         let tree = Tree::from_newick("((3,4)2,(6,7)5)1;").unwrap();
-        let root = tree.get_root().unwrap();
+        let root = tree.root().unwrap();
 
         let postorder = "3426751";
         let preorder = "1234567";

@@ -88,7 +88,7 @@ fn print_stats(path: &Path, tree: &Tree, name: bool) {
         tree.n_leaves(),
         to_repr(tree.is_rooted()),
         to_repr(tree.is_binary()),
-        to_repr(tree.cherries()),
+        to_repr(tree.n_cherries()),
         to_repr(tree.colless()),
         to_repr(tree.sackin()),
     )
@@ -119,7 +119,7 @@ fn main() {
 
                 if internal_names {
                     // Rename root
-                    let root = tree.get_root()?;
+                    let root = tree.root()?;
 
                     let mut c = 0;
                     for id in tree.preorder(root)? {
@@ -225,7 +225,7 @@ fn main() {
         } => {
             let mut tree = read_tree(&tree);
             let mut n = 0;
-            for &node_idx in tree.preorder(tree.get_root().unwrap()).unwrap().iter() {
+            for &node_idx in tree.preorder(tree.root().unwrap()).unwrap().iter() {
                 let node = tree.get_mut(node_idx).unwrap();
                 if exclude_tips && node.is_tip() {
                     continue;
@@ -387,7 +387,7 @@ fn main() {
             let mut pruned = false;
             while !pruned {
                 pruned = true;
-                for leaf_idx in tree.get_leaves() {
+                for leaf_idx in tree.leaves() {
                     let leaf = tree.get(leaf_idx).unwrap();
                     let unnamed = leaf.name.is_none();
                     if unnamed {

@@ -78,7 +78,7 @@
 //!
 //! let newick_str = "((A,B)C,(D,E)F)G;";
 //! let mut tree = Tree::from_newick(newick_str).unwrap();
-//! let root = tree.get_root().unwrap();
+//! let root = tree.root().unwrap();
 //!
 //! let preorder: Vec<_> = tree.preorder(root).unwrap()
 //!     .iter()
@@ -273,7 +273,7 @@ pub fn generate_yule(
     }
 
     // Assign names to tips
-    for (i, tip_idx) in tree.get_leaves().iter().cloned().enumerate() {
+    for (i, tip_idx) in tree.leaves().iter().cloned().enumerate() {
         tree.get_mut(tip_idx)?.set_name(format!("Tip_{i}"));
     }
 
@@ -303,11 +303,7 @@ pub fn generate_caterpillar(
         if i == n_leaves - 1 {
             // Adding tip
             tree.add_child(Node::new_named(&format!("Tip_{i}")), parent, l1)?;
-            tree.add_child(
-                Node::new_named(&format!("Tip_{}", i + 1)),
-                parent.into(),
-                l2,
-            )?;
+            tree.add_child(Node::new_named(&format!("Tip_{}", i + 1)), parent, l2)?;
         } else {
             // Adding parent node
             parent = tree.add_child(Node::new(), parent, l1)?;

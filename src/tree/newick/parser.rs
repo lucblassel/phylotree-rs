@@ -243,8 +243,8 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
 
         if let Some(parent_id) = parent {
             node.set_parent(parent_id, None);
-            node.set_depth(self.nodes[parent_id.0].get_depth() + 1);
-            self.nodes[parent_id.0].add_child(id, None);
+            node.set_depth(self.nodes[parent_id.index()].get_depth() + 1);
+            self.nodes[parent_id.index()].add_child(id, None);
         }
 
         self.nodes.push(node);
@@ -265,7 +265,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
     }
 
     fn set_name(&mut self, node: NodeId, name: String) {
-        self.nodes[node.0].set_name(name);
+        self.nodes[node.index()].set_name(name);
     }
 
     fn set_unquoted_label(
@@ -274,7 +274,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         label: String,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if self.nodes[node.0].is_tip()
+        if self.nodes[node.index()].is_tip()
             || self.options.internal_node_labels == InternalNodeLabelMode::Name
         {
             self.set_name(node, label);
@@ -299,7 +299,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         support: f64,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if let Some(existing) = self.nodes[node.0].support {
+        if let Some(existing) = self.nodes[node.index()].support {
             if existing != support {
                 return Err(NewickParseError::ConflictingSupportValues {
                     existing,
@@ -308,15 +308,15 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                 });
             }
         } else {
-            self.nodes[node.0].support = Some(support);
+            self.nodes[node.index()].support = Some(support);
         }
         Ok(())
     }
 
     fn set_branch_length(&mut self, node: NodeId, length: f64) {
-        self.nodes[node.0].parent_edge = Some(length);
-        if let Some(parent) = self.nodes[node.0].parent {
-            self.nodes[parent.0].set_child_edge(node, Some(length));
+        self.nodes[node.index()].parent_edge = Some(length);
+        if let Some(parent) = self.nodes[node.index()].parent {
+            self.nodes[parent.index()].set_child_edge(node, Some(length));
         }
     }
 
@@ -326,7 +326,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         comment: &str,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if !self.nodes[node.0].is_tip() {
+        if !self.nodes[node.index()].is_tip() {
             if let Some(input) = self.options.support_comments.support_value(comment) {
                 let support =
                     input
@@ -339,9 +339,9 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
             }
         }
 
-        match &mut self.nodes[node.0].comment {
+        match &mut self.nodes[node.index()].comment {
             Some(current) => current.push_str(comment),
-            None => self.nodes[node.0].comment = Some(comment.to_owned()),
+            None => self.nodes[node.index()].comment = Some(comment.to_owned()),
         }
         Ok(())
     }
@@ -410,21 +410,25 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         let node = self.current_node_for_attribute(token.span)?;
         match &token.token {
             NewickToken::UnquotedString(label) => {
-                if self.nodes[node.0].name.is_some() || self.nodes[node.0].parent_edge.is_some() {
+                if self.nodes[node.index()].name.is_some()
+                    || self.nodes[node.index()].parent_edge.is_some()
+                {
                     return Err(Self::unexpected(token, "a delimiter or branch length"));
                 }
                 self.set_unquoted_label(node, label.clone(), token.span)?;
                 Ok(false)
             }
             NewickToken::QuotedString(name) => {
-                if self.nodes[node.0].name.is_some() || self.nodes[node.0].parent_edge.is_some() {
+                if self.nodes[node.index()].name.is_some()
+                    || self.nodes[node.index()].parent_edge.is_some()
+                {
                     return Err(Self::unexpected(token, "a delimiter or branch length"));
                 }
                 self.set_name(node, name.clone());
                 Ok(false)
             }
             NewickToken::Colon => {
-                if self.nodes[node.0].parent_edge.is_some() {
+                if self.nodes[node.index()].parent_edge.is_some() {
                     return Err(Self::unexpected(token, "a delimiter"));
                 }
                 self.state = ParserState::BranchLength;

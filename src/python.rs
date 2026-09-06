@@ -112,7 +112,7 @@ impl Tree {
     }
 
     fn n_cherries(&self) -> Result<usize, TreeError> {
-        let cherries = self.tree.cherries()?;
+        let cherries = self.tree.n_cherries()?;
         Ok(cherries)
     }
 
@@ -157,11 +157,11 @@ impl Tree {
 
     fn get_name_index(&self, name: &str) -> Option<usize> {
         let node = self.tree.get_by_name(name);
-        node.map(|n| n.id)
+        node.map(|n| n.id.into())
     }
 
     fn prune(&mut self, root: usize) -> Result<(), TreeError> {
-        self.tree.prune(&root)?;
+        self.tree.prune(root.into())?;
         Ok(())
     }
 
@@ -175,44 +175,44 @@ impl Tree {
         source: usize,
         target: usize,
     ) -> Result<(Option<f64>, usize), TreeError> {
-        let dist = self.tree.get_distance(&source, &target)?;
+        let dist = self.tree.get_distance(source.into(), target.into())?;
         Ok(dist)
     }
 
     fn get_root_id(&self) -> Result<usize, TreeError> {
-        let id = self.tree.get_root()?;
-        Ok(id)
+        let id = self.tree.root()?;
+        Ok(id.into())
     }
 
     fn inorder(&self, root: usize) -> Result<Vec<usize>, TreeError> {
-        let traversal = self.tree.inorder(&root)?;
-        Ok(traversal)
+        let traversal = self.tree.inorder(root.into())?;
+        Ok(traversal.into_iter().map(Into::into).collect())
     }
 
     fn postorder(&self, root: usize) -> Result<Vec<usize>, TreeError> {
-        let traversal = self.tree.postorder(&root)?;
-        Ok(traversal)
+        let traversal = self.tree.postorder(root.into())?;
+        Ok(traversal.into_iter().map(Into::into).collect())
     }
 
     fn preorder(&self, root: usize) -> Result<Vec<usize>, TreeError> {
-        let traversal = self.tree.preorder(&root)?;
-        Ok(traversal)
+        let traversal = self.tree.preorder(root.into())?;
+        Ok(traversal.into_iter().map(Into::into).collect())
     }
 
     fn levelorder(&self, root: usize) -> Result<Vec<usize>, TreeError> {
-        let traversal = self.tree.levelorder(&root)?;
-        Ok(traversal)
+        let traversal = self.tree.levelorder(root.into())?;
+        Ok(traversal.into_iter().map(Into::into).collect())
     }
 
     fn get_leaf_names(&self) -> Vec<Option<String>> {
-        self.tree.get_leaf_names()
+        self.tree.leaf_names()
     }
 
     fn get_node_attributes(&self, id: usize, py: Python) -> Result<PyObject, TreeError> {
-        let node = self.tree.get(&id)?;
+        let node = self.tree.get(id.into())?;
         let name = node.name.clone();
-        let parent: Option<usize> = node.parent.clone();
-        let children: Vec<usize> = node.children.clone();
+        let parent: Option<usize> = node.parent.map(Into::into);
+        let children: Vec<usize> = node.children.iter().copied().map(Into::into).collect();
         let parent_edge: Option<f64> = node.parent_edge.clone();
         let comment: Option<String> = node.comment.clone();
 

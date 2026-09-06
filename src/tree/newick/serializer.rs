@@ -235,7 +235,7 @@ impl<'a> NewickSerializer<'a> {
     /// Serializes the complete tree, including the terminating semicolon.
     pub(crate) fn serialize(&self) -> Result<String, TreeError> {
         self.validate()?;
-        let root = self.tree.get_root()?;
+        let root = self.tree.root()?;
         let mut output = self.serialize_subtree(root)?;
         output.push(';');
         Ok(output)

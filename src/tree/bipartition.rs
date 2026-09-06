@@ -64,7 +64,7 @@ impl BipartitionProfile {
     /// ```
     pub fn from_tree(tree: &Tree) -> Result<Self, TreeError> {
         let taxon_index = tree.taxon_index()?;
-        let root = tree.get_root()?;
+        let root = tree.root()?;
         let mut clades = ProfileMap::new();
         let mut descendant_taxa: HashMap<NodeId, Partition> = HashMap::new();
 
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn profile_creation_does_not_populate_an_invalidated_tree_cache() {
         let mut tree = Tree::from_newick("((A,B),C);").unwrap();
-        let root = tree.get_root().unwrap();
+        let root = tree.root().unwrap();
         tree.get_mut(root).unwrap().support = Some(1.0);
         assert!(tree.cached_taxon_index().is_none());
 
