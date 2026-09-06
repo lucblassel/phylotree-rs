@@ -237,14 +237,14 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
     }
 
     fn add_node(&mut self, parent: Option<NodeId>) -> NodeId {
-        let id = self.nodes.len();
+        let id = self.nodes.len().into();
         let mut node = Node::new();
         node.set_id(id);
 
         if let Some(parent_id) = parent {
             node.set_parent(parent_id, None);
-            node.set_depth(self.nodes[parent_id].get_depth() + 1);
-            self.nodes[parent_id].add_child(id, None);
+            node.set_depth(self.nodes[parent_id.0].get_depth() + 1);
+            self.nodes[parent_id.0].add_child(id, None);
         }
 
         self.nodes.push(node);
@@ -265,7 +265,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
     }
 
     fn set_name(&mut self, node: NodeId, name: String) {
-        self.nodes[node].set_name(name);
+        self.nodes[node.0].set_name(name);
     }
 
     fn set_unquoted_label(
@@ -274,7 +274,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         label: String,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if self.nodes[node].is_tip()
+        if self.nodes[node.0].is_tip()
             || self.options.internal_node_labels == InternalNodeLabelMode::Name
         {
             self.set_name(node, label);
@@ -299,7 +299,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         support: f64,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if let Some(existing) = self.nodes[node].support {
+        if let Some(existing) = self.nodes[node.0].support {
             if existing != support {
                 return Err(NewickParseError::ConflictingSupportValues {
                     existing,
@@ -308,15 +308,15 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                 });
             }
         } else {
-            self.nodes[node].support = Some(support);
+            self.nodes[node.0].support = Some(support);
         }
         Ok(())
     }
 
     fn set_branch_length(&mut self, node: NodeId, length: f64) {
-        self.nodes[node].parent_edge = Some(length);
-        if let Some(parent) = self.nodes[node].parent {
-            self.nodes[parent].set_child_edge(&node, Some(length));
+        self.nodes[node.0].parent_edge = Some(length);
+        if let Some(parent) = self.nodes[node.0].parent {
+            self.nodes[parent.0].set_child_edge(node, Some(length));
         }
     }
 
@@ -326,7 +326,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         comment: &str,
         span: Span,
     ) -> Result<(), NewickParseError> {
-        if !self.nodes[node].is_tip() {
+        if !self.nodes[node.0].is_tip() {
             if let Some(input) = self.options.support_comments.support_value(comment) {
                 let support =
                     input
@@ -339,9 +339,9 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
             }
         }
 
-        match &mut self.nodes[node].comment {
+        match &mut self.nodes[node.0].comment {
             Some(current) => current.push_str(comment),
-            None => self.nodes[node].comment = Some(comment.to_owned()),
+            None => self.nodes[node.0].comment = Some(comment.to_owned()),
         }
         Ok(())
     }
@@ -410,21 +410,21 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         let node = self.current_node_for_attribute(token.span)?;
         match &token.token {
             NewickToken::UnquotedString(label) => {
-                if self.nodes[node].name.is_some() || self.nodes[node].parent_edge.is_some() {
+                if self.nodes[node.0].name.is_some() || self.nodes[node.0].parent_edge.is_some() {
                     return Err(Self::unexpected(token, "a delimiter or branch length"));
                 }
                 self.set_unquoted_label(node, label.clone(), token.span)?;
                 Ok(false)
             }
             NewickToken::QuotedString(name) => {
-                if self.nodes[node].name.is_some() || self.nodes[node].parent_edge.is_some() {
+                if self.nodes[node.0].name.is_some() || self.nodes[node.0].parent_edge.is_some() {
                     return Err(Self::unexpected(token, "a delimiter or branch length"));
                 }
                 self.set_name(node, name.clone());
                 Ok(false)
             }
             NewickToken::Colon => {
-                if self.nodes[node].parent_edge.is_some() {
+                if self.nodes[node.0].parent_edge.is_some() {
                     return Err(Self::unexpected(token, "a delimiter"));
                 }
                 self.state = ParserState::BranchLength;
@@ -533,13 +533,13 @@ mod tests {
         );
 
         for (expected_id, node) in nodes.iter().enumerate() {
-            assert_eq!(node.id, expected_id);
+            assert_eq!(node.id, expected_id.into());
 
             if let Some(parent_id) = node.parent {
                 let parent = node_by_id(nodes, parent_id);
                 assert!(parent.children.contains(&node.id));
                 assert_eq!(node.get_depth(), parent.get_depth() + 1);
-                assert_eq!(parent.get_child_edge(&node.id), node.parent_edge);
+                assert_eq!(parent.get_child_edge(node.id), node.parent_edge);
             } else {
                 assert_eq!(node.get_depth(), 0);
             }
@@ -604,16 +604,16 @@ mod tests {
         let nodes = parse("((,),);").unwrap();
 
         assert_eq!(nodes.len(), 5);
-        let root = node_by_id(&nodes, 0);
-        let inner = node_by_id(&nodes, 1);
+        let root = node_by_id(&nodes, 0.into());
+        let inner = node_by_id(&nodes, 1.into());
         assert_eq!(root.parent, None);
-        assert_eq!(root.children, vec![inner.id, 4]);
+        assert_eq!(root.children, vec![inner.id, 4.into()]);
         assert_eq!(inner.parent, Some(root.id));
-        assert_eq!(inner.children, vec![2, 3]);
+        assert_eq!(inner.children, vec![2.into(), 3.into()]);
         assert_eq!(inner.get_depth(), 1);
-        assert_eq!(node_by_id(&nodes, 2).get_depth(), 2);
-        assert_eq!(node_by_id(&nodes, 3).get_depth(), 2);
-        assert_eq!(node_by_id(&nodes, 4).get_depth(), 1);
+        assert_eq!(node_by_id(&nodes, 2.into()).get_depth(), 2);
+        assert_eq!(node_by_id(&nodes, 3.into()).get_depth(), 2);
+        assert_eq!(node_by_id(&nodes, 4.into()).get_depth(), 1);
     }
 
     #[test]
@@ -674,7 +674,7 @@ mod tests {
             let node = node_named(&nodes, name);
             assert_eq!(node.parent_edge, Some(length));
             let parent = node_by_id(&nodes, node.parent.unwrap());
-            assert_eq!(parent.get_child_edge(&node.id), Some(length));
+            assert_eq!(parent.get_child_edge(node.id), Some(length));
         }
 
         assert_eq!(root.parent_edge, None);
@@ -686,19 +686,19 @@ mod tests {
         let nodes = parse("(:0.1,:0.2,(:0.3,:0.4):0.5):0;").unwrap();
 
         assert_eq!(nodes.len(), 6);
-        let root = node_by_id(&nodes, 0);
-        let inner = node_by_id(&nodes, 3);
+        let root = node_by_id(&nodes, 0.into());
+        let inner = node_by_id(&nodes, 3.into());
         assert_eq!(root.parent, None);
         assert_eq!(root.parent_edge, Some(0.0));
-        assert_eq!(root.children, vec![1, 2, 3]);
+        assert_eq!(root.children, vec![1.into(), 2.into(), 3.into()]);
         assert_eq!(inner.parent_edge, Some(0.5));
-        assert_eq!(inner.children, vec![4, 5]);
+        assert_eq!(inner.children, vec![4.into(), 5.into()]);
 
         for (id, length) in [(1, 0.1), (2, 0.2), (3, 0.5), (4, 0.3), (5, 0.4)] {
-            let node = node_by_id(&nodes, id);
+            let node = node_by_id(&nodes, id.into());
             assert_eq!(node.parent_edge, Some(length));
             let parent = node_by_id(&nodes, node.parent.unwrap());
-            assert_eq!(parent.get_child_edge(&id), Some(length));
+            assert_eq!(parent.get_child_edge(id.into()), Some(length));
         }
     }
 
@@ -778,7 +778,10 @@ mod tests {
             (3, "left"),
             (4, "right"),
         ] {
-            assert_eq!(node_by_id(&nodes, id).comment.as_deref(), Some(expected));
+            assert_eq!(
+                node_by_id(&nodes, id.into()).comment.as_deref(),
+                Some(expected)
+            );
         }
         assert_node_graph_is_consistent(&nodes);
     }
@@ -883,13 +886,13 @@ mod tests {
             ..Default::default()
         };
         let nodes = parse_with_options("((1,2)95,C)Root;", options).unwrap();
-        let inner = node_by_id(&nodes, 1);
+        let inner = node_by_id(&nodes, 1.into());
 
         assert_eq!(inner.name, None);
         assert_eq!(inner.support, Some(95.0));
-        assert_eq!(node_by_id(&nodes, 2).name.as_deref(), Some("1"));
-        assert_eq!(node_by_id(&nodes, 3).name.as_deref(), Some("2"));
-        assert_eq!(node_by_id(&nodes, 0).name.as_deref(), Some("Root"));
+        assert_eq!(node_by_id(&nodes, 2.into()).name.as_deref(), Some("1"));
+        assert_eq!(node_by_id(&nodes, 3.into()).name.as_deref(), Some("2"));
+        assert_eq!(node_by_id(&nodes, 0.into()).name.as_deref(), Some("Root"));
     }
 
     #[test]
@@ -1082,7 +1085,7 @@ mod tests_ete3_parsing {
         let parenthesized = parse("(hola);").expect("could not parse parenthesized node");
         assert_node_graph_is_consistent(&parenthesized);
         assert_eq!(parenthesized.len(), 2);
-        assert_eq!(node_named(&parenthesized, "hola").parent, Some(0));
+        assert_eq!(node_named(&parenthesized, "hola").parent, Some(0.into()));
 
         let bare = parse("hola;").expect("could not parse bare node");
         assert_node_graph_is_consistent(&bare);

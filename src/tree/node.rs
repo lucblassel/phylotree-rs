@@ -67,7 +67,7 @@ impl Node {
     /// Creates a new Node
     pub fn new() -> Self {
         Self {
-            id: 0,
+            id: NodeId(0),
             name: None,
             parent: None,
             children: vec![],
@@ -84,7 +84,7 @@ impl Node {
     /// Creates a new named Node
     pub fn new_named(name: &str) -> Self {
         Self {
-            id: 0,
+            id: NodeId(0),
             name: Some(String::from(name)),
             parent: None,
             children: vec![],
@@ -133,12 +133,12 @@ impl Node {
 
     /// Adds a child to the node
     /// ```
-    /// use phylotree::tree::Node;
+    /// use phylotree::tree::{Node, NodeId};
     ///
     /// let mut parent = Node::new();
-    /// parent.id = 0;
+    /// parent.id = NodeId::from(0);
     /// let mut child = Node::new();
-    /// child.id = 1;
+    /// child.id = NodeId::from(1);
     ///
     /// let l = 0.1;
     ///
@@ -146,45 +146,45 @@ impl Node {
     /// parent.add_child(child.id, Some(l));
     ///
     /// assert_eq!(child.parent_edge, Some(l));
-    /// assert_eq!(parent.get_child_edge(&child.id), Some(l));
+    /// assert_eq!(parent.get_child_edge(child.id), Some(l));
     /// ```
     pub fn add_child(&mut self, child: NodeId, child_edge: Option<EdgeLength>) {
         self.children.push(child);
-        self.set_child_edge(&child, child_edge);
+        self.set_child_edge(child, child_edge);
     }
 
     /// Get the Edge between node and a child
-    pub fn get_child_edge(&self, child: &NodeId) -> Option<EdgeLength> {
+    pub fn get_child_edge(&self, child: NodeId) -> Option<EdgeLength> {
         if let Some(edges) = &self.child_edges {
-            edges.get(child).copied()
+            edges.get(&child).copied()
         } else {
             None
         }
     }
 
     /// Sets the Edge between a node and its child
-    pub fn set_child_edge(&mut self, child: &NodeId, edge: Option<EdgeLength>) {
+    pub fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {
         if let Some(edge) = edge {
             self.child_edges
                 .get_or_insert_with(Default::default)
-                .insert(*child, edge);
+                .insert(child, edge);
         }
     }
 
     /// Removes the child from the node
-    pub fn remove_child(&mut self, child: &NodeId) -> Result<(), NodeError> {
-        let vec_index = match self.children.iter().position(|node_id| node_id == child) {
+    pub fn remove_child(&mut self, child: NodeId) -> Result<(), NodeError> {
+        let vec_index = match self.children.iter().position(|node_id| *node_id == child) {
             Some(idx) => idx,
             None => {
                 return Err(NodeError::HasNoChild {
                     parent: self.id,
-                    child: *child,
+                    child: child,
                 })
             }
         };
 
         self.children.remove(vec_index);
-        self.child_edges.as_mut().map(|edges| edges.remove(child));
+        self.child_edges.as_mut().map(|edges| edges.remove(&child));
 
         Ok(())
     }

@@ -15,6 +15,8 @@ mod taxon_index;
 mod tree_impl;
 mod tree_list;
 
+use tinytemplate::format;
+
 pub use self::bipartition::{BipartitionProfile, RobinsonFouldsMode};
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
@@ -28,8 +30,20 @@ pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListErro
 
 /// A type that represents Identifiers of [`Node`] objects
 /// within phylogenetic [`Tree`] object.
-pub type NodeId = usize;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId(usize);
 
+impl From<usize> for NodeId {
+    fn from(value: usize) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 /// A type that represents branch lengths between [`Node`] objects
 /// within phylogenetic [`Tree`] object.
 pub type EdgeLength = f64;

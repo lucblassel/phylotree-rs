@@ -68,8 +68,8 @@ impl BipartitionProfile {
         let mut clades = ProfileMap::new();
         let mut descendant_taxa: HashMap<NodeId, Partition> = HashMap::new();
 
-        for node_id in tree.postorder(&root)? {
-            let node = tree.get(&node_id)?;
+        for node_id in tree.postorder(root)? {
+            let node = tree.get(node_id)?;
             let mut descendants = FixedBitSet::with_capacity(taxon_index.len());
             if node.is_tip() {
                 let name = node.name.as_deref().ok_or(TreeError::UnnamedLeaves)?;
@@ -392,7 +392,7 @@ mod tests {
     fn profile_creation_does_not_populate_an_invalidated_tree_cache() {
         let mut tree = Tree::from_newick("((A,B),C);").unwrap();
         let root = tree.get_root().unwrap();
-        tree.get_mut(&root).unwrap().support = Some(1.0);
+        tree.get_mut(root).unwrap().support = Some(1.0);
         assert!(tree.cached_taxon_index().is_none());
 
         BipartitionProfile::from_tree(&tree).unwrap();

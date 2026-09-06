@@ -236,7 +236,7 @@ impl<'a> NewickSerializer<'a> {
     pub(crate) fn serialize(&self) -> Result<String, TreeError> {
         self.validate()?;
         let root = self.tree.get_root()?;
-        let mut output = self.serialize_subtree(&root)?;
+        let mut output = self.serialize_subtree(root)?;
         output.push(';');
         Ok(output)
     }
@@ -250,14 +250,14 @@ impl<'a> NewickSerializer<'a> {
         Ok(())
     }
 
-    fn serialize_subtree(&self, node_id: &NodeId) -> Result<String, TreeError> {
+    fn serialize_subtree(&self, node_id: NodeId) -> Result<String, TreeError> {
         let node = self.tree.get(node_id)?;
         validate_node(node, &self.options)?;
         let mut output = String::new();
 
         if !node.children.is_empty() {
             output.push('(');
-            for (index, child_id) in node.children.iter().enumerate() {
+            for (index, &child_id) in node.children.iter().enumerate() {
                 if index > 0 {
                     output.push(',');
                 }
@@ -459,7 +459,7 @@ mod tests {
         node.parent_edge = length;
         node.comment = comment.map(str::to_owned);
         if !is_tip {
-            node.children.push(1);
+            node.children.push(1.into());
         }
         node
     }
@@ -571,7 +571,7 @@ mod tests {
 
         assert!(matches!(
             serialize_node_with_options(&internal, options),
-            Err(TreeError::ConflictingNewickNodeLabel(0))
+            Err(TreeError::ConflictingNewickNodeLabel(NodeId(0)))
         ));
     }
 

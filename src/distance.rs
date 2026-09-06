@@ -31,6 +31,9 @@ pub enum MatrixError {
     /// We are trying to add more taxa than we allocated space in the matrix for
     #[error("You added more taxa than there is room for in the matrix.")]
     SizeExceeded,
+    /// Too small to be a distance matrix
+    #[error("You need at least 2 taxa for a valid distance matrix.")]
+    InvalidSize,
     /// We are trying to access a distance between two taxa that does not
     /// exist in the matrix
     #[error("Missing distance between {0} and {1}.")]
@@ -126,13 +129,16 @@ where
     }
 
     /// Create an empty distance matrix with a given size
-    pub fn new_with_size(size: usize) -> Self {
-        Self {
+    pub fn new_with_size(size: usize) -> Result<Self, MatrixError> {
+        if size == 0 {
+            return Err(MatrixError::InvalidSize);
+        }
+        Ok(Self {
             size,
             taxa: Vec::with_capacity(size),
             matrix: vec![zero(); size * (size - 1) / 2],
             zero: zero(),
-        }
+        })
     }
 
     /// Create a distance matrix from pre-computed values. The `matrix` parameter
@@ -237,12 +243,15 @@ where
     }
 
     /// Get the distance matrix as a HashMap containing taxa pairs as keys
-    /// and pairwise distances as values
+    /// and pairwise distances as values. This contains 2 copies of each distance
+    /// (one for each permutation of the pair of names), and diagonal zero entries.
     pub fn to_map(&self) -> HashMap<(String, String), T> {
         HashMap::from_iter(self.taxa.iter().cartesian_product(self.taxa.iter()).map(
             |(taxon1, taxon2)| {
-                let idx = self.get_pair_index(taxon1, taxon2).unwrap();
-                ((taxon1.clone(), taxon2.clone()), self.matrix[idx])
+                (
+                    (taxon1.clone(), taxon2.clone()),
+                    *(self.get(taxon1, taxon2).unwrap()),
+                )
             },
         ))
     }
@@ -366,7 +375,7 @@ where
             return Err(PhylipParseError::SizeAndRowsMismatch(names.len(), size));
         }
 
-        let mut matrix = Self::new_with_size(size);
+        let mut matrix = Self::new_with_size(size)?;
         matrix.set_taxa(names.iter().map(|v| v.to_string()).collect_vec())?;
 
         let mut seen = HashSet::new();
@@ -490,14 +499,7 @@ where
 
             // Merge nodes a and b in to new parent u
             let u_node = tree
-                .merge_children(
-                    &node_ids[a],
-                    &node_ids[b],
-                    Some(d_au),
-                    Some(d_bu),
-                    None,
-                    None,
-                )
+                .merge_children(node_ids[a], node_ids[b], Some(d_au), Some(d_bu), None, None)
                 .unwrap();
 
             // get cardinality of new parent node u
@@ -544,19 +546,13 @@ where
         let d_ar = tree_height - heights[a_i];
         let d_br = tree_height - heights[b_i];
 
-        let root_node = tree.get_mut(&virt_root).unwrap();
-        root_node.set_child_edge(&a, Some(d_ar));
-        root_node.set_child_edge(&b, Some(d_br));
-        tree.get_mut(&a).unwrap().parent_edge = Some(d_ar);
-        tree.get_mut(&b).unwrap().parent_edge = Some(d_br);
+        let root_node = tree.get_mut(virt_root).unwrap();
+        root_node.set_child_edge(a, Some(d_ar));
+        root_node.set_child_edge(b, Some(d_br));
+        tree.get_mut(a).unwrap().parent_edge = Some(d_ar);
+        tree.get_mut(b).unwrap().parent_edge = Some(d_br);
 
         Ok(tree)
-    }
-
-    /// Build a [`Tree`] from the distance matrix using the
-    /// [neighbor joining](https://en.wikipedia.org/wiki/Neighbor_joining) algorithm
-    pub fn neighbor_joining(&self) -> Result<Tree, MatrixError> {
-        todo!()
     }
 }
 
@@ -634,7 +630,7 @@ s5    5  10  15
 
     fn build_matrix() -> DistanceMatrix<f32> {
         let names = [("s1", 1.0), ("s2", 2.0), ("s3", 3.0), ("s5", 5.0)];
-        let mut matrix = DistanceMatrix::new_with_size(names.len());
+        let mut matrix = DistanceMatrix::new_with_size(names.len()).unwrap();
         matrix
             .set_taxa(
                 names

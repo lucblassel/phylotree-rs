@@ -66,7 +66,7 @@ impl Layout {
 }
 
 /// Returns the radial layout of a tree according to the algorithm
-/// detailed in:  
+/// detailed in:
 /// <https://link.springer.com/chapter/10.1007/11602613_110>
 pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
     let mut l = vec![0.; tree.size()];
@@ -77,52 +77,52 @@ pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
     let root = tree.get_root()?;
 
     // Get subtree sizes
-    for v in tree.postorder(&root)?.iter() {
+    for &v in tree.postorder(root)?.iter() {
         let node = tree.get(v)?;
         if node.is_tip() {
-            l[*v] = 1_f64
+            l[v.0] = 1_f64
         } else {
             for w_ in node.children.iter() {
-                l[*v] += l[*w_];
+                l[v.0] += l[w_.0];
             }
         }
     }
 
     // Compute angles
-    for v in tree.preorder(&root)?.iter() {
+    for &v in tree.preorder(root)?.iter() {
         let node = tree.get(v)?;
-        if *v != root {
+        if v != root {
             let d = node.parent_edge.ok_or(TreeError::MissingBranchLengths)?;
             let u = node
                 .parent
-                .ok_or(TreeError::from(NodeError::HasNoParent(*v)))?;
+                .ok_or(TreeError::from(NodeError::HasNoParent(v)))?;
 
-            x[*v] = (
-                x[u].0 + d * f64::cos(t[*v] + w[*v] / 2.),
-                x[u].1 + d * f64::sin(t[*v] + w[*v] / 2.),
+            x[v.0] = (
+                x[u.0].0 + d * f64::cos(t[v.0] + w[v.0] / 2.),
+                x[u.0].1 + d * f64::sin(t[v.0] + w[v.0] / 2.),
             );
         }
 
-        let mut n = t[*v];
+        let mut n = t[v.0];
 
         for w_ in node.children.iter() {
-            w[*w_] = (l[*w_] * 2. * PI) / l[root];
-            t[*w_] = n;
-            n += w[*w_];
+            w[w_.0] = (l[w_.0] * 2. * PI) / l[root.0];
+            t[w_.0] = n;
+            n += w[w_.0];
         }
     }
 
     let mut layout = Layout::default();
 
-    for v in tree.preorder(&root)?.iter().skip(1) {
+    for &v in tree.preorder(root)?.iter().skip(1) {
         let u = tree
             .get(v)?
             .parent
-            .ok_or(TreeError::from(NodeError::HasNoParent(*v)))?;
+            .ok_or(TreeError::from(NodeError::HasNoParent(v)))?;
         let name = tree.get(v)?.name.clone();
 
-        let line_start = x[u];
-        let line_end = x[*v];
+        let line_start = x[u.0];
+        let line_end = x[v.0];
 
         layout.branches.push(Branch {
             xstart: line_start.0,

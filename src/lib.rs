@@ -46,7 +46,7 @@
 //! let child3 = tree.add_child(Node::new_named("Child_3"), child1, None).unwrap();
 //!
 //! // Get depth of child
-//! assert_eq!(tree.get(&child3).unwrap().get_depth(), 2)
+//! assert_eq!(tree.get(child3).unwrap().get_depth(), 2)
 //! ```
 //!
 //! ## Reading and writing trees
@@ -80,9 +80,9 @@
 //! let mut tree = Tree::from_newick(newick_str).unwrap();
 //! let root = tree.get_root().unwrap();
 //!
-//! let preorder: Vec<_> = tree.preorder(&root).unwrap()
+//! let preorder: Vec<_> = tree.preorder(root).unwrap()
 //!     .iter()
-//!     .map(|node_id| tree.get(node_id).unwrap().name.clone().unwrap())
+//!     .map(|&node_id| tree.get(node_id).unwrap().name.clone().unwrap())
 //!     .collect();
 //!
 //! assert_eq!(preorder, vec!["G", "C", "A", "B", "F", "D", "E"]);
@@ -91,7 +91,7 @@
 //! let f_idx = tree.get_by_name("F").unwrap().id;
 //! tree.add_child(Node::new_named("third_child"), f_idx, None).unwrap();
 //!
-//! assert!(tree.inorder(&root).is_err())
+//! assert!(tree.inorder(root).is_err())
 //! ```
 //!
 //!
@@ -146,7 +146,7 @@
 //! let t0 = tree.get_by_name("T0").unwrap();
 //! let t3 = tree.get_by_name("T3").unwrap();
 //!
-//! let (edge_sum, num_edges) = tree.get_distance(&t0.id, &t3.id).unwrap();
+//! let (edge_sum, num_edges) = tree.get_distance(t0.id, t3.id).unwrap();
 //!
 //! assert_eq!(num_edges, 4);
 //! assert_eq!(edge_sum, Some(0.5 + 0.6 + 0.3 + 0.2));
@@ -170,7 +170,7 @@ use clap::ValueEnum;
 use distr::{Distr, Sampler};
 use rand::prelude::*;
 
-use tree::{Node, Tree, TreeError};
+use tree::{Node, NodeId, Tree, TreeError};
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -207,8 +207,8 @@ pub fn generate_tree(
 
     let sampler = Sampler::new(sampler_type);
 
-    let mut next_deq = VecDeque::new();
-    next_deq.push_back(0);
+    let mut next_deq: VecDeque<NodeId> = VecDeque::new();
+    next_deq.push_back(0.into());
 
     for _ in 0..(n_leaves - 1) {
         let parent_id = if rng.gen_bool(0.5) {
@@ -231,7 +231,7 @@ pub fn generate_tree(
         next_deq.push_back(tree.add_child(Node::new(), parent_id, l2)?);
     }
 
-    for (i, id) in next_deq.iter().enumerate() {
+    for (i, &id) in next_deq.iter().enumerate() {
         tree.get_mut(id)?.set_name(format!("Tip_{i}"));
     }
 
@@ -274,7 +274,7 @@ pub fn generate_yule(
 
     // Assign names to tips
     for (i, tip_idx) in tree.get_leaves().iter().cloned().enumerate() {
-        tree.get_mut(&tip_idx)?.set_name(format!("Tip_{i}"));
+        tree.get_mut(tip_idx)?.set_name(format!("Tip_{i}"));
     }
 
     Ok(tree)
@@ -293,7 +293,7 @@ pub fn generate_caterpillar(
     let mut rng = thread_rng();
     let sampler = Sampler::new(sampler_type);
 
-    let mut parent = 0;
+    let mut parent: NodeId = 0.into();
     for i in 1..n_leaves {
         let parent_bkp = parent;
 
@@ -303,7 +303,11 @@ pub fn generate_caterpillar(
         if i == n_leaves - 1 {
             // Adding tip
             tree.add_child(Node::new_named(&format!("Tip_{i}")), parent, l1)?;
-            tree.add_child(Node::new_named(&format!("Tip_{}", i + 1)), parent, l2)?;
+            tree.add_child(
+                Node::new_named(&format!("Tip_{}", i + 1)),
+                parent.into(),
+                l2,
+            )?;
         } else {
             // Adding parent node
             parent = tree.add_child(Node::new(), parent, l1)?;

@@ -122,16 +122,16 @@ fn main() {
                     let root = tree.get_root()?;
 
                     let mut c = 0;
-                    for id in tree.preorder(&root)? {
-                        if tree.get(&id)?.is_tip() {
+                    for id in tree.preorder(root)? {
+                        if tree.get(id)?.is_tip() {
                             continue;
                         }
 
-                        tree.get_mut(&id)?.set_name(format!("Int_{c}"));
+                        tree.get_mut(id)?.set_name(format!("Int_{c}"));
                         c += 1;
                     }
 
-                    tree.get_mut(&root)?.set_name("Root".to_string());
+                    tree.get_mut(root)?.set_name("Root".to_string());
                 }
 
                 Ok(tree)
@@ -225,7 +225,7 @@ fn main() {
         } => {
             let mut tree = read_tree(&tree);
             let mut n = 0;
-            for node_idx in tree.preorder(&tree.get_root().unwrap()).unwrap().iter() {
+            for &node_idx in tree.preorder(tree.get_root().unwrap()).unwrap().iter() {
                 let node = tree.get_mut(node_idx).unwrap();
                 if exclude_tips && node.is_tip() {
                     continue;
@@ -243,7 +243,7 @@ fn main() {
                     }
                 }
                 if collapsed {
-                    let parent = tree.get_mut(&parent_idx.unwrap()).unwrap();
+                    let parent = tree.get_mut(parent_idx.unwrap()).unwrap();
                     parent.set_child_edge(node_idx, Some(0.0))
                 }
             }
@@ -266,7 +266,7 @@ fn main() {
                     panic!("{} is not a tip node!", tip_name)
                 }
                 let id = node.id;
-                tree.prune(&id).unwrap();
+                tree.prune(id).unwrap();
             }
 
             tree.compress().unwrap();
@@ -292,7 +292,7 @@ fn main() {
                 let (n1, n2) = (pair[0], pair[1]);
                 let i1 = tree.get_by_name(n1).unwrap().id;
                 let i2 = tree.get_by_name(n2).unwrap().id;
-                if let (Some(d), _) = tree.get_distance(&i1, &i2).unwrap() {
+                if let (Some(d), _) = tree.get_distance(i1, i2).unwrap() {
                     writer
                         .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
                         .unwrap();
@@ -362,19 +362,17 @@ fn main() {
 
                     if collapse {
                         removed.push(taxa.clone());
-                        tree.get_mut(&idx)
+                        tree.get_mut(idx).unwrap().set_parent(parent_idx, Some(0.0));
+                        tree.get_mut(parent_idx)
                             .unwrap()
-                            .set_parent(parent_idx, Some(0.0));
-                        tree.get_mut(&parent_idx)
-                            .unwrap()
-                            .set_child_edge(&idx, Some(0.0));
+                            .set_child_edge(idx, Some(0.0));
                     } else if i == 0 {
                         // If we are deleting duplicates we
                         // still want to keep one instance
                         continue;
                     } else {
                         removed.push(taxa.clone());
-                        tree.prune(&idx).unwrap();
+                        tree.prune(idx).unwrap();
                     }
                     n += 1;
                 }
@@ -390,11 +388,11 @@ fn main() {
             while !pruned {
                 pruned = true;
                 for leaf_idx in tree.get_leaves() {
-                    let leaf = tree.get(&leaf_idx).unwrap();
+                    let leaf = tree.get(leaf_idx).unwrap();
                     let unnamed = leaf.name.is_none();
                     if unnamed {
                         pruned = false;
-                        tree.prune(&leaf_idx).unwrap();
+                        tree.prune(leaf_idx).unwrap();
                     }
                 }
                 tree.compress().unwrap();

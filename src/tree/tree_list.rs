@@ -469,7 +469,7 @@ impl TreeList {
     ///
     /// let supports: Vec<_> = trees.iter().map(|tree| {
     ///     let root = tree.get_root().unwrap();
-    ///     tree.get(&root).unwrap().support
+    ///     tree.get(root).unwrap().support
     /// }).collect();
     /// assert_eq!(supports, vec![Some(90.0), Some(95.0)]);
     /// ```
@@ -516,7 +516,7 @@ impl TreeList {
     ///
     /// assert_eq!(trees.len(), 2);
     /// let root = trees[0].get_root().unwrap();
-    /// assert_eq!(trees[0].get(&root).unwrap().support, Some(90.0));
+    /// assert_eq!(trees[0].get(root).unwrap().support, Some(90.0));
     /// ```
     pub fn from_reader_with_options<R: Read>(
         reader: R,
@@ -721,7 +721,7 @@ mod tests {
 
         let supports: Vec<_> = trees
             .iter()
-            .map(|tree| tree.get(&tree.get_root().unwrap()).unwrap().support)
+            .map(|tree| tree.get(tree.get_root().unwrap()).unwrap().support)
             .collect();
         assert_eq!(supports, vec![Some(90.0), Some(95.0)]);
     }
@@ -902,7 +902,7 @@ mod tests {
     fn list_taxon_index_rebuilding_is_explicit() {
         let mut trees = TreeList::from_newick("((A,B),C); (C,(B,A));").unwrap();
         let root = trees[0].get_root().unwrap();
-        trees[0].get_mut(&root).unwrap().support = Some(1.0);
+        trees[0].get_mut(root).unwrap().support = Some(1.0);
         assert!(trees.cached_taxon_index().is_none());
         assert!(trees[0].cached_taxon_index().is_none());
 
