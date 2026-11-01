@@ -33,7 +33,7 @@ mv target/release/phylotree <somewhere/in/your/PATH>
 Below is some sample usage of the `phylotree` crate, please see [docs.rs/phylotree](https://docs.rs/phylotree) for the full documentation.
 
 ```rust
-use phylotree::tree::Tree;
+use phylotree::tree::{Node, Tree};
 
 //////////////////////////////////
 // Building a tree from scratch //
@@ -52,7 +52,7 @@ let child2 = tree.add_child(Node::new_named("Child_2"), root, Some(0.5)).unwrap(
 let child3 = tree.add_child(Node::new_named("Child_3"), child1, None).unwrap();
 
 // Get depth of child
-assert_eq!(tree.get(&child3).unwrap().get_depth(), 2)
+assert_eq!(tree.get(child3).unwrap().get_depth(), 2)
 
 ///////////////////////////////
 // Reading and writing trees //
@@ -60,18 +60,18 @@ assert_eq!(tree.get(&child3).unwrap().get_depth(), 2)
 let newick_str = "((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;";
 let tree = Tree::from_newick(newick_str).unwrap();
 
-assert_eq!(tree.to_newick().unwrap(), newick_string)
+assert_eq!(tree.to_newick().unwrap(), newick_str)
 
 //////////////////////
 // Traversing trees //
 //////////////////////
 let newick_str = "((A,B)C,(D,E)F)G;";
 let mut tree = Tree::from_newick(newick_str).unwrap();
-let root = tree.get_root().unwrap();
+let root = tree.root().unwrap();
 
-let preorder: Vec<_> = tree.preorder(&root).unwrap()
+let preorder: Vec<_> = tree.preorder(root).unwrap()
     .iter()
-    .map(|node_id| tree.get(node_id).unwrap().name.clone().unwrap())
+    .map(|&node_id| tree.get(node_id).unwrap().name.clone().unwrap())
     .collect();
 
 assert_eq!(preorder, vec!["G", "C", "A", "B", "F", "D", "E"]);
@@ -89,7 +89,7 @@ let newick_rota = "((D:0.3,C:0.4)E:0.5,(B:0.2,A:0.1)F:0.6)G;";
 let tree_orig = Tree::from_newick(newick_orig).unwrap();
 let tree_rota = Tree::from_newick(newick_rota).unwrap();
 
-let rf = tree_orig.robinson_foulds(&tree_rota).unwrap();
+let rf = tree_orig.unrooted_robinson_foulds(&tree_rota).unwrap();
 
 assert_eq!(rf, 0)
 

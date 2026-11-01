@@ -635,7 +635,9 @@ impl Tree {
     }
 
     /// Returns the diameter of the tree
-    /// (i.e. longest tip to tip distance)
+    /// (i.e. longest tip to tip distance), in O(nodes) time and space.
+    /// Paths with any missing branch length use their edge count instead.
+    /// The root stem is ignored. Fewer than two tips returns `IsEmpty`.
     /// ```
     /// use phylotree::tree::Tree;
     ///
@@ -646,18 +648,69 @@ impl Tree {
     /// assert_eq!(tree_no_brlen.diameter().unwrap(), 3.);
     /// ```
     pub fn diameter(&self) -> Result<EdgeLength, TreeError> {
-        self.leaves()
-            .iter()
-            .combinations(2)
-            .map(|pair| {
-                let (edge_sum, num_edges) = self.get_distance(*pair[0], *pair[1]).unwrap();
-                match edge_sum {
-                    Some(height) => height,
-                    None => num_edges as f64,
+        if self.leaves().len() < 2 {
+            return Err(TreeError::IsEmpty);
+        }
+        // Iterative postorder avoids recursive traversal on deep trees.
+        let mut pending = vec![self.root()?];
+        let mut order = Vec::new();
+        while let Some(id) = pending.pop() {
+            order.push(id);
+            pending.extend(self.get(id)?.children.iter().rev().copied());
+        }
+        let mut weighted = vec![None::<f64>; self.nodes.len()];
+        let mut hops = vec![0_usize; self.nodes.len()];
+        let mut missing = vec![None::<usize>; self.nodes.len()];
+        let mut diameter = None::<f64>;
+        for id in order.into_iter().rev() {
+            let node = self.get(id)?;
+            if node.is_tip() {
+                weighted[id.index()] = Some(0.0);
+                continue;
+            }
+            let mut best_weighted = None::<f64>;
+            let mut best_hops = None::<usize>;
+            let mut best_missing = None::<usize>;
+            for &child in &node.children {
+                let edge = self.get(child)?.parent_edge;
+                if edge.is_some_and(|length| !length.is_finite()) {
+                    return Err(TreeError::GeneralError("Nonfinite branch length"));
                 }
-            })
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .ok_or(TreeError::IsEmpty)
+                let distance = edge.zip(weighted[child.index()]).map(|(a, b)| a + b);
+                let depth = hops[child.index()] + 1;
+                // Preserve the pairwise API: any missing edge makes the entire
+                // tip-to-tip path topological, rather than mixing units.
+                let missing_depth = if edge.is_none() {
+                    Some(depth)
+                } else {
+                    missing[child.index()].map(|d| d + 1)
+                };
+                let candidates = [
+                    best_weighted.zip(distance).map(|(a, b)| a + b),
+                    best_missing.map(|d| (d + depth) as f64),
+                    best_hops.zip(missing_depth).map(|(a, b)| (a + b) as f64),
+                ];
+                for candidate in candidates.into_iter().flatten() {
+                    if !candidate.is_finite() {
+                        return Err(TreeError::GeneralError("Nonfinite diameter"));
+                    }
+                    diameter = Some(diameter.map_or(candidate, |d| d.max(candidate)));
+                }
+                // Only actual leaf endpoints count, including negative-length
+                // paths; an internal node must not introduce a zero endpoint.
+                if let Some(d) = distance {
+                    best_weighted = Some(best_weighted.map_or(d, |old| old.max(d)));
+                }
+                best_hops = Some(best_hops.map_or(depth, |old| old.max(depth)));
+                if let Some(d) = missing_depth {
+                    best_missing = Some(best_missing.map_or(d, |old| old.max(d)));
+                }
+            }
+            weighted[id.index()] = best_weighted;
+            hops[id.index()] = best_hops.unwrap_or(0);
+            missing[id.index()] = best_missing;
+        }
+        diameter.ok_or(TreeError::IsEmpty)
     }
 
     /// Returns the lenght of the trees
@@ -1603,8 +1656,58 @@ impl Tree {
     /// ```
     pub fn rescale(&mut self, factor: f64) {
         for node in self.nodes.iter_mut() {
-            node.rescale_edges(factor)
+            node.rescale_edges(factor);
+            node.subtree_distances.borrow_mut().take();
         }
+    }
+
+    /// Rescale all branch lengths to a positive target tip-to-tip diameter.
+    ///
+    /// Requires finite, nonnegative lengths on every non-root edge and a
+    /// positive current diameter. Invalid inputs leave the tree unchanged.
+    /// The root stem does not contribute to the diameter.
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("(A:1,B:2);").unwrap();
+    /// tree.rescale_diameter(6.0).unwrap();
+    /// assert_eq!(tree.diameter().unwrap(), 6.0);
+    /// ```
+    pub fn rescale_diameter(&mut self, target: EdgeLength) -> Result<(), TreeError> {
+        if !target.is_finite() || target <= 0.0 {
+            return Err(TreeError::GeneralError("Positive finite diameter required"));
+        }
+        for node in self
+            .nodes
+            .iter()
+            .filter(|n| !n.deleted && n.parent.is_some())
+        {
+            let length = node.parent_edge.ok_or(TreeError::MissingBranchLengths)?;
+            if !length.is_finite() || length < 0.0 {
+                return Err(TreeError::GeneralError(
+                    "Finite nonnegative branch lengths required",
+                ));
+            }
+        }
+        let current = self.diameter()?;
+        if current <= 0.0 {
+            return Err(TreeError::GeneralError("Positive diameter required"));
+        }
+        let factor = target / current;
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err(TreeError::GeneralError(
+                "Diameter scale is not representable",
+            ));
+        }
+        if self.nodes.iter().filter(|n| !n.deleted).any(|n| {
+            n.parent_edge
+                .is_some_and(|length| !(length * factor).is_finite())
+        }) {
+            return Err(TreeError::GeneralError(
+                "Rescaled branch length is not representable",
+            ));
+        }
+        self.rescale(factor);
+        Ok(())
     }
 
     /// Randomly resolve multifurcations to binarize the tree
@@ -3888,5 +3991,32 @@ mod tests_ete3_operations {
         }
 
         assert!(failed.is_empty(), "Failed cases:\n{failed:#?}")
+    }
+}
+
+#[cfg(test)]
+mod rescale_cache_tests {
+    use super::Tree;
+
+    #[test]
+    fn rescaling_invalidates_cached_subtree_distances() {
+        for target_diameter in [false, true] {
+            let mut tree = Tree::from_newick("((A:1,B:2):3,C:4);").unwrap();
+            tree.distance_matrix().unwrap();
+            assert!(tree
+                .nodes
+                .iter()
+                .any(|n| n.subtree_distances.borrow().is_some()));
+            if target_diameter {
+                tree.rescale_diameter(18.0).unwrap();
+            } else {
+                tree.rescale(2.0);
+            }
+            assert!(tree
+                .nodes
+                .iter()
+                .all(|n| n.subtree_distances.borrow().is_none()));
+            assert_eq!(tree.diameter().unwrap(), 18.0);
+        }
     }
 }

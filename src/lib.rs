@@ -177,6 +177,7 @@ pub mod python;
 
 pub mod distance;
 pub mod distr;
+pub mod simulation;
 pub mod tree;
 
 // type Error = Box<dyn std::error::Error>;

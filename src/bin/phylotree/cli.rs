@@ -192,7 +192,7 @@ pub enum Commands {
 fn valid_tips_number(s: &str) -> Result<usize, String> {
     let requested_n_tips: usize = s.parse().map_err(|_| format!("`{s}` is not a number"))?;
     if requested_n_tips < 3 {
-        return Err(format!("Cannot generate a tree with less than 3 leaves."));
+        return Err("Cannot generate a tree with less than 3 leaves.".to_string());
     }
     Ok(requested_n_tips)
 }

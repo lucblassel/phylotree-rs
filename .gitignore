@@ -260,3 +260,8 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# Keep the seeded tree-simulation regression suite in version control.
+!/tests/
+/tests/*
+!/tests/simulation.rs
