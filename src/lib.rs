@@ -1,127 +1,88 @@
 #![warn(missing_docs)]
 
-//! The `phylotree` crate aims to be useful when dealing with phylogenetic trees.
-//! It can be used to build such trees or read then from newick files. this crate
-//! can also be used to compare trees.
+//! Phylogenetic trees, topology comparisons, and distance matrices.
 //!
-//! Since phylogenetic trees and phylolgenetic distance matrices are so closely related
-//! this crate can also be used to extract such matrices from phylolgenetic trees as
-//! well as read and write phylip distance matrix files.
+//! - [`tree`]: parse Newick, traverse or edit trees, and compare topologies.
+//! - [`simulation`]: seeded topology and branch-length priors.
+//! - [`distance`]: compact distance matrices, PHYLIP I/O, and UPGMA.
+//! - [`distr`]: fixed branch-length distributions for the legacy generators.
 //!
-//! # A note on implementation
-//! Recursive data structures can be a pain in rust, which is why this crate exists:
+//! Trees store nodes in a vector rather than a recursive data structure. Access
+//! and modify nodes through tree-local [`tree::NodeId`] values. Use
+//! [`tree::TreeList`] to read, write, and summarize collections of trees.
 //!
-//! **so you don't have to implement it...**
+//! # Building trees
 //!
-//! To avoid this problem here the tree is stored as a vector
-//! of nodes, each node has an identifier and accessing and mutating
-//! nodes in a tree is done using these identifiers. As such we can have a
-//! non-recursive data structure representing the tree but also easily
-//! implement recursive algorithms *(like simple tree traversals)* on this tree.
-//!
-//! # Using `phylotree`
-//! Most of the functionality is implemented in [`crate::tree`]. The
-//! [`crate::distance`] module is used to dealt with phylolgenetic distance matrices.
-//! [`crate::distr`] is a helper module to provide different branch
-//! length distributions when generating random phylogenetic trees.
-//!
-//! ## Building trees
-//! The simplest way to build a tree is to create an empty tree, add a root node and
-//! then add children to the various added nodes:
+//! Start with an empty tree, add a root, then attach children. Both names and
+//! branch lengths are optional; [`tree::Tree::add_child`] maintains the links
+//! between parent and child nodes.
 //!
 //! ```
-//! use phylotree::tree::{Tree, Node};
+//! use phylotree::tree::{Node, Tree};
 //!
 //! let mut tree = Tree::new();
+//! let root = tree.add(Node::new_named("root"));
+//! let a = tree.add_child(Node::new_named("A"), root, Some(0.5)).unwrap();
+//! tree.add_child(Node::new_named("B"), root, Some(0.2)).unwrap();
 //!
-//! // Add the root node
-//! let root = tree.add(Node::new());
-//!
-//! // Add a child to the root
-//! let child1 = tree.add_child(Node::new_named("Child_1"), root, None).unwrap();
-//! // Add a child to the root with a branch length
-//! let child2 = tree.add_child(Node::new_named("Child_2"), root, Some(0.5)).unwrap();
-//!
-//! // Add more children
-//! let child3 = tree.add_child(Node::new_named("Child_3"), child1, None).unwrap();
-//!
-//! // Get depth of child
-//! assert_eq!(tree.get(child3).unwrap().get_depth(), 2)
+//! assert_eq!(tree.get(a).unwrap().get_depth(), 1);
+//! assert_eq!(tree.n_leaves(), 2);
 //! ```
 //!
-//! ## Reading and writing trees
-//! This library can build trees strings (or files) encoded in the
-//! [newick](https://en.wikipedia.org/wiki/Newick_format) format:
+//! # Reading, writing, and traversing trees
+//!
+//! Parse a Newick string with [`tree::Tree::from_newick`] and serialize it with
+//! [`tree::Tree::to_newick`]. File-based equivalents are also available.
+//! Traversals return node IDs in visiting order: preorder, postorder, and
+//! level order work on general trees; inorder requires a binary tree.
+//!
 //! ```
 //! use phylotree::tree::Tree;
-//!
-//! let newick_str = "((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;";
-//! let tree = Tree::from_newick(newick_str).unwrap();
-//!
-//! assert_eq!(tree.to_newick().unwrap(), newick_str)
-//! ```
-//!
-//! ## Traversing trees
-//! Several traversals are implemented to visit nodes in a particular order. pre-order,
-//! post-order and level-order traversals are implemented on all trees. In-order traversls
-//! are implemented only for binary trees. A traversals returns a [`Vec`] of [`tree::NodeId`]
-//! in the order they are to be visited in.
-//! ```
-//! use phylotree::tree::{Tree, Node};
 //!
 //! //          |
 //! //     -----G-----
-//! //    |          |
-//! // ---C---    ---F---
-//! // |     |    |     |
-//! // A     B    D     E
-//!
-//! let newick_str = "((A,B)C,(D,E)F)G;";
-//! let mut tree = Tree::from_newick(newick_str).unwrap();
+//! //     |         |
+//! //  ---C---   ---F---
+//! //  |     |   |     |
+//! //  A     B   D     E
+//! let newick = "((A,B)C,(D,E)F)G;";
+//! let tree = Tree::from_newick(newick).unwrap();
 //! let root = tree.root().unwrap();
-//!
-//! let preorder: Vec<_> = tree.preorder(root).unwrap()
-//!     .iter()
-//!     .map(|&node_id| tree.get(node_id).unwrap().name.clone().unwrap())
+//! let names: Vec<_> = tree.preorder(root).unwrap().into_iter()
+//!     .map(|id| tree.get(id).unwrap().name.as_deref().unwrap())
 //!     .collect();
 //!
-//! assert_eq!(preorder, vec!["G", "C", "A", "B", "F", "D", "E"]);
-//!
-//! // Add a child node to F so the tree is no longer binary
-//! let f_idx = tree.get_by_name("F").unwrap().id;
-//! tree.add_child(Node::new_named("third_child"), f_idx, None).unwrap();
-//!
-//! assert!(tree.inorder(root).is_err())
+//! assert_eq!(names, vec!["G", "C", "A", "B", "F", "D", "E"]);
+//! assert_eq!(tree.to_newick().unwrap(), newick);
 //! ```
 //!
+//! # Comparing trees
 //!
-//! ## Comparing trees
-//! A number of metrics taking into account topology and branch lenghts are implemented
-//! in order to compare trees with each other:
+//! Robinson–Foulds (RF) distance compares groupings of tips. Choose rooted
+//! comparisons for descendant clades or unrooted comparisons for splits.
+//! Rotating children does not change the topology:
+//!
 //! ```
 //! use phylotree::tree::Tree;
 //!
-//! // The second tree is just a random rotation of the first,
-//! // they represent the same phylogeney
-//! let newick_orig = "((A:0.1,B:0.2)F:0.6,(C:0.3,D:0.4)E:0.5)G;";
-//! let newick_rota = "((D:0.3,C:0.4)E:0.5,(B:0.2,A:0.1)F:0.6)G;";
-//!
-//! let tree_orig = Tree::from_newick(newick_orig).unwrap();
-//! let tree_rota = Tree::from_newick(newick_rota).unwrap();
-//!
-//! let rf = tree_orig.unrooted_robinson_foulds(&tree_rota).unwrap();
-//!
-//! assert_eq!(rf, 0)
+//! let first = Tree::from_newick("((A,B),(C,D));").unwrap();
+//! let rotated = Tree::from_newick("((D,C),(B,A));").unwrap();
+//! assert_eq!(first.unrooted_robinson_foulds(&rotated).unwrap(), 0);
 //! ```
 //!
-//! ## Computing distances between nodes in a tree
-//! We can get the distance (either as number of edges or sum of edge lengths) betweem
-//! nodes of the tree as well as compute the whole phyhlogenetic distance matrix
-//! of a tree.
+//! [`tree::Tree::compare_topologies`] also computes normalized RF, weighted RF,
+//! and the Kuhner–Felsenstein branch score. Retain a [`tree::BipartitionProfile`]
+//! when comparing one tree against many others.
+//!
+//! # Distances and distance matrices
+//!
+//! [`tree::Tree::get_distance`] returns both the branch-length sum (when all
+//! lengths on the path are present) and the number of edges. A distance matrix
+//! stores all pairwise tip distances and supports PHYLIP input and output.
+//!
 //! ```
 //! use phylotree::tree::Tree;
 //!
-//! // The following tree is encoded by the newick string:
 //! //          |
 //! //     +----+----+
 //! //     |         |
@@ -139,30 +100,40 @@
 //! //            |     |
 //! //            T2    |
 //! //                  T0
+//! let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
+//! let t0 = tree.get_by_name("T0").unwrap().id;
+//! let t3 = tree.get_by_name("T3").unwrap().id;
+//! let (length, edges) = tree.get_distance(t0, t3).unwrap();
 //!
-//! let newick = "((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);";
-//! let tree = Tree::from_newick(newick).unwrap();
+//! assert_eq!(edges, 4);
+//! assert!((length.unwrap() - 1.6).abs() < 1e-12);
 //!
-//! let t0 = tree.get_by_name("T0").unwrap();
-//! let t3 = tree.get_by_name("T3").unwrap();
-//!
-//! let (edge_sum, num_edges) = tree.get_distance(t0.id, t3.id).unwrap();
-//!
-//! assert_eq!(num_edges, 4);
-//! assert_eq!(edge_sum, Some(0.5 + 0.6 + 0.3 + 0.2));
-//!
-//! // Compute the whole distance matrix
-//! let matrix = tree.distance_matrix_recursive().unwrap();
-//! let phylip="\
-//! 4
-//! T0    0  1.6  0.9  1.6
-//! T1    1.6  0  1.5  0.4
-//! T2    0.9  1.5  0  1.5
-//! T3    1.6  0.4  1.5  0
-//! ";
-//!
-//! assert_eq!(matrix.to_phylip(true).unwrap(), phylip)
+//! let matrix = tree.distance_matrix().unwrap();
+//! assert!((*matrix.get("T0", "T3").unwrap() - 1.6).abs() < 1e-12);
+//! let phylip = matrix.to_phylip(true).unwrap();
+//! assert!(phylip.starts_with("4\n"));
 //! ```
+//!
+//! To obtain just the longest tip-to-tip distance, use [`tree::Tree::diameter`];
+//! it runs in linear time without constructing a distance matrix.
+//!
+//! # Simulating trees
+//!
+//! Supply your own RNG for reproducible simulations. Choose a topology prior
+//! independently of its branch-length prior:
+//!
+//! ```
+//! use phylotree::simulation::{simulate, BranchLengths, Topology};
+//! use rand::{rngs::StdRng, SeedableRng};
+//!
+//! let mut rng = StdRng::seed_from_u64(42);
+//! let mut tree = simulate(20, Topology::UniformUnrooted,
+//!     BranchLengths::Gamma { shape: 2.0, scale: 0.05 }, &mut rng).unwrap();
+//! tree.rescale_diameter(1.0).unwrap();
+//! assert!((tree.diameter().unwrap() - 1.0).abs() < 1e-12);
+//! ```
+//!
+//! See [`simulation`] for the uniform, ETE3, Yule, and birth-death priors.
 //!
 use std::collections::VecDeque;
 
@@ -194,7 +165,16 @@ pub enum TreeShape {
     Ete3,
 }
 
-/// Genereates a random binary tree of a given size.
+/// Generate an ETE3-style binary topology using the thread-local RNG.
+///
+/// Requires at least three tips. `brlens` controls whether lengths are sampled
+/// from `sampler_type`; see [`simulation::simulate`] for seedable priors.
+///
+/// ```
+/// use phylotree::{generate_tree, distr::Distr};
+/// let tree = generate_tree(10, true, Distr::Exponential).unwrap();
+/// assert_eq!(tree.n_leaves(), 10);
+/// ```
 pub fn generate_tree(
     n_leaves: usize,
     brlens: bool,
@@ -243,7 +223,16 @@ pub fn generate_tree(
     Ok(tree)
 }
 
-/// Generate a random binary tree under the Yule model.
+/// Generate a Yule binary topology using the thread-local RNG.
+///
+/// Requires at least three tips; `brlens` enables the selected branch prior.
+/// See [`simulation::simulate`] for caller-owned RNG state.
+///
+/// ```
+/// use phylotree::{generate_yule, distr::Distr};
+/// let tree = generate_yule(10, true, Distr::Exponential).unwrap();
+/// assert_eq!(tree.n_leaves(), 10);
+/// ```
 pub fn generate_yule(
     n_leaves: usize,
     brlens: bool,
@@ -289,8 +278,15 @@ pub fn generate_yule(
     Ok(tree)
 }
 
-/// Generates a caterpillar tree by adding children to the last node addesd to the tree
-/// until we reach the desired numebr of leaves.
+/// Generate a caterpillar topology with at least three tips.
+///
+/// `brlens` enables lengths sampled from `sampler_type` using the thread-local RNG.
+///
+/// ```
+/// use phylotree::{generate_caterpillar, distr::Distr};
+/// let tree = generate_caterpillar(10, true, Distr::Exponential).unwrap();
+/// assert_eq!(tree.n_leaves(), 10);
+/// ```
 pub fn generate_caterpillar(
     n_leaves: usize,
     brlens: bool,

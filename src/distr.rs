@@ -1,4 +1,7 @@
-//! Distributions to generate branch lengths inb random trees
+//! Fixed branch-length distributions for the legacy `generate_*` functions.
+//!
+//! Use [`crate::simulation::BranchLengths`] for configurable exponential/Gamma
+//! parameters with caller-owned RNG state; see [`crate::simulation::simulate`].
 //!
 
 use std::fmt::{Debug, Display};

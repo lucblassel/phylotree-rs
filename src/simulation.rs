@@ -1,9 +1,13 @@
-//! Seedable topology and branch-length priors.
+//! Seedable topology and branch-length priors; see [`simulate`].
 //!
-//! Uniform labeled topologies (PDA), ETE3's deque process and Yule topologies
-//! are different distributions. Birth-death uses DendroPy's *first hitting n*
-//! convention, restarting extinct realizations and pruning extinct lineages;
-//! it does not implement GSA or conditioning on a fixed crown age.
+//! Uniform labeled (PDA), ETE3 deque, and Yule topologies are distinct priors.
+//! Labels `T1..Tn` are exchangeable. Seeds reproduce results with the same
+//! RNG/dependency versions, without matching Python random streams.
+//!
+//! Independent [`BranchLengths`] replace non-root edges after topology sampling;
+//! [`BranchLengths::ProcessTime`] retains birth-death times. Root stems are omitted.
+//! Use [`Tree::diameter`] and [`Tree::rescale_diameter`] for diameter operations.
+//! Dataset-specific rate changes and empirical rescaling belong in applications.
 use crate::tree::{Node, NodeId, Tree, TreeError};
 use rand::{seq::SliceRandom, Rng};
 use rand_distr::{Distribution, Exp, Gamma};
@@ -25,6 +29,9 @@ pub enum SimulationError {
 }
 
 /// Independent edge-length prior, or the birth-death process's elapsed times.
+///
+/// Defaults to exponential with mean 0.1. Gamma uses **scale**, not rate.
+/// See [`simulate`] for a seeded Gamma example and [`BirthDeath`] for process times.
 #[derive(Debug, Clone, Copy)]
 pub enum BranchLengths {
     /// Exponential distribution parameterized by its mean, not its rate.
@@ -50,7 +57,27 @@ impl Default for BranchLengths {
     }
 }
 
-/// Constant-rate birth-death process and explicit resource limits.
+/// Constant-rate birth-death process with explicit resource limits.
+///
+/// Starts with one lineage, stops on first reaching the requested extant count,
+/// restarts on extinction, prunes extinct lineages, and suppresses unary nodes.
+/// This matches DendroPy's non-GSA, extant-count conditioning, without a fixed
+/// crown age or extra terminal wait. Process-time tips are contemporaneous;
+/// exactly two newborn terminal edges are zero. The pre-crown stem is omitted.
+/// Limits return errors rather than substituting another prior.
+///
+/// Defaults: birth rate 1, death rate 0.5, 10,000,000 events, 100,000 restarts.
+///
+/// ```
+/// use phylotree::simulation::{simulate, BirthDeath, BranchLengths, Topology};
+/// use rand::{rngs::StdRng, SeedableRng};
+/// let mut rng = StdRng::seed_from_u64(42);
+/// let tree = simulate(20, Topology::BirthDeath(BirthDeath::default()),
+///     BranchLengths::ProcessTime, &mut rng).unwrap();
+/// assert_eq!(tree.n_leaves(), 20);
+/// ```
+///
+/// Reference: [DendroPy birth-death implementation](https://jeetsukumaran.github.io/DendroPy/_modules/dendropy/model/birthdeath.html).
 #[derive(Debug, Clone, Copy)]
 pub struct BirthDeath {
     /// Per-lineage birth rate (strictly positive).
@@ -76,11 +103,14 @@ impl Default for BirthDeath {
 /// The distribution on topology; the root is retained for the rooted processes.
 #[derive(Debug, Clone, Copy)]
 pub enum Topology {
-    /// Uniform on (2n-5)!! unrooted labeled binary topologies.
+    /// Uniform on (2n-5)!! unrooted labeled binary topologies (at least three tips).
+    /// Inserts labels on uniformly chosen edges; represented with a degree-three root.
     UniformUnrooted,
     /// Uniform on (2n-3)!! rooted labeled binary topologies, including stem insertions.
     UniformRooted,
-    /// ETE3 3.1.3 Tree.populate: pop either end of a leaf deque with equal probability.
+    /// ETE3 3.1.3 `Tree.populate`: split the leaf popped from either end of a deque.
+    /// Each end has probability 1/2; this differs from uniformly choosing a leaf.
+    /// See the [ETE3 source](https://github.com/etetoolkit/ete/blob/3.1.3/ete3/coretype/tree.py).
     Ete3,
     /// Yule/Harding topology: choose a uniformly random extant leaf to split.
     Yule,
@@ -92,6 +122,9 @@ pub enum Topology {
 ///
 /// `ProcessTime` is valid only for `BirthDeath`. Other branch priors replace
 /// all non-root edges *after* topology generation. The root stem is omitted.
+///
+/// Returns an error for invalid parameters, fewer than two tips (three for
+/// unrooted uniform trees), or exhausted birth-death resource limits.
 ///
 /// ```
 /// use phylotree::simulation::{simulate, Topology, BranchLengths};

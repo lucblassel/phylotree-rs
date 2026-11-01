@@ -45,6 +45,16 @@ impl SupportCommentMode {
     /// Creates a custom comment mode matching `key` exactly.
     ///
     /// Both borrowed string slices and owned strings are accepted.
+    ///
+    /// ```
+    /// use phylotree::tree::{NewickParseOptions, SupportCommentMode, Tree};
+    /// let options = NewickParseOptions {
+    ///     support_comments: SupportCommentMode::custom("posterior"),
+    ///     ..Default::default()
+    /// };
+    /// let tree = Tree::from_newick_with_options("(A,B)[posterior=0.95];", options).unwrap();
+    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().support, Some(0.95));
+    /// ```
     pub fn custom(key: impl Into<String>) -> Self {
         Self::Custom(key.into())
     }

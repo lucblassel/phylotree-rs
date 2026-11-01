@@ -95,6 +95,12 @@ impl NewickSupportFormat {
     /// Creates a custom comment format using `key` in `[key=<support>]`.
     ///
     /// Both borrowed string slices and owned strings are accepted.
+    ///
+    /// ```
+    /// use phylotree::tree::NewickSupportFormat;
+    /// let format = NewickSupportFormat::custom_comment("posterior");
+    /// assert_eq!(format, NewickSupportFormat::CustomComment("posterior".into()));
+    /// ```
     pub fn custom_comment(key: impl Into<String>) -> Self {
         Self::CustomComment(key.into())
     }
@@ -152,6 +158,11 @@ pub enum NewickFormat {
 
 impl NewickFormat {
     /// Expands this compatibility preset into independent serialization options.
+    ///
+    /// ```
+    /// use phylotree::tree::{NewickFormat, NewickNameFormat};
+    /// assert_eq!(NewickFormat::OnlyNames.options().names, NewickNameFormat::All);
+    /// ```
     pub fn options(&self) -> NewickSerializeOptions {
         let support = NewickSupportFormat::None;
         match self {

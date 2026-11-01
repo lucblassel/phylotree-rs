@@ -132,6 +132,12 @@ pub struct Tree {
 /// ----
 impl Tree {
     /// Create a new empty Tree object
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::new();
+    /// assert_eq!(tree.size(), 0);
+    /// ```
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -153,6 +159,13 @@ impl Tree {
     // ############################
 
     /// Add a new node to the tree.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, Node};
+    /// let mut tree = Tree::new();
+    /// let root = tree.add(Node::new_named("root"));
+    /// assert_eq!(tree.root().unwrap(), root);
+    /// ```
     pub fn add(&mut self, node: Node) -> NodeId {
         self.reset_bipartition_cache();
         let idx = NodeId(self.nodes.len());
@@ -211,6 +224,13 @@ impl Tree {
     }
 
     /// Get a reference to a specific Node of the tree
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let id = tree.root().unwrap();
+    /// assert!(tree.get(id).unwrap().is_root());
+    /// ```
     pub fn get(&self, id: NodeId) -> Result<&Node, TreeError> {
         if id.index() >= self.nodes.len() {
             return Err(TreeError::NodeNotFound(id));
@@ -224,6 +244,14 @@ impl Tree {
     }
 
     /// Get a mutable reference to a specific Node of the tree
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let id = tree.root().unwrap();
+    /// tree.get_mut(id).unwrap().set_name("root".into());
+    /// assert_eq!(tree.get(id).unwrap().name.as_deref(), Some("root"));
+    /// ```
     pub fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, TreeError> {
         if id.index() >= self.nodes.len() || self.nodes[id.index()].deleted {
             return Err(TreeError::NodeNotFound(id));
@@ -253,6 +281,13 @@ impl Tree {
     }
 
     /// Get a mutable reference to a node in the tree by name
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.get_by_name_mut("A").unwrap().set_name("X".into());
+    /// assert!(tree.get_by_name("X").is_some());
+    /// ```
     pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
         let index = self
             .nodes
@@ -288,6 +323,12 @@ impl Tree {
 
     /// Gets the root node. In the case of unrooted trees this node is a "virtual root"
     /// that has exactly 3 children.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.get(tree.root().unwrap()).unwrap().is_root());
+    /// ```
     pub fn root(&self) -> Result<NodeId, TreeError> {
         self.nodes
             .iter()
@@ -555,6 +596,12 @@ impl Tree {
     // #######################################
 
     /// Check if the tree is Binary
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.is_binary().unwrap());
+    /// ```
     pub fn is_binary(&self) -> Result<bool, TreeError> {
         for node in self.nodes.iter() {
             // Root of the tree
@@ -573,6 +620,12 @@ impl Tree {
     }
 
     /// Checks if the tree is rooted (i.e. the root node exists and has exactly 2 children)
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.is_rooted().unwrap());
+    /// ```
     pub fn is_rooted(&self) -> Result<bool, TreeError> {
         let root_id = self.root()?;
 
@@ -580,6 +633,12 @@ impl Tree {
     }
 
     /// Checks if all the tips have unique names (This check assumes that all tips have a name)
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.has_unique_tip_names().unwrap());
+    /// ```
     pub fn has_unique_tip_names(&self) -> Result<bool, TreeError> {
         let mut names = HashSet::new();
         for name in self.leaf_names() {
@@ -746,6 +805,12 @@ impl Tree {
     }
 
     /// Computes the number of cherries in a tree
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.n_cherries().unwrap(), 2);
+    /// ```
     pub fn n_cherries(&self) -> Result<usize, TreeError> {
         if !self.is_binary()? {
             return Err(TreeError::IsNotBinary);
@@ -766,15 +831,14 @@ impl Tree {
         }
     }
 
-    /// Computes the Colless index for the tree.
-    /// The colless index, $I_c$, measures the imbalance of a phylogenetic tree:
-    /// $$
-    /// I_c = \sum_{i \in nodes} |L_i - R_i|
-    /// $$
+    /// Sum absolute differences in descendant tip counts at each bifurcation.
+    /// Requires a rooted binary tree; zero indicates a balanced topology.
     ///
-    /// Where $L_i$ is the number of leaves in the left subtree of node $i$ and
-    /// $R_i$ the number of leaves in the right subtree of $i$.
-    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.colless().unwrap(), 0);
+    /// ```
     pub fn colless(&self) -> Result<usize, TreeError> {
         self.check_rooted_binary()?;
 
@@ -794,14 +858,16 @@ impl Tree {
         Ok(colless)
     }
 
-    /// Computes the normalized colless statistic with a Yule null model:
-    /// $$
-    /// I_{yule} = \frac{I_c - n\cdot\log(n) - n(\gamma-1-\log(2))}{n}
-    /// $$
-    /// Where $I_c$ is the unnormalized colless index *(computed with [`Tree::colless()`])*,
-    /// $n$ the number of leaves
-    /// and $\gamma$ the [Euler constant](https://en.wikipedia.org/wiki/Euler%27s_constant).
-    /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/colless.html))*
+    /// Return Colless normalized against the Yule expectation.
+    ///
+    /// Uses `(Ic - n * ln(n) - n * (gamma - 1 - ln(2))) / n`, where `gamma`
+    /// is Euler's constant; see [`Self::colless`].
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.colless_yule().unwrap().is_finite());
+    /// ```
     pub fn colless_yule(&self) -> Result<f64, TreeError> {
         self.colless().map(|i_c| {
             let n = self.n_leaves() as f64;
@@ -811,21 +877,27 @@ impl Tree {
         })
     }
 
-    /// Computes the normalized colless statistic with a PDA null model:
-    /// $$
-    /// I_{PDA} = \frac{I_c}{n^{3/2}}
-    /// $$
-    /// Where $I_c$ is the unnormalized colless index *(computed with [`Tree::colless()`])*
-    /// and $n$ the number of leaves.
-    /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/colless.html))*
+    /// Return Colless divided by `n^(3/2)` for a PDA null model.
+    /// Requires a rooted binary tree; see [`Self::colless`].
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.colless_pda().unwrap(), 0.0);
+    /// ```
     pub fn colless_pda(&self) -> Result<f64, TreeError> {
         self.colless()
             .map(|i_c| i_c as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
     }
 
-    /// Computes the Sackin index. The Sackin index, $I_s$, is computed by taking the
-    /// sum over all internal nodes of the number of leaves descending from that node.
-    /// A smaller Sackin index means a more balanced tree.
+    /// Sum the depths of all tips (the Sackin imbalance index).
+    /// Requires a rooted binary tree; smaller values indicate greater balance.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.sackin().unwrap(), 8);
+    /// ```
     pub fn sackin(&self) -> Result<usize, TreeError> {
         self.check_rooted_binary()?;
 
@@ -836,13 +908,14 @@ impl Tree {
             .sum())
     }
 
-    /// Computes the normalized Sackin index with a Yule null model:
-    /// $$
-    /// I_{yule} = \frac{I_s - 2n\cdot \sum_{j=2}^n \frac{1}{j}}{n}
-    /// $$
-    /// With $I_s$ the unnormalized Sackin index *(computed with [`Tree::sackin()`])*
-    /// and $n$ the number of leaves in the tree.
-    /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/sackin.html))*
+    /// Return Sackin normalized against the Yule expectation.
+    /// Uses `(Is - 2n * sum(1/j, j=2..n)) / n`; see [`Self::sackin`].
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.sackin_yule().unwrap().is_finite());
+    /// ```
     pub fn sackin_yule(&self) -> Result<f64, TreeError> {
         self.sackin().map(|i_n| {
             let n = self.n_leaves();
@@ -852,13 +925,14 @@ impl Tree {
         })
     }
 
-    /// Computes the normalized sackin statistic with a PDA null model:
-    /// $$
-    /// I_{PDA} = \frac{I_s}{n^{3/2}}
-    /// $$
-    /// With $I_s$ the unnormalized Sackin index *(computed with [`Tree::sackin()`])*
-    /// and $n$ the number of leaves in the tree.
-    /// *([see also apTreeshape](https://search.r-project.org/CRAN/refmans/apTreeshape/html/sackin.html))*
+    /// Return Sackin divided by `n^(3/2)` for a PDA null model.
+    /// Requires a rooted binary tree; see [`Self::sackin`].
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.sackin_pda().unwrap(), 1.0);
+    /// ```
     pub fn sackin_pda(&self) -> Result<f64, TreeError> {
         self.sackin()
             .map(|i_n| i_n as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
@@ -887,6 +961,13 @@ impl Tree {
     }
 
     /// Returns the stored taxon index, if it is currently available.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.rebuild_taxon_index().unwrap();
+    /// assert_eq!(tree.cached_taxon_index().unwrap().len(), 4);
+    /// ```
     pub fn cached_taxon_index(&self) -> Option<&TaxonIndex> {
         self.taxon_index.as_ref()
     }
@@ -910,6 +991,12 @@ impl Tree {
     }
 
     /// Recomputes and stores the mapping between taxon labels and bit positions.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.rebuild_taxon_index().unwrap().len(), 4);
+    /// ```
     pub fn rebuild_taxon_index(&mut self) -> Result<&TaxonIndex, TreeError> {
         self.taxon_index = None;
         self.taxon_index = Some(self.compute_taxon_index()?);
@@ -925,6 +1012,13 @@ impl Tree {
     }
 
     /// Converts the stored side of a partition to concatenated taxon labels.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let partition = tree.get_partitions().unwrap().into_iter().next().unwrap();
+    /// assert_eq!(tree.partition_to_leaves(&partition).unwrap().chars().count(), 2);
+    /// ```
     pub fn partition_to_leaves(&self, partition: &Partition) -> Result<String, TreeError> {
         let taxon_index = self.taxon_index()?;
         Ok(partition
@@ -938,11 +1032,24 @@ impl Tree {
     /// Creating a profile does not populate or otherwise modify this tree's
     /// optional taxon-index cache. The storage strategy controls whether the
     /// canonical unrooted split projection is retained by the profile.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.taxon_index().len(), 4);
+    /// ```
     pub fn bipartition_profile(&self) -> Result<BipartitionProfile, TreeError> {
         BipartitionProfile::from_tree(self)
     }
 
     /// Get all partitions of a tree.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.get_partitions().unwrap().len(), 1);
+    /// ```
     pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
         self.bipartition_profile()?
             .partition_set(RobinsonFouldsMode::Unrooted)
@@ -979,6 +1086,14 @@ impl Tree {
     ///
     /// Bipartitions are no longer cached on trees; use [`Tree::bipartition_profile`]
     /// to retain a computed representation for repeated comparisons.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.rebuild_taxon_index().unwrap();
+    /// tree.reset_bipartition_cache();
+    /// assert!(tree.cached_taxon_index().is_none());
+    /// ```
     pub fn reset_bipartition_cache(&mut self) {
         self.taxon_index = None;
     }
@@ -989,6 +1104,13 @@ impl Tree {
 
     /// Computes the Robinson–Foulds distance using an explicit rooted or
     /// unrooted interpretation.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// use phylotree::tree::RobinsonFouldsMode;
+    /// assert_eq!(tree.robinson_foulds(&tree, RobinsonFouldsMode::Unrooted).unwrap(), 0);
+    /// ```
     pub fn robinson_foulds(
         &self,
         other: &Self,
@@ -999,25 +1121,37 @@ impl Tree {
     }
 
     /// Computes rooted Robinson–Foulds distance from descendant clades.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.rooted_robinson_foulds(&tree).unwrap(), 0);
+    /// ```
     pub fn rooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
         self.robinson_foulds(other, RobinsonFouldsMode::Rooted)
     }
 
     /// Computes unrooted Robinson–Foulds distance from canonical splits.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.unrooted_robinson_foulds(&tree).unwrap(), 0);
+    /// ```
     pub fn unrooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
         self.robinson_foulds(other, RobinsonFouldsMode::Unrooted)
     }
 
-    /// Computes the normalized Robinson Foulds distance between two trees
-    /// [(Robinson & Foulds, 1981)](https://doi.org/10.1016/0025-5564(81)90043-2).
-    /// The RF distance is normalized by the maximum possible RF distance for both trees
-    /// *(i.e the number of bipartitions in both trees)* so that the resulting distance
-    /// is contained within [0, 1]:
-    /// $$
-    /// RF_{norm} = \frac{RF}{|A| + |B|}
-    /// $$
-    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees.
-    /// See also [Tree::compare_topologies()]
+    /// Return RF divided by the total number of groupings in both trees.
+    /// The result lies in `[0, 1]`; two empty grouping sets have distance zero.
+    /// See [`Self::robinson_foulds`] for the rooted/unrooted interpretation.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// use phylotree::tree::RobinsonFouldsMode;
+    /// assert_eq!(tree.robinson_foulds_norm(&tree, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// ```
     pub fn robinson_foulds_norm(
         &self,
         other: &Self,
@@ -1027,36 +1161,31 @@ impl Tree {
             .robinson_foulds_norm(&other.bipartition_profile()?, mode)
     }
 
-    /// Computes the weighted Robinson Foulds distance between two trees
-    /// [(Robinson & Foulds, 1979)](https://doi.org/10.1007/BFb0102690).
-    /// This distance is equal to the absolute difference of branch lengths for
-    /// matched bipartitions between the two trees, plus branch lenghts for unique bipartitions:
-    /// $$
-    /// RF_{weighted} = \sum_{e \in A\cap B} |d_{(e,A)} - d_{(e,B)}| +
-    /// \sum_{e \in A\setminus B}d_{(e,A)} +
-    /// \sum_{e \in B\setminus A}d_{(e,B)}
-    /// $$
-    /// Where $A$ and $B$ are the sets of bipartitions of the first and second trees,
-    /// and $d_{(e,A)}$ the branch length of bipartition $e$ in the first tree ($A$).
-    /// See also [Tree::compare_topologies()]
+    /// Sum absolute branch-length differences over unrooted splits.
+    /// Unmatched splits contribute their full length; requires matching taxa
+    /// and lengths on the relevant internal branches.
+    /// [Robinson & Foulds (1979)](https://doi.org/10.1007/BFb0102690).
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.weighted_robinson_foulds(&tree).unwrap(), 0.0);
+    /// ```
     pub fn weighted_robinson_foulds(&self, other: &Self) -> Result<f64, TreeError> {
         self.bipartition_profile()?
             .weighted_robinson_foulds(&other.bipartition_profile()?, RobinsonFouldsMode::Unrooted)
     }
 
-    /// Computes the kuhner felsenstein branch score between two trees,
-    /// [(Kuhner & Felsenstein, 1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
-    /// The distance is computed by taking the squared difference of branch lengths for
-    /// matched bipartitions between the two trees, plus squared branch lenghts for unique bipartitions.
-    /// The branch score is then derived by taking the square root of that total sum:
-    /// $$
-    /// KF = \sqrt{
-    ///     \sum_{e \in A\cap B} (d_{(e,A)} - d_{(e,B)})^2 +
-    ///     \sum_{e \in A\setminus B}d_{(e,A)}^2 +
-    ///     \sum_{e \in B\setminus A}d_{(e,B)}^2
-    /// }
-    /// $$
-    /// See also [Tree::compare_topologies()]
+    /// Return the Euclidean branch score over unrooted splits.
+    /// Unmatched splits are compared with length zero; requires matching taxa
+    /// and lengths on the relevant internal branches.
+    /// [Kuhner & Felsenstein (1994)](https://doi.org/10.1093/oxfordjournals.molbev.a040126).
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert_eq!(tree.kuhner_felsenstein(&tree).unwrap(), 0.0);
+    /// ```
     pub fn kuhner_felsenstein(&self, other: &Self) -> Result<f64, TreeError> {
         self.bipartition_profile()?
             .kuhner_felsenstein(&other.bipartition_profile()?, RobinsonFouldsMode::Unrooted)
@@ -1795,6 +1924,13 @@ impl Tree {
     }
 
     /// Recompute node depths and set them correctly.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.reset_depths().unwrap();
+    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().get_depth(), 0);
+    /// ```
     pub fn reset_depths(&mut self) -> Result<(), TreeError> {
         let root = self.root()?;
         self.reset_depth_impl(root, 0)
@@ -1973,6 +2109,12 @@ impl Tree {
     }
 
     /// Writes the tree to a newick file
+    ///
+    /// ```no_run
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.to_file(std::path::Path::new("tree.nwk")).unwrap();
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn to_file(&self, path: &Path) -> Result<(), TreeError> {
         match fs::write(path, self.to_newick()?) {
@@ -1982,12 +2124,24 @@ impl Tree {
     }
 
     /// Creates a tree from a newick file
+    ///
+    /// ```no_run
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_file(std::path::Path::new("tree.nwk")).unwrap();
+    /// println!("{} tips", tree.n_leaves());
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
         Self::from_file_with_options(path, NewickParseOptions::default())
     }
 
     /// Creates a tree from a Newick file using explicit parsing options.
+    ///
+    /// ```no_run
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_file_with_options(std::path::Path::new("tree.nwk"), Default::default()).unwrap();
+    /// println!("{} tips", tree.n_leaves());
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file_with_options(
         path: &Path,
@@ -1998,6 +2152,12 @@ impl Tree {
     }
 
     /// Outputs a Nexus formatted string of the tree
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.to_nexus().unwrap().contains("#NEXUS"));
+    /// ```
     pub fn to_nexus(&self) -> Result<String, TreeError> {
         let nwk = self.to_newick()?;
         let n = self.n_leaves();

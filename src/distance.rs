@@ -167,11 +167,23 @@ where
     ///
     /// The distances must be in row-major order over the strict lower triangle,
     /// containing exactly `n * (n - 1) / 2` values for `n` taxa.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::new(vec!["A".into(), "B".into(), "C".into()], &[1.0, 2.0, 3.0]).unwrap();
+    /// assert_eq!(*matrix.get("B", "C").unwrap(), 3.0);
+    /// ```
     pub fn new(taxa: Vec<String>, matrix: &[T]) -> Result<Self, MatrixError> {
         Self::from_precomputed(taxa, matrix.to_vec())
     }
 
     /// Creates a zero-filled distance matrix for the supplied taxa.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::<f64>::zeros(vec!["A".into(), "B".into()]).unwrap();
+    /// assert_eq!(*matrix.get_by_index(0, 1).unwrap(), 0.0);
+    /// ```
     pub fn zeros(taxa: Vec<String>) -> Result<Self, MatrixError> {
         let n_pairs = Self::pair_count(taxa.len())?;
         Self::from_precomputed(taxa, vec![zero(); n_pairs])
@@ -219,6 +231,13 @@ where
     }
 
     /// Replaces the taxon labels without changing matrix dimensions or values.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// matrix.set_taxa(vec!["X".into(), "Y".into()]).unwrap();
+    /// assert_eq!(*matrix.get("X", "Y").unwrap(), 2.0);
+    /// ```
     pub fn set_taxa(&mut self, taxa: Vec<String>) -> Result<(), MatrixError> {
         if taxa.len() != self.len() {
             return Err(MatrixError::SizeError {
@@ -252,6 +271,12 @@ where
     }
 
     /// Get numerical index associated to taxon identifier
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.get_taxa_index("B").unwrap(), 1);
+    /// ```
     pub fn get_taxa_index(&self, id: &str) -> Result<usize, MatrixError> {
         self.taxa
             .iter()
@@ -299,6 +324,12 @@ where
     }
 
     /// Gets the distance between two taxa by matrix index.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(*matrix.get_by_index(0, 1).unwrap(), 2.0);
+    /// ```
     pub fn get_by_index(&self, i: usize, j: usize) -> Result<&T, MatrixError> {
         self.validate_index(i)?;
         self.validate_index(j)?;
@@ -306,6 +337,12 @@ where
     }
 
     /// Gets the distance between two taxa by label.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(*matrix.get("A", "B").unwrap(), 2.0);
+    /// ```
     pub fn get(&self, id_1: &str, id_2: &str) -> Result<&T, MatrixError> {
         let i = self.get_taxa_index(id_1)?;
         let j = self.get_taxa_index(id_2)?;
@@ -313,6 +350,13 @@ where
     }
 
     /// Sets the distance between two taxa by matrix index.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// matrix.set_by_index(0, 1, 3.0).unwrap();
+    /// assert_eq!(*matrix.get_by_index(1, 0).unwrap(), 3.0);
+    /// ```
     pub fn set_by_index(&mut self, i: usize, j: usize, dist: T) -> Result<(), MatrixError> {
         self.validate_index(i)?;
         self.validate_index(j)?;
@@ -330,6 +374,13 @@ where
     }
 
     /// Sets the distance between two taxa by label.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// matrix.set("A", "B", 3.0).unwrap();
+    /// assert_eq!(*matrix.get("B", "A").unwrap(), 3.0);
+    /// ```
     pub fn set(&mut self, id_1: &str, id_2: &str, dist: T) -> Result<(), MatrixError> {
         let i = self.get_taxa_index(id_1)?;
         let j = self.get_taxa_index(id_2)?;
@@ -339,6 +390,12 @@ where
     /// Get the distance matrix as a HashMap containing taxa pairs as keys
     /// and pairwise distances as values. This contains 2 copies of each distance
     /// (one for each permutation of the pair of names), and diagonal zero entries.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.to_map()[&("A".into(), "B".into())], 2.0);
+    /// ```
     pub fn to_map(&self) -> HashMap<(String, String), T> {
         HashMap::from_iter(self.taxa.iter().enumerate().flat_map(|(i, taxon1)| {
             self.taxa.iter().enumerate().map(move |(j, taxon2)| {
@@ -351,6 +408,13 @@ where
     }
 
     /// Outputs a matrix as a phylip formatted string
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// let text = matrix.to_phylip(true).unwrap();
+    /// assert_eq!(DistanceMatrix::<f64>::from_phylip_strict(&text, true).unwrap().len(), 2);
+    /// ```
     pub fn to_phylip(&self, square: bool) -> Result<String, MatrixError> {
         if self.is_empty() {
             return Ok("0\n".to_owned());
@@ -384,6 +448,12 @@ where
     }
 
     /// Writes the matrix to a phylip file
+    ///
+    /// ```no_run
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// matrix.to_file(std::path::Path::new("distances.phy"), true).unwrap();
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn to_file(&self, path: &Path, square: bool) -> Result<(), MatrixError> {
         match fs::write(path, self.to_phylip(square)?) {
@@ -418,6 +488,12 @@ where
     /// Build a distance matrix from the lower triangle of a phylip file.
     /// Does not enforce symmetry in the phylip file, it should be faster than
     /// [`DistanceMatrix::from_phylip_strict`]. Also does not check if all the rows are the same size
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::<f64>::from_phylip_tril("2\nA\nB 2\n").unwrap();
+    /// assert_eq!(*matrix.get("A", "B").unwrap(), 2.0);
+    /// ```
     pub fn from_phylip_tril(phylip: &str) -> Result<Self, PhylipParseError<T>> {
         let mut lines = phylip.lines();
         let size: usize = lines
@@ -452,6 +528,12 @@ where
     /// The parser requires exactly the declared number of rows and exactly the
     /// expected number of distances in every row. Square matrices must have a
     /// zero diagonal and exact symmetry. All parsed distances must be finite.
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::<f64>::from_phylip_strict("2\nA 0 2\nB 2 0\n", true).unwrap();
+    /// assert_eq!(*matrix.get("A", "B").unwrap(), 2.0);
+    /// ```
     pub fn from_phylip_strict(phylip: &str, square: bool) -> Result<Self, PhylipParseError<T>> {
         let mut lines = phylip.lines();
         let size = lines
@@ -535,6 +617,12 @@ where
 
     /// Find smallest distance in the distance matrix as well as the
     /// corresponding index
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.min().unwrap().1, 2.0);
+    /// ```
     pub fn min(&self) -> Option<((usize, usize), T)> {
         self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
             None => Some(((i, j), *v)),
@@ -550,6 +638,12 @@ where
 
     /// Find largest distance in the distance matrix as well as the
     /// corresponding index
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.max().unwrap().1, 2.0);
+    /// ```
     pub fn max(&self) -> Option<((usize, usize), T)> {
         self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
             None => Some(((i, j), *v)),
@@ -564,6 +658,12 @@ where
     }
 
     /// Reads the matrix from a phylip file
+    ///
+    /// ```no_run
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::<f64>::from_file(std::path::Path::new("distances.phy"), true).unwrap();
+    /// println!("{} taxa", matrix.len());
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path, square: bool) -> Result<Self, PhylipParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
@@ -571,12 +671,24 @@ where
     }
 
     /// Iterator over the lower triangle of the matrix
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.iter().copied().collect::<Vec<_>>(), vec![2.0]);
+    /// ```
     pub fn iter(&self) -> impl Iterator<Item = &'_ T> {
         self.matrix.iter()
     }
 
     /// Iterator over the lower triangle of the matrix with the corresponding
     /// (row,col) matrix indices
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// assert_eq!(matrix.indexed_iter().next().unwrap(), ((1, 0), &2.0));
+    /// ```
     pub fn indexed_iter(&self) -> impl Iterator<Item = ((usize, usize), &'_ T)> {
         self.iter()
             .enumerate()
@@ -603,6 +715,13 @@ where
 {
     /// Build a [`Tree`] from the distance matrix using the
     /// [UPGMA](https://en.wikipedia.org/wiki/UPGMA) algorithm
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// let tree = matrix.upgma().unwrap();
+    /// assert_eq!(tree.n_leaves(), 2);
+    /// ```
     pub fn upgma(&self) -> Result<Tree, MatrixError> {
         // Setup
         let mut dm = (*self).clone();

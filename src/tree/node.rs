@@ -65,6 +65,13 @@ pub struct Node {
 
 impl Node {
     /// Creates a new Node
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// assert!(node.is_tip());
+    /// assert!(node.is_root());
+    /// ```
     pub fn new() -> Self {
         Self {
             id: NodeId(0),
@@ -82,6 +89,13 @@ impl Node {
     }
 
     /// Creates a new named Node
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// let node = Node::new_named("A");
+    /// assert_eq!(node.name.as_deref(), Some("A"));
+    /// ```
     pub fn new_named(name: &str) -> Self {
         Self {
             id: NodeId(0),
@@ -99,6 +113,13 @@ impl Node {
     }
 
     /// Sets the internal Node name
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// node.set_name("A".into());
+    /// assert_eq!(node.name.as_deref(), Some("A"));
+    /// ```
     pub fn set_name(&mut self, name: String) {
         self.name = Some(name);
     }
@@ -108,8 +129,17 @@ impl Node {
         self.id = id;
     }
 
-    /// Set the parent node
-    /// See `add_child` for example usage
+    /// Set this node's parent and incoming length.
+    ///
+    /// Update the parent's children separately; prefer [`super::Tree::add_child`]
+    /// when editing a tree.
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// node.set_parent(NodeId::from(0), Some(0.5));
+    /// assert_eq!(node.parent_edge, Some(0.5));
+    /// ```
     pub fn set_parent(&mut self, parent: NodeId, parent_edge: Option<EdgeLength>) {
         self.parent = Some(parent);
         self.parent_edge = parent_edge;
@@ -163,6 +193,15 @@ impl Node {
     }
 
     /// Sets the Edge between a node and its child
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// let child = NodeId::from(1);
+    /// node.add_child(child, Some(0.5));
+    /// node.set_child_edge(child, Some(1.0));
+    /// assert_eq!(node.get_child_edge(child), Some(1.0));
+    /// ```
     pub fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {
         if let Some(edge) = edge {
             self.child_edges
@@ -172,6 +211,15 @@ impl Node {
     }
 
     /// Removes the child from the node
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// let child = NodeId::from(1);
+    /// node.add_child(child, Some(0.5));
+    /// node.remove_child(child).unwrap();
+    /// assert!(node.is_tip());
+    /// ```
     pub fn remove_child(&mut self, child: NodeId) -> Result<(), NodeError> {
         let vec_index = match self.children.iter().position(|node_id| *node_id == child) {
             Some(idx) => idx,
@@ -210,6 +258,14 @@ impl Node {
     }
 
     /// Returns this node's fields in Newick format, excluding its children.
+    ///
+    /// ```
+    /// use phylotree::tree::{Node, NodeId};
+    /// let mut node = Node::new();
+    /// use phylotree::tree::NewickFormat;
+    /// node.set_name("A".into());
+    /// assert_eq!(node.to_newick(NewickFormat::AllFields).unwrap(), "A");
+    /// ```
     pub fn to_newick(&self, format: NewickFormat) -> Result<String, super::TreeError> {
         super::newick::serialize_node(self, format)
     }

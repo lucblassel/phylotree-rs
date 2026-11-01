@@ -68,6 +68,13 @@ impl Layout {
 /// Returns the radial layout of a tree according to the algorithm
 /// detailed in:
 /// <https://link.springer.com/chapter/10.1007/11602613_110>
+///
+/// ```
+/// use phylotree::tree::{draw::radial_layout, Tree};
+/// let tree = Tree::from_newick("(A:1,B:2,C:3);").unwrap();
+/// let mut layout = radial_layout(&tree).unwrap();
+/// layout.rescale(2.0);
+/// ```
 pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
     let mut l = vec![0.; tree.size()];
     let mut w = vec![2. * PI; tree.size()];

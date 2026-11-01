@@ -114,11 +114,23 @@ pub struct TreeList {
 
 impl TreeList {
     /// Creates an empty tree list.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let trees = TreeList::new();
+    /// assert!(trees.is_empty());
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Creates an empty tree list with space for at least `capacity` trees.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let trees = TreeList::with_capacity(10);
+    /// assert!(trees.capacity() >= 10);
+    /// ```
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             trees: Vec::with_capacity(capacity),
@@ -175,6 +187,13 @@ impl TreeList {
     }
 
     /// Returns the stored list-wide taxon index, if it is currently available.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// trees.rebuild_taxon_index().unwrap();
+    /// assert_eq!(trees.cached_taxon_index().unwrap().len(), 4);
+    /// ```
     pub fn cached_taxon_index(&self) -> Option<&TaxonIndex> {
         self.taxon_index.as_ref()
     }
@@ -183,6 +202,12 @@ impl TreeList {
     ///
     /// The empty list has an empty index. If no index has been stored, this
     /// method computes one without mutating the list or its trees.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.taxon_index().unwrap().len(), 4);
+    /// ```
     pub fn taxon_index(&self) -> Result<TaxonIndex, TreeListError> {
         self.taxon_index
             .clone()
@@ -191,6 +216,12 @@ impl TreeList {
     }
 
     /// Recomputes and stores one shared taxon index on the list and its trees.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.rebuild_taxon_index().unwrap().len(), 4);
+    /// ```
     pub fn rebuild_taxon_index(&mut self) -> Result<&TaxonIndex, TreeListError> {
         self.taxon_index = None;
         let taxon_index = self.compute_taxon_index()?;
@@ -203,11 +234,23 @@ impl TreeList {
     }
 
     /// Validates that every tree has the same uniquely named set of taxa.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// trees.validate_same_taxa().unwrap();
+    /// ```
     pub fn validate_same_taxa(&self) -> Result<(), TreeListError> {
         self.taxon_index().map(|_| ())
     }
 
     /// Counts how many trees contain each nontrivial bipartition.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.partition_counts().unwrap().values().sum::<usize>(), 2);
+    /// ```
     pub fn partition_counts(&self) -> Result<HashMap<Bipartition, usize>, TreeListError> {
         let taxon_index = self.taxon_index()?;
         let mut counts: HashMap<FixedBitSet, usize> = HashMap::new();
@@ -229,6 +272,12 @@ impl TreeList {
     }
 
     /// Returns the proportion of trees containing each nontrivial bipartition.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert!(trees.partition_frequencies().unwrap().values().all(|&frequency| frequency == 0.5));
+    /// ```
     pub fn partition_frequencies(&self) -> Result<HashMap<Bipartition, f64>, TreeListError> {
         if self.is_empty() {
             self.validate_same_taxa()?;
@@ -262,6 +311,12 @@ impl TreeList {
     ///
     /// Branch lengths, node names, comments, support values, and child order do
     /// not affect topology identity. Root placement is significant for rooted trees.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.topology_frequencies().unwrap().len(), 2);
+    /// ```
     pub fn topology_frequencies(&self) -> Result<Vec<TopologyFrequency>, TreeListError> {
         self.validate_same_taxa()?;
         let mut counts: HashMap<TopologyKey, (usize, usize)> = HashMap::new();
@@ -298,11 +353,23 @@ impl TreeList {
     /// Returns the most frequent topology, or `None` for an empty list.
     ///
     /// Ties are resolved in favor of the topology encountered first.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.most_frequent_topology().unwrap().unwrap().count, 1);
+    /// ```
     pub fn most_frequent_topology(&self) -> Result<Option<TopologyFrequency>, TreeListError> {
         Ok(self.topology_frequencies()?.into_iter().next())
     }
 
     /// Returns the number of distinct topologies in the list.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.n_topologies().unwrap(), 2);
+    /// ```
     pub fn n_topologies(&self) -> Result<usize, TreeListError> {
         Ok(self.topology_frequencies()?.len())
     }
@@ -348,12 +415,27 @@ impl TreeList {
     }
 
     /// Appends a tree to the back of the list.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// let tree = phylotree::tree::Tree::from_newick("(A,B);").unwrap();
+    /// trees.push(tree);
+    /// assert_eq!(trees.len(), 3);
+    /// ```
     pub fn push(&mut self, tree: Tree) {
         self.invalidate_taxon_index();
         self.trees.push(tree);
     }
 
     /// Removes and returns the last tree, or `None` if the list is empty.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert!(trees.pop().is_some());
+    /// assert_eq!(trees.len(), 1);
+    /// ```
     pub fn pop(&mut self) -> Option<Tree> {
         let tree = self.trees.pop();
         if tree.is_some() {
@@ -363,6 +445,13 @@ impl TreeList {
     }
 
     /// Removes all trees from the list.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// trees.clear();
+    /// assert!(trees.is_empty());
+    /// ```
     pub fn clear(&mut self) {
         if !self.trees.is_empty() {
             self.trees.clear();
@@ -425,6 +514,13 @@ impl TreeList {
     }
 
     /// Consumes the list and returns its backing vector.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// let trees: Vec<_> = trees.into_trees();
+    /// assert_eq!(trees.len(), 2);
+    /// ```
     pub fn into_trees(self) -> Vec<Tree> {
         self.trees
     }
@@ -581,6 +677,12 @@ impl TreeList {
     }
 
     /// Serializes the trees as one Newick tree per line.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// assert_eq!(trees.to_newick().unwrap().lines().count(), 2);
+    /// ```
     pub fn to_newick(&self) -> Result<String, TreeError> {
         let mut output = Vec::new();
         self.write_newick(&mut output)?;
@@ -588,6 +690,14 @@ impl TreeList {
     }
 
     /// Writes the trees to a stream as one Newick tree per line.
+    ///
+    /// ```
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// let mut output = Vec::new();
+    /// trees.write_newick(&mut output).unwrap();
+    /// assert_eq!(String::from_utf8(output).unwrap().lines().count(), 2);
+    /// ```
     pub fn write_newick<W: Write>(&self, mut writer: W) -> Result<(), TreeError> {
         for tree in &self.trees {
             writer.write_all(tree.to_newick()?.as_bytes())?;
@@ -597,6 +707,12 @@ impl TreeList {
     }
 
     /// Writes the trees to a file as one Newick tree per line.
+    ///
+    /// ```no_run
+    /// use phylotree::tree::TreeList;
+    /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
+    /// trees.to_file(std::path::Path::new("trees.nwk")).unwrap();
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn to_file(&self, path: &Path) -> Result<(), TreeError> {
         let file = std::fs::File::create(path)?;

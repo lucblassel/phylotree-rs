@@ -1,4 +1,4 @@
-//! Build and manioulate phylogenetic trees.
+//! Build and manipulate phylogenetic trees.
 //!
 //! This module defines the essential structs used to represent phylogenetic trees:
 //!  - The [`Node`] struct that represents a node of a phylogenetic tree.
@@ -44,6 +44,11 @@ pub struct NodeId(usize);
 
 impl NodeId {
     /// Returns the underlying storage index.
+    ///
+    /// ```
+    /// use phylotree::tree::NodeId;
+    /// assert_eq!(NodeId::from(3).index(), 3);
+    /// ```
     #[inline]
     pub const fn index(self) -> usize {
         self.0

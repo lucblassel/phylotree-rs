@@ -60,11 +60,25 @@ impl TaxonIndex {
     }
 
     /// Returns the taxon assigned to a bit index.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("(B,A);").unwrap();
+    /// let index = tree.taxon_index().unwrap();
+    /// assert_eq!(index.taxon(0), Some("A"));
+    /// ```
     pub fn taxon(&self, index: usize) -> Option<&str> {
         self.inner.taxa.get(index).map(String::as_str)
     }
 
     /// Returns the bit index assigned to a taxon label.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("(B,A);").unwrap();
+    /// let index = tree.taxon_index().unwrap();
+    /// assert_eq!(index.index_of("B"), Some(1));
+    /// ```
     pub fn index_of(&self, taxon: &str) -> Option<usize> {
         self.inner.indices.get(taxon).copied()
     }

@@ -197,6 +197,13 @@ impl BipartitionProfile {
     }
 
     /// Counts groupings shared with another compatible profile in the selected mode.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.common_partition_count(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 1);
+    /// ```
     pub fn common_partition_count(
         &self,
         other: &Self,
@@ -219,6 +226,13 @@ impl BipartitionProfile {
     }
 
     /// Computes the Robinson–Foulds distance in the selected mode.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.robinson_foulds(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 0);
+    /// ```
     pub fn robinson_foulds(
         &self,
         other: &Self,
@@ -235,16 +249,37 @@ impl BipartitionProfile {
     }
 
     /// Computes rooted Robinson–Foulds distance from descendant clades.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.rooted_robinson_foulds(&profile).unwrap(), 0);
+    /// ```
     pub fn rooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
         self.robinson_foulds(other, RobinsonFouldsMode::Rooted)
     }
 
     /// Computes unrooted Robinson–Foulds distance from canonical splits.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.unrooted_robinson_foulds(&profile).unwrap(), 0);
+    /// ```
     pub fn unrooted_robinson_foulds(&self, other: &Self) -> Result<usize, TreeError> {
         self.robinson_foulds(other, RobinsonFouldsMode::Unrooted)
     }
 
     /// Computes normalized Robinson–Foulds distance in the selected mode.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.robinson_foulds_norm(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// ```
     pub fn robinson_foulds_norm(
         &self,
         other: &Self,
@@ -266,6 +301,13 @@ impl BipartitionProfile {
     }
 
     /// Computes weighted Robinson–Foulds distance in the selected mode.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.weighted_robinson_foulds(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// ```
     pub fn weighted_robinson_foulds(
         &self,
         other: &Self,
@@ -294,6 +336,13 @@ impl BipartitionProfile {
     }
 
     /// Computes the Kuhner–Felsenstein branch score in the selected mode.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// assert_eq!(profile.kuhner_felsenstein(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// ```
     pub fn kuhner_felsenstein(
         &self,
         other: &Self,
@@ -322,6 +371,14 @@ impl BipartitionProfile {
     }
 
     /// Computes topology and branch-length comparison metrics in one pass.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, RobinsonFouldsMode};
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// let profile = tree.bipartition_profile().unwrap();
+    /// let comparison = profile.compare(&profile, RobinsonFouldsMode::Unrooted).unwrap();
+    /// assert_eq!(comparison.rf, 0.0);
+    /// ```
     pub fn compare(&self, other: &Self, mode: RobinsonFouldsMode) -> Result<Comparison, TreeError> {
         self.require_compatible(other)?;
         let left = self.partitions(mode)?;
