@@ -6,6 +6,7 @@ use itertools::Itertools;
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet};
+use std::f64::consts::EULER_GAMMA;
 use std::iter::zip;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs, path::Path};
@@ -840,7 +841,7 @@ impl Tree {
     pub fn colless_yule(&self) -> Result<f64, TreeError> {
         self.colless().map(|i_c| {
             let n = self.n_leaves() as f64;
-            let e_i_c = n * n.ln() + (0.57721566 - 1. - f64::ln(2.0)) * n;
+            let e_i_c = n * n.ln() + (EULER_GAMMA - 1. - f64::ln(2.0)) * n;
 
             (i_c as f64 - e_i_c) / n
         })
