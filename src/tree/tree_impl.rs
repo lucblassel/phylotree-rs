@@ -5,7 +5,6 @@ use itertools::Itertools;
 #[cfg(not(target_arch = "wasm32"))]
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
-use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
 use std::iter::zip;
 #[cfg(not(target_arch = "wasm32"))]
@@ -64,6 +63,9 @@ pub enum TreeError {
     /// The requested node with index [`NodeId`] does not exist in the tree
     #[error("There is no node with index: {0}")]
     NodeNotFound(NodeId),
+    /// A mutable traversal reached the same storage slot more than once.
+    #[error("Traversal revisited node {0}; the child links contain a cycle or shared descendant")]
+    RepeatedTraversalNode(NodeId),
     /// The node with index [`NodeId`] could not be compressed
     #[error("Could not compress node {0}, it does not have exactly one parent and one child")]
     CouldNotCompressNode(NodeId),
@@ -258,6 +260,15 @@ impl Tree {
         }
         self.reset_bipartition_cache();
         Ok(&mut self.nodes[id.index()])
+    }
+
+    // Mutable node traversals borrow the storage once and never borrow Tree again.
+    pub(super) fn traversal_nodes_mut(&mut self) -> &mut [Node] {
+        self.reset_bipartition_cache();
+        for node in &mut self.nodes {
+            node.subtree_distances.get_mut().take();
+        }
+        &mut self.nodes
     }
 
     /// Get a reference to a node in the tree by name.
@@ -478,12 +489,7 @@ impl Tree {
     /// assert_eq!(preorder, vec!["F", "B", "A", "D", "C", "E", "G", "I", "H"])
     /// ```
     pub fn preorder(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
-        let mut indices = vec![root];
-        for child in self.get(root)?.children.iter() {
-            indices.extend(self.preorder(*child)?)
-        }
-
-        Ok(indices)
+        self.iter_preorder_from(root)?.collect()
     }
 
     /// Returns a vector containing node ids in the same order as the
@@ -502,13 +508,7 @@ impl Tree {
     /// assert_eq!(postorder, vec!["A", "C", "E", "D", "B", "H", "I", "G", "F"])
     /// ```
     pub fn postorder(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
-        let mut indices = vec![];
-        for child in self.get(root)?.children.iter() {
-            indices.extend(self.postorder(*child)?)
-        }
-        indices.push(root);
-
-        Ok(indices)
+        self.iter_postorder_from(root)?.collect()
     }
 
     /// Returns a vector containing node ids in the same order as the
@@ -532,27 +532,7 @@ impl Tree {
     /// the [`Node`] struct cannot have a right child only, so in our tree I is the left
     /// child of G.*
     pub fn inorder(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
-        let mut indices = vec![];
-        let children = &self.get(root)?.children;
-
-        // Tree is not binary
-        if children.len() > 2 {
-            return Err(TreeError::IsNotBinary);
-        }
-
-        // There is a left child
-        if !children.is_empty() {
-            indices.extend(self.inorder(children[0])?)
-        }
-
-        indices.push(root);
-
-        // There is a right child
-        if children.len() > 1 {
-            indices.extend(self.inorder(children[1])?)
-        }
-
-        Ok(indices)
+        self.iter_inorder_from(root)?.collect()
     }
 
     /// Returns a vector containing node ids in the same order as the
@@ -571,18 +551,7 @@ impl Tree {
     /// assert_eq!(levelorder, vec!["F", "B", "G", "A", "D", "I", "C", "E", "H"])
     /// ```
     pub fn levelorder(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
-        let mut indices = vec![];
-        let mut queue = VecDeque::new();
-        queue.push_back(root);
-        while !queue.is_empty() {
-            let root = queue.pop_front().unwrap();
-            indices.push(root);
-            for child in self.get(root)?.children.iter() {
-                queue.push_back(*child)
-            }
-        }
-
-        Ok(indices)
+        self.iter_levelorder_from(root)?.collect()
     }
 }
 
@@ -1786,7 +1755,6 @@ impl Tree {
     pub fn rescale(&mut self, factor: f64) {
         for node in self.nodes.iter_mut() {
             node.rescale_edges(factor);
-            node.subtree_distances.borrow_mut().take();
         }
     }
 
@@ -4178,5 +4146,28 @@ mod rescale_cache_tests {
                 .all(|n| n.subtree_distances.borrow().is_none()));
             assert_eq!(tree.diameter().unwrap(), 18.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod mutable_traversal_cache_tests {
+    use super::Tree;
+
+    #[test]
+    fn invalidates_ancestor_and_subtree_caches_even_on_early_exit() {
+        let mut tree = Tree::from_newick("((A:1,B:2)C:3,D:4)R;").unwrap();
+        tree.distance_matrix().unwrap();
+        tree.rebuild_taxon_index().unwrap();
+        assert!(tree
+            .nodes
+            .iter()
+            .any(|node| node.subtree_distances.borrow().is_some()));
+        let subtree = tree.get_by_name("C").unwrap().id;
+        drop(tree.iter_postorder_nodes_mut_from(subtree).unwrap());
+        assert!(tree
+            .nodes
+            .iter()
+            .all(|node| node.subtree_distances.borrow().is_none()));
+        assert!(tree.cached_taxon_index().is_none());
     }
 }

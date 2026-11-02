@@ -56,6 +56,33 @@
 //! assert_eq!(tree.to_newick().unwrap(), newick);
 //! ```
 //!
+//! Lazy traversals avoid allocating the complete node list. Each item is a
+//! `Result`; use `?` to stop on the first error. Subtree variants take a node ID.
+//!
+//! ```
+//! use phylotree::tree::Tree;
+//! let tree = Tree::from_newick("((A,B)C,D)R;")?;
+//! for id in tree.iter_postorder()? {
+//!     let node = tree.get(id?)?;
+//!     // Work with each node as it is visited.
+//!     assert!(node.name.is_some());
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Node variants yield borrowed nodes directly; mutable variants support standard
+//! iterator methods such as `try_for_each`:
+//!
+//! ```
+//! use phylotree::tree::{Tree, TreeError};
+//! let mut tree = Tree::from_newick("(A:1,B:2)R;")?;
+//! tree.iter_preorder_nodes_mut()?.try_for_each(|node| {
+//!     node?.rescale_edges(2.0);
+//!     Ok::<(), TreeError>(())
+//! })?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! # Comparing trees
 //!
 //! Robinson–Foulds (RF) distance compares groupings of tips. Choose rooted

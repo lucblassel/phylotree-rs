@@ -3,6 +3,8 @@
 ## Unreleased
 ### Added
 #### Lib
+- Added borrowed and mutable node traversal variants for all four orders and subtrees. Mutable traversals yield disjoint references lazily, invalidate caches, and report repeated nodes without aliasing. Exposed `Node::rescale_edges` for tree-wide iterator operations.
+- Added lazy, fallible preorder, postorder, inorder and level-order tree iterators, with subtree variants and an explicit error followed by exhaustion.
 - Added a shared, value-semantic `TaxonIndex` for trees and tree lists, along with taxon validation, bitset-backed bipartition frequencies, topology frequencies, and most-frequent-topology summaries.
 - Added configurable parsing and serialization of branch support using numeric internal-node labels and NHX, BEAST, or custom comment keys.
 - Added a `TreeList` collection with iterator support and parsing of consecutive Newick trees from strings, readers, and files.
@@ -10,6 +12,7 @@
 - Added source-aware Newick parse diagnostics with highlighted error spans.
 - Added an option to name internal nodes in simulated trees
 ### Changed
+- Tree traversal vectors now collect non-recursive iterators; `iter_preorder` now yields `Result<NodeId, TreeError>` rather than panicking on invalid descendants.
 - `DistanceMatrix` now preserves its shape and taxon-label invariants by construction: its fields are private, its size is derived from its taxa, `new` validates compact lower-triangle data and returns a `Result`, and `zeros`, `len`, `is_empty`, `taxa`, `as_slice`, `get_by_index`, and `set_by_index` provide checked construction and access.
 - Replaced the `NodeId` type alias with a tree-local newtype, added lossless conversions to and from `usize`, and changed node-ID arguments to be passed by value.
 - Renamed several tree query methods for a more concise and consistent API: `get_root` to `root`, `get_leaves` to `leaves`, `get_leaf_names` to `leaf_names`, `get_subtree` to `subtree`, `get_descendants` to `descendants`, `get_subtree_leaves` to `subtree_leaves`, and `cherries` to `n_cherries`.

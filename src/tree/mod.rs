@@ -12,6 +12,7 @@ pub mod draw;
 mod newick;
 mod node;
 mod taxon_index;
+mod traversal;
 mod tree_impl;
 mod tree_list;
 
@@ -23,6 +24,10 @@ pub use self::newick::{
 };
 pub use self::node::{Node, NodeError};
 pub use self::taxon_index::TaxonIndex;
+pub use self::traversal::{
+    InOrderTreeTraversal, LevelOrderTreeTraversal, NodeTraversal, NodeTraversalMut,
+    PostOrderTreeTraversal, PreOrderTreeTraversal,
+};
 pub use self::tree_impl::{Comparison, Tree, TreeError};
 pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListError};
 
