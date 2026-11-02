@@ -765,6 +765,7 @@ impl Tree {
     }
 }
 
+#[cfg(test)]
 mod tests {
 
     use crate::tree::{Node, NodeId, NodeTraversalMut, Tree, TreeError};

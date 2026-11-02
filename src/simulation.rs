@@ -140,8 +140,7 @@ pub fn simulate<R: Rng + ?Sized>(
     lengths: BranchLengths,
     rng: &mut R,
 ) -> Result<Tree, SimulationError> {
-    if tips < 2
-        || tips > usize::MAX / 4
+    if !(2..=usize::MAX / 4).contains(&tips)
         || (tips < 3 && matches!(topology, Topology::UniformUnrooted))
     {
         return Err(SimulationError::InvalidParameter("tip count"));
