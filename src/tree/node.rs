@@ -237,8 +237,23 @@ impl Node {
         Ok(())
     }
 
-    /// Rescales parent and child edges by a factor.
-    pub(crate) fn rescale_edges(&mut self, factor: f64) {
+    /// Scale this node's stored parent/child edge lengths and clear its distance cache.
+    ///
+    /// Apply to every node to keep both ends of every branch consistent. Mutable
+    /// tree iterators also clear all tree caches before yielding any nodes.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, TreeError};
+    /// let mut tree = Tree::from_newick("(A:1,B:2)R;")?;
+    /// tree.iter_preorder_nodes_mut()?.try_for_each(|node| {
+    ///     node?.rescale_edges(2.0);
+    ///     Ok::<(), TreeError>(())
+    /// })?;
+    /// assert_eq!(tree.to_newick()?, "(A:2,B:4)R;");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn rescale_edges(&mut self, factor: f64) {
+        self.subtree_distances.get_mut().take();
         self.parent_edge = self.parent_edge.map(|edge| edge * factor);
         if let Some(edges) = &mut self.child_edges {
             for v in edges.values_mut() {
