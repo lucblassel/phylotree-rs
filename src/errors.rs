@@ -31,3 +31,4 @@ pub enum ParseError {
     #[error("The tree is missin a semi colon at the end.")]
     NoClosingSemicolon,
 }
+

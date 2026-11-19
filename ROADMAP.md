@@ -119,20 +119,22 @@ Implementing neighbor joining is not required for this beta roadmap; removing or
 
 Document the internal guarantees that all constructors and mutation methods must preserve.
 
-- [x] Exactly one live root exists for every non-empty connected tree.
-- [ ] Every live non-root node has one live parent.
-- [ ] Every child ID refers to a live node in the same tree.
-- [ ] Parent and child relationships are reciprocal.
-- [ ] A parent contains each child at most once.
-- [ ] Branch lengths agree between the child and parent representations.
-- [ ] Every live node is reachable from the root.
-- [ ] The topology is acyclic.
-- [ ] Every stored node depth equals its actual distance in edges from the root.
-- [ ] Deleted storage slots are ignored by semantic tree operations.
-- [ ] Cached or derived indexes are either valid or explicitly invalidated.
-
-- [ ] Add an internal invariant-checking helper for tests.
-- [ ] Consider exposing a public `Tree::validate()` method if users can construct or deserialize trees through low-level APIs.
+1. [x] Exactly one live root exists for every non-empty connected tree.
+2. [ ] Every live non-root node has one live parent.
+    - [x] Made the structural set_parent, add_child, remove_child node methods crate-private.
+    - [x] Added a Tree::remove_child method that uses the Node methods. Right now it deletes the node. 
+    - [ ] We need to decide if the remove_child method can work on internal nodes and therefore prune the subtree or if we restrict it to leaves.
+3. [ ] Every child ID refers to a live node in the same tree.
+4. [x] Parent and child relationships are reciprocal.
+5. [ ] A parent contains each child at most once.
+6. [x] Branch lengths agree between the child and parent representations.
+7. [x] Every live node is reachable from the root.
+8. [x] The topology is acyclic.
+9. [ ] Every stored node depth equals its actual distance in edges from the root.
+10. [x] Deleted storage slots are ignored by semantic tree operations.
+11. [ ] Cached or derived indexes are either valid or explicitly invalidated.
+12. [ ] Add an internal invariant-checking helper for tests.
+13. [ ] Consider exposing a public `Tree::validate()` method if users can construct or deserialize trees through low-level APIs.
 
 ### 2.2 Make tombstone handling consistent
 

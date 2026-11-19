@@ -161,7 +161,7 @@ impl Tree {
     // # ADDING AND GETTING NODES #
     // ############################
 
-    // Add a node to the
+    // Add a node to the tree's node vector
     fn add(&mut self, node: Node) -> NodeId {
         self.reset_bipartition_cache();
         let idx = NodeId(self.nodes.len());
@@ -221,21 +221,85 @@ impl Tree {
         parent: NodeId,
         edge: Option<EdgeLength>,
     ) -> Result<NodeId, TreeError> {
-        if parent.index() >= self.nodes.len() {
-            return Err(TreeError::NodeNotFound(parent));
-        }
-
         let mut node = node;
 
         node.set_parent(parent, edge);
         node.set_depth(self.get(parent)?.depth + 1);
 
-        let id = self.add(node);
+        let child_id = self.add(node);
 
-        self.get_mut(id)?.set_id(id);
-        self.get_mut(parent)?.add_child(id, edge);
+        // Ensure there are no cycles
+        let mut ancestor = Some(parent);
+        while let Some(id) = ancestor {
+            if id == child_id {
+                return Err(TreeError::GeneralError("Cycle detected"));
+            };
+            ancestor = self.get(id)?.parent;
+        }
+        self.get_mut(child_id)?.set_id(child_id);
+        self.get_mut(parent)?.add_child(child_id, edge)?;
 
-        Ok(id)
+        Ok(child_id)
+    }
+
+    /// Remove a child from one of the tree's nodes.
+    /// This is only valid for leaf-children since removing an internal node would leave orphan
+    /// nodes.
+    /// For removing an internal node as well as all its descendants use the Tree::prune method.
+    ///
+    /// # Example
+    /// ```
+    /// use phylotree::tree::{Tree,Node};
+    ///
+    /// // Create the tree and add a root node
+    /// let mut tree = Tree::new();
+    /// let root_id = tree.add(Node::new());
+    ///
+    /// // Add children to the root
+    /// let left = tree.add_child(Node::new(), root_id, None).unwrap();
+    /// let right = tree.add_child(Node::new(), root_id, Some(0.1)).unwrap();
+    ///
+    /// tree.remove_child(root_id, left).unwrap();
+    /// assert_eq!(tree.get(root_id)?, );
+    ///
+    /// ```
+    /// TODO: Decide if this method can also prune subtrees or should be restricted to leaves.
+    pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), TreeError> {
+        if !self.get(child)?.is_tip() {
+            return Err(TreeError::GeneralError(
+                "`remove_child` only supports removing leaves; use `prune` to remove subtrees.",
+            ));
+        }
+
+        self.get_mut(parent)?.remove_child(child)?;
+        self.get_mut(child)?.delete();
+
+        self.reset_bipartition_cache();
+
+        Ok(())
+    }
+
+    /// Set the edge between a parent node and a child node.
+    pub fn set_edge(
+        &mut self,
+        parent: NodeId,
+        child: NodeId,
+        edge: Option<EdgeLength>,
+    ) -> Result<(), TreeError> {
+        // Check the edge exists
+        if !self.get(parent)?.children.contains(&child) {
+            return Err(NodeError::HasNoChild { parent, child }.into());
+        }
+
+        self.get_mut(parent)?.set_child_edge(child, edge);
+        self.get_mut(child)?.parent_edge = edge;
+
+        // Invalidate subtree distance cache
+        for node in &mut self.nodes {
+            node.subtree_distances.get_mut().take();
+        }
+
+        Ok(())
     }
 
     /// Get a reference to a specific Node of the tree
@@ -301,6 +365,7 @@ impl Tree {
     pub fn get_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
             .iter()
+            .filter(|n| !n.deleted)
             .find(|node| node.name.as_deref().is_some_and(|n| n == name))
     }
 
@@ -316,6 +381,7 @@ impl Tree {
         let index = self
             .nodes
             .iter()
+            .filter(|n| !n.deleted)
             .position(|node| node.name.as_deref().is_some_and(|n| n == name))?;
         self.reset_bipartition_cache();
         Some(&mut self.nodes[index])
@@ -340,7 +406,7 @@ impl Tree {
     pub fn search_nodes(&self, cond: impl Fn(&Node) -> bool) -> Vec<NodeId> {
         self.nodes
             .iter()
-            .filter(|node| cond(node))
+            .filter(|node| !node.deleted && cond(node))
             .map(|node| node.id)
             .collect()
     }
@@ -585,7 +651,7 @@ impl Tree {
     /// assert!(tree.is_binary().unwrap());
     /// ```
     pub fn is_binary(&self) -> Result<bool, TreeError> {
-        for node in self.nodes.iter() {
+        for node in self.nodes.iter().filter(|n| !n.deleted) {
             // Root of the tree
             if node.parent.is_none() {
                 if self.is_rooted()? && node.children.len() > 2 {
@@ -636,12 +702,15 @@ impl Tree {
 
     /// Returns the number of nodes in the tree
     pub fn size(&self) -> usize {
-        self.nodes.len()
+        self.nodes.iter().filter(|n| !n.deleted).count()
     }
 
     /// Returns the number of leaves in the tree
     pub fn n_leaves(&self) -> usize {
-        self.nodes.iter().filter(|&node| node.is_tip()).count()
+        self.nodes
+            .iter()
+            .filter(|&node| !node.deleted && node.is_tip())
+            .count()
     }
 
     /// Returns the height of the tree
@@ -766,7 +835,7 @@ impl Tree {
         let s = self
             .nodes
             .iter()
-            .filter(|n| !n.is_root())
+            .filter(|n| !n.deleted && !n.is_root())
             .map(|n| n.parent_edge)
             .collect::<Option<Vec<_>>>();
         match s {
@@ -799,7 +868,7 @@ impl Tree {
         }
         if !self.nodes.is_empty() {
             let mut n = 0;
-            for node in self.nodes.iter() {
+            for node in self.nodes.iter().filter(|n| !n.deleted) {
                 if node.children.len() == 2
                     && self.get(node.children[0])?.is_tip()
                     && self.get(node.children[1])?.is_tip()
@@ -826,7 +895,11 @@ impl Tree {
 
         let mut colless = 0;
 
-        for node in self.nodes.iter().filter(|node| !node.is_tip()) {
+        for node in self
+            .nodes
+            .iter()
+            .filter(|node| !node.deleted && !node.is_tip())
+        {
             let left = self.subtree_leaves(node.children[0])?.len();
             let right = if node.children.len() > 1 {
                 self.subtree_leaves(node.children[1])?.len()
@@ -1723,7 +1796,7 @@ impl Tree {
         };
 
         self.get_mut(child)?.set_parent(parent, new_edge);
-        self.get_mut(parent)?.add_child(child, new_edge);
+        self.get_mut(parent)?.add_child(child, new_edge)?;
         self.get_mut(parent)?.remove_child(to_remove)?;
 
         self.get_mut(to_remove)?.delete();
@@ -1854,7 +1927,7 @@ impl Tree {
                 for _ in 0..2 {
                     let child = children.pop().unwrap();
                     let edge = self.get(child)?.parent_edge;
-                    self.get_mut(parent)?.add_child(child, edge);
+                    self.get_mut(parent)?.add_child(child, edge)?;
                     self.get_mut(child)?.set_parent(parent, edge);
                     self.get_mut(node_id)?.remove_child(child)?;
                 }
@@ -1967,8 +2040,8 @@ impl Tree {
 
         // Set parent/child relationships between merged nodes and new parent node
         let p = self.get_mut(parent)?;
-        p.add_child(child1, edge1);
-        p.add_child(child2, edge2);
+        p.add_child(child1, edge1)?;
+        p.add_child(child2, edge2)?;
         p.name = parent_name;
 
         // Set new parent in child nodes
@@ -2149,6 +2222,7 @@ impl Tree {
         let labels = self
             .nodes
             .iter()
+            .filter(|n| !n.deleted)
             .filter_map(|node| {
                 if node.is_tip() {
                     node.name.clone()
@@ -2236,7 +2310,7 @@ impl Default for Tree {
 // #[allow(clippy::excessive_precision)]
 mod tests {
 
-    use core::f64;
+    // use core::f64;
 
     use super::*;
 

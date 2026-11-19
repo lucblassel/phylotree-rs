@@ -31,6 +31,9 @@ pub enum NodeError {
         /// Id of the inexistant child node
         child: NodeId,
     },
+    /// We are trying to add the same child twice
+    #[error("Node already has child {0}.")]
+    DuplicateChild(NodeId),
 }
 
 #[derive(Clone)]
@@ -140,13 +143,13 @@ impl Node {
     /// node.set_parent(NodeId::from(0), Some(0.5));
     /// assert_eq!(node.parent_edge, Some(0.5));
     /// ```
-    pub fn set_parent(&mut self, parent: NodeId, parent_edge: Option<EdgeLength>) {
+    pub(crate) fn set_parent(&mut self, parent: NodeId, parent_edge: Option<EdgeLength>) {
         self.parent = Some(parent);
         self.parent_edge = parent_edge;
     }
 
     /// Sets the depth of the node
-    pub fn set_depth(&mut self, depth: usize) {
+    pub(crate) fn set_depth(&mut self, depth: usize) {
         self.depth = depth;
     }
 
@@ -157,7 +160,9 @@ impl Node {
 
     /// Empties the node and sets it as deleted
     pub(crate) fn delete(&mut self) {
+        let id = self.id;
         *self = Self::new();
+        self.id = id;
         self.deleted = true;
     }
 
@@ -173,14 +178,23 @@ impl Node {
     /// let l = 0.1;
     ///
     /// child.set_parent(parent.id, Some(l));
-    /// parent.add_child(child.id, Some(l));
+    /// parent.add_child(child.id, Some(l)).unwrap();
     ///
     /// assert_eq!(child.parent_edge, Some(l));
     /// assert_eq!(parent.get_child_edge(child.id), Some(l));
     /// ```
-    pub fn add_child(&mut self, child: NodeId, child_edge: Option<EdgeLength>) {
+    pub(crate) fn add_child(
+        &mut self,
+        child: NodeId,
+        child_edge: Option<EdgeLength>,
+    ) -> Result<(), NodeError> {
+        if self.children.contains(&child) {
+            return Err(NodeError::DuplicateChild(child));
+        }
         self.children.push(child);
         self.set_child_edge(child, child_edge);
+
+        Ok(())
     }
 
     /// Get the Edge between node and a child
@@ -203,10 +217,15 @@ impl Node {
     /// assert_eq!(node.get_child_edge(child), Some(1.0));
     /// ```
     pub fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {
-        if let Some(edge) = edge {
-            self.child_edges
-                .get_or_insert_with(Default::default)
-                .insert(child, edge);
+        match edge {
+            Some(e) => {
+                self.child_edges
+                    .get_or_insert_with(Default::default)
+                    .insert(child, e);
+            }
+            None => {
+                self.child_edges.as_mut().map(|edges| edges.remove(&child));
+            }
         }
     }
 
@@ -220,7 +239,7 @@ impl Node {
     /// node.remove_child(child).unwrap();
     /// assert!(node.is_tip());
     /// ```
-    pub fn remove_child(&mut self, child: NodeId) -> Result<(), NodeError> {
+    pub(crate) fn remove_child(&mut self, child: NodeId) -> Result<(), NodeError> {
         let vec_index = match self.children.iter().position(|node_id| *node_id == child) {
             Some(idx) => idx,
             None => {

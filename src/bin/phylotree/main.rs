@@ -226,25 +226,19 @@ fn main() {
             let mut tree = read_tree(&tree);
             let mut n = 0;
             for &node_idx in tree.preorder(tree.root().unwrap()).unwrap().iter() {
-                let node = tree.get_mut(node_idx).unwrap();
-                if exclude_tips && node.is_tip() {
+                let (parent_edge, parent_idx, is_tip) = {
+                    let node = tree.get(node_idx).unwrap();
+                    (node.parent_edge, node.parent, node.is_tip())
+                };
+                if exclude_tips && is_tip {
                     continue;
                 }
-                let parent_idx = node.parent;
-                let mut collapsed = false;
-                if let Some(len) = node.parent_edge {
+
+                if let (Some(parent), Some(len)) = (parent_idx, parent_edge) {
                     if len < threshold {
-                        node.set_parent(parent_idx.unwrap(), Some(0.0));
-                        collapsed = true;
-                        n += 1;
-                        if verbose {
-                            eprintln!("Collapsed {node:?}")
-                        }
+                        tree.set_edge(parent, node_idx, Some(0.0)).unwrap();
+                        n += 1
                     }
-                }
-                if collapsed {
-                    let parent = tree.get_mut(parent_idx.unwrap()).unwrap();
-                    parent.set_child_edge(node_idx, Some(0.0))
                 }
             }
 
@@ -362,10 +356,7 @@ fn main() {
 
                     if collapse {
                         removed.push(taxa.clone());
-                        tree.get_mut(idx).unwrap().set_parent(parent_idx, Some(0.0));
-                        tree.get_mut(parent_idx)
-                            .unwrap()
-                            .set_child_edge(idx, Some(0.0));
+                        tree.set_edge(parent_idx, idx, Some(0.0)).unwrap();
                     } else if i == 0 {
                         // If we are deleting duplicates we
                         // still want to keep one instance

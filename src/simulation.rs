@@ -233,7 +233,7 @@ fn build(
             nodes[c].set_parent(p.into(), Some(lengths[c]));
             let depth = nodes[p].get_depth() + 1;
             nodes[c].set_depth(depth);
-            nodes[p].add_child(c.into(), Some(lengths[c]));
+            nodes[p].add_child(c.into(), Some(lengths[c])).unwrap();
             stack.push(c);
         }
     }

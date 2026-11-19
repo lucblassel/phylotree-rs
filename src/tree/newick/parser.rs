@@ -254,7 +254,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
         if let Some(parent_id) = parent {
             node.set_parent(parent_id, None);
             node.set_depth(self.nodes[parent_id.index()].get_depth() + 1);
-            self.nodes[parent_id.index()].add_child(id, None);
+            self.nodes[parent_id.index()].add_child(id, None).unwrap();
         }
 
         self.nodes.push(node);
