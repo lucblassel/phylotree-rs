@@ -14,7 +14,7 @@ use num_traits::{zero, Float, Zero};
 use thiserror::Error;
 use trait_set::trait_set;
 
-use crate::tree::{Node, Tree};
+use crate::tree::{Node, Tree, TreeError};
 
 trait_set! {
     /// Trait describing objects that can be used as branch lengths
@@ -84,6 +84,9 @@ pub enum MatrixError {
         /// Number of taxa we are trying to add
         n_taxa: usize,
     },
+    /// The tree used to generate the distance matrix has an error
+    #[error("Underlying tree has error")]
+    TreeError(#[from] Box<TreeError>),
 }
 
 /// Errors that can occur when parsing phylip distance matrix files.
@@ -733,7 +736,7 @@ where
 
         // Build starting star tree
         let mut tree = Tree::new();
-        let virt_root = tree.add(Node::new());
+        let virt_root = tree.add_root(Node::new()).map_err(Box::new)?;
         let mut node_ids = self
             .taxa
             .iter()

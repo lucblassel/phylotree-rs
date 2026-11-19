@@ -929,7 +929,7 @@ mod tests {
     #[test]
     fn deep_chain_does_not_use_the_call_stack() {
         let mut tree = Tree::new();
-        let root = tree.add(Node::new());
+        let root = tree.add_root(Node::new()).unwrap();
         let mut last = root;
         for _ in 1..50_000 {
             last = tree.add_child(Node::new(), last, None).unwrap();
@@ -1236,7 +1236,7 @@ mod tests {
     #[test]
     fn deep_mutable_walks_remain_non_recursive() {
         let mut tree = Tree::new();
-        let mut last = tree.add(Node::new());
+        let mut last = tree.add_root(Node::new()).unwrap();
         for _ in 1..50_000 {
             last = tree.add_child(Node::new(), last, None).unwrap();
         }

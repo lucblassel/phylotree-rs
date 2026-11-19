@@ -119,7 +119,7 @@ Implementing neighbor joining is not required for this beta roadmap; removing or
 
 Document the internal guarantees that all constructors and mutation methods must preserve.
 
-- [ ] Exactly one live root exists for every non-empty connected tree.
+- [x] Exactly one live root exists for every non-empty connected tree.
 - [ ] Every live non-root node has one live parent.
 - [ ] Every child ID refers to a live node in the same tree.
 - [ ] Parent and child relationships are reciprocal.

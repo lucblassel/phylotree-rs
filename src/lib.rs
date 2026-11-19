@@ -213,7 +213,7 @@ pub fn generate_tree(
 
     let mut tree = Tree::new();
     // Add root
-    tree.add(Node::default());
+    tree.add_root(Node::default())?;
 
     let mut rng = thread_rng();
 
@@ -271,7 +271,7 @@ pub fn generate_yule(
 
     // Initialize tree
     let mut tree = Tree::new();
-    let root = tree.add(Node::default());
+    let root = tree.add_root(Node::default())?;
 
     let mut rng = thread_rng();
     let sampler = Sampler::new(sampler_type);
@@ -324,7 +324,7 @@ pub fn generate_caterpillar(
     }
 
     let mut tree = Tree::new();
-    tree.add(Node::default());
+    tree.add_root(Node::default())?;
 
     let mut rng = thread_rng();
     let sampler = Sampler::new(sampler_type);

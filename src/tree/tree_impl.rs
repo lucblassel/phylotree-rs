@@ -161,15 +161,8 @@ impl Tree {
     // # ADDING AND GETTING NODES #
     // ############################
 
-    /// Add a new node to the tree.
-    ///
-    /// ```
-    /// use phylotree::tree::{Tree, Node};
-    /// let mut tree = Tree::new();
-    /// let root = tree.add(Node::new_named("root"));
-    /// assert_eq!(tree.root().unwrap(), root);
-    /// ```
-    pub fn add(&mut self, node: Node) -> NodeId {
+    // Add a node to the
+    fn add(&mut self, node: Node) -> NodeId {
         self.reset_bipartition_cache();
         let idx = NodeId(self.nodes.len());
         let mut node = node;
@@ -177,6 +170,25 @@ impl Tree {
         self.nodes.push(node);
 
         idx
+    }
+
+    /// Add a new root node to an empty tree.
+    ///
+    /// ```
+    /// use phylotree::tree::{Tree, Node};
+    /// let mut tree = Tree::new();
+    /// let root = tree.add(Node::new_named("root")).unwrap();
+    /// assert_eq!(tree.root().unwrap(), root);
+    /// ```
+    pub fn add_root(&mut self, node: Node) -> Result<NodeId, TreeError> {
+        // Check if tree already has root
+        match self.root() {
+            Err(TreeError::RootNotFound) => (),
+            Ok(_) => return Err(TreeError::GeneralError("Tree already has a root")),
+            Err(err) => return Err(err),
+        }
+
+        Ok(self.add(node))
     }
 
     /// Add a child to one of the tree's nodes.
@@ -344,7 +356,7 @@ impl Tree {
     pub fn root(&self) -> Result<NodeId, TreeError> {
         self.nodes
             .iter()
-            .filter(|&node| node.parent.is_none())
+            .filter(|&node| !node.deleted && node.parent.is_none())
             .map(|node| node.id)
             .next()
             .ok_or(TreeError::RootNotFound)
@@ -1672,6 +1684,10 @@ impl Tree {
     /// assert_eq!(tree.to_newick().unwrap(), "((A,(C,E)D)B)F;")
     /// ```
     pub fn prune(&mut self, root: NodeId) -> Result<(), TreeError> {
+        if root == self.root()? {
+            return Err(TreeError::GeneralError("Cannot prune the root."));
+        }
+
         for child in self.get(root)?.children.clone() {
             self.prune(child)?
         }
