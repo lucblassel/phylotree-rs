@@ -30,6 +30,13 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --all-targets
+      # Long-running deep-tree tests are #[ignore]d by default; run them here.
+      # The `deep_` filter skips other ignored tests that are known-broken TODOs.
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all-targets -- --ignored deep_
 
   fmt:
     name: Rustfmt
