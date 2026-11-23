@@ -177,7 +177,7 @@ impl Tree {
     /// ```
     /// use phylotree::tree::{Tree, Node};
     /// let mut tree = Tree::new();
-    /// let root = tree.add(Node::new_named("root")).unwrap();
+    /// let root = tree.add_root(Node::new_named("root")).unwrap();
     /// assert_eq!(tree.root().unwrap(), root);
     /// ```
     pub fn add_root(&mut self, node: Node) -> Result<NodeId, TreeError> {
@@ -199,20 +199,20 @@ impl Tree {
     ///
     /// // Create the tree and add a root node
     /// let mut tree = Tree::new();
-    /// let root_id = tree.add(Node::new());
+    /// let root_id = tree.add_root(Node::new()).unwrap();
     ///
     /// // Add children to the root
     /// let left = tree.add_child(Node::new(), root_id, None).unwrap();
     /// let right = tree.add_child(Node::new(), root_id, Some(0.1)).unwrap();
     ///
-    /// assert_eq!(tree.get(root_id).unwrap().children.len(), 2);
+    /// assert_eq!(tree.get(root_id).unwrap().children().len(), 2);
     ///
     /// // The depths of child nodes are derived from the parent node
-    /// assert_eq!(tree.get(left).unwrap().get_depth(), 1);
-    /// assert_eq!(tree.get(right).unwrap().get_depth(), 1);
+    /// assert_eq!(tree.get(left).unwrap().depth(), 1);
+    /// assert_eq!(tree.get(right).unwrap().depth(), 1);
     ///
     /// // If an edge length is specified then it is set in both child and parent
-    /// assert_eq!(tree.get(right).unwrap().parent_edge, Some(0.1));
+    /// assert_eq!(tree.get(right).unwrap().parent_edge(), Some(0.1));
     /// assert_eq!(tree.get(root_id).unwrap().get_child_edge(right), Some(0.1));
     /// ```
     pub fn add_child(
@@ -253,17 +253,15 @@ impl Tree {
     ///
     /// // Create the tree and add a root node
     /// let mut tree = Tree::new();
-    /// let root_id = tree.add(Node::new());
+    /// let root_id = tree.add_root(Node::new()).unwrap();
     ///
     /// // Add children to the root
     /// let left = tree.add_child(Node::new(), root_id, None).unwrap();
     /// let right = tree.add_child(Node::new(), root_id, Some(0.1)).unwrap();
     ///
     /// tree.remove_child(root_id, left).unwrap();
-    /// assert_eq!(tree.get(root_id)?, );
-    ///
+    /// //assert_eq!(tree.get(root_id)?, );
     /// ```
-    /// TODO: Decide if this method can also prune subtrees or should be restricted to leaves.
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), TreeError> {
         if !self.get(child)?.is_tip() {
             return Err(TreeError::GeneralError(
@@ -322,14 +320,15 @@ impl Tree {
         Ok(node)
     }
 
-    /// Get a mutable reference to a specific Node of the tree
+    /// Get a mutable reference to a specific Node of the tree.
+    /// Only metadata fields will be modifiable on the node.
     ///
     /// ```
     /// use phylotree::tree::Tree;
     /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
     /// let id = tree.root().unwrap();
-    /// tree.get_mut(id).unwrap().set_name("root".into());
-    /// assert_eq!(tree.get(id).unwrap().name.as_deref(), Some("root"));
+    /// tree.get_mut(id).unwrap().set_name("root");
+    /// assert_eq!(tree.get(id).unwrap().name(), Some("root"));
     /// ```
     pub fn get_mut(&mut self, id: NodeId) -> Result<&mut Node, TreeError> {
         if id.index() >= self.nodes.len() || self.nodes[id.index()].deleted {
@@ -357,7 +356,7 @@ impl Tree {
     /// use phylotree::tree::{Tree, Node};
     ///
     /// let mut tree = Tree::new();
-    /// let root_idx = tree.add(Node::new_named("root"));
+    /// let root_idx = tree.add_root(Node::new_named("root")).unwrap();
     /// let child_idx = tree.add_child(Node::new_named("child"), root_idx, None).unwrap();
     ///
     /// assert_eq!(tree.get_by_name("child"), Some(tree.get(child_idx).unwrap()));
@@ -374,7 +373,7 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// tree.get_by_name_mut("A").unwrap().set_name("X".into());
+    /// tree.get_by_name_mut("A").unwrap().set_name("X");
     /// assert!(tree.get_by_name("X").is_some());
     /// ```
     pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
@@ -392,7 +391,7 @@ impl Tree {
     /// use phylotree::tree::{Tree, Node};
     ///
     /// let mut tree = Tree::new();
-    /// let root_idx = tree.add(Node::new_named("root"));
+    /// let root_idx = tree.add_root(Node::new_named("root")).unwrap();
     /// let mut indices = vec![];
     ///
     /// for name in ["A", "B", "A"] {
@@ -400,7 +399,7 @@ impl Tree {
     ///     if name == "A" { indices.push(idx) }
     /// }
     ///
-    /// let found = tree.search_nodes(|node| node.name == Some("A".into()));
+    /// let found = tree.search_nodes(|node| node.name() == Some("A"));
     /// assert_eq!(found, indices);
     /// ```
     pub fn search_nodes(&self, cond: impl Fn(&Node) -> bool) -> Vec<NodeId> {
@@ -433,7 +432,7 @@ impl Tree {
     /// use phylotree::tree::{Tree, Node};
     ///
     /// let mut tree = Tree::new();
-    /// let root_idx = tree.add(Node::new());
+    /// let root_idx = tree.add_root(Node::new()).unwrap();
     /// let left = tree.add_child(Node::new(), root_idx, None).unwrap();
     /// let right = tree.add_child(Node::new(), root_idx, None).unwrap();
     ///
@@ -452,7 +451,7 @@ impl Tree {
     /// use phylotree::tree::{Tree, Node};
     ///
     /// let mut tree = Tree::new();
-    /// let root_idx = tree.add(Node::new());
+    /// let root_idx = tree.add_root(Node::new()).unwrap();
     /// let _ = tree.add_child(Node::new_named("left"), root_idx, None).unwrap();
     /// let _ = tree.add_child(Node::new_named("right"), root_idx, None).unwrap();
     ///
@@ -475,10 +474,10 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let subtree: Vec<_> = tree.subtree(sub_root.id)
+    /// let subtree: Vec<_> = tree.subtree(sub_root.id())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -500,10 +499,10 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let subtree: Vec<_> = tree.descendants(sub_root.id)
+    /// let subtree: Vec<_> = tree.descendants(sub_root.id())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -525,10 +524,10 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
     /// let sub_root = tree.get_by_name("E").unwrap();
-    /// let sub_leaves: Vec<_> = tree.subtree_leaves(sub_root.id)
+    /// let sub_leaves: Vec<_> = tree.subtree_leaves(sub_root.id())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -561,7 +560,7 @@ impl Tree {
     /// let preorder: Vec<_> = tree.preorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -580,7 +579,7 @@ impl Tree {
     /// let postorder: Vec<_> = tree.postorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -600,7 +599,7 @@ impl Tree {
     /// let inorder: Vec<_> = tree.inorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -623,7 +622,7 @@ impl Tree {
     /// let levelorder: Vec<_> = tree.levelorder(tree.root().unwrap())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -700,9 +699,15 @@ impl Tree {
         Ok(names.len() == self.n_leaves())
     }
 
-    /// Returns the number of nodes in the tree
+    /// Returns the number of live nodes in the tree
     pub fn size(&self) -> usize {
         self.nodes.iter().filter(|n| !n.deleted).count()
+    }
+
+    /// Returns the number of nodes in the trees internal vector
+    /// This includes nodes marked as deleted.
+    pub fn stored_size(&self) -> usize {
+        self.nodes.len()
     }
 
     /// Returns the number of leaves in the tree
@@ -1428,7 +1433,7 @@ impl Tree {
     /// let path: Vec<_> = tree.get_path_from_root(5.into())
     ///     .unwrap()
     ///     .iter()
-    ///     .map(|&id| tree.get(id).unwrap().name.clone())
+    ///     .map(|&id| tree.get(id).unwrap().name().clone())
     ///     .flatten()
     ///     .collect();
     ///
@@ -1454,11 +1459,11 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let ancestor = tree.get_common_ancestor(
-    ///     tree.get_by_name("A").unwrap().id,
-    ///     tree.get_by_name("D").unwrap().id,
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("D").unwrap().id(),
     /// ).unwrap();
     ///
-    /// assert_eq!(tree.get(ancestor).unwrap().name, Some("B".to_owned()))
+    /// assert_eq!(tree.get(ancestor).unwrap().name(), Some("B"))
     /// ```
     pub fn get_common_ancestor(&self, source: NodeId, target: NodeId) -> Result<NodeId, TreeError> {
         if source == target {
@@ -1487,8 +1492,8 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let (sum_edge_lengths, num_edges) = tree.get_distance(
-    ///     tree.get_by_name("A").unwrap().id,
-    ///     tree.get_by_name("I").unwrap().id,
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("I").unwrap().id(),
     /// ).unwrap();
     ///
     /// assert_eq!(num_edges, 4);
@@ -1750,7 +1755,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let mut tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let root_idx = tree.get_by_name("G").unwrap().id;
+    /// let root_idx = tree.get_by_name("G").unwrap().id();
     ///
     /// tree.prune(root_idx);
     ///
@@ -1770,6 +1775,8 @@ impl Tree {
         }
 
         self.get_mut(root)?.delete();
+
+        self.invalidate_caches();
 
         Ok(())
     }
@@ -1822,9 +1829,27 @@ impl Tree {
             .map(|node| node.id)
             .collect();
 
+        // Check that all nodes we want to merge have concordant branch lengths:
+        // Either parent and child branch are both None or both Some.
+        if to_compress.iter().any(|&id| {
+            let Ok(node) = self.get(id) else {
+                return true;
+            };
+            let parent = node.parent_edge;
+            let child = node.get_child_edge(node.children[0]);
+            !matches!((parent, child), (Some(_), Some(_)) | (None, None))
+        }) {
+            return Err(TreeError::MissingBranchLengths);
+        }
+
+        self.invalidate_caches();
+
         for id in to_compress {
             self.compress_node(id)?;
         }
+
+        // Make sure node depths are updated
+        self.reset_depths()?;
 
         Ok(())
     }
@@ -1939,6 +1964,11 @@ impl Tree {
                 }
             }
         }
+
+        // Update depths of nodes
+        self.reset_depths()?;
+        self.invalidate_caches();
+
         Ok(())
     }
 
@@ -1969,7 +1999,7 @@ impl Tree {
         Ok(())
     }
 
-    // recusrive implementation of depth recomputation
+    // recusive implementation of depth recomputation
     fn reset_depth_impl(&mut self, root: NodeId, depth: usize) -> Result<(), TreeError> {
         let root = self.get_mut(root)?;
         root.set_depth(depth);
@@ -1987,7 +2017,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
     /// tree.reset_depths().unwrap();
-    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().get_depth(), 0);
+    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().depth(), 0);
     /// ```
     pub fn reset_depths(&mut self) -> Result<(), TreeError> {
         let root = self.root()?;
@@ -2001,8 +2031,8 @@ impl Tree {
     ///
     /// // Initialize star tree
     /// let mut tree = Tree::from_newick("(A,B,C);").unwrap();
-    /// let a = tree.get_by_name("A").unwrap().id;
-    /// let b = tree.get_by_name("B").unwrap().id;
+    /// let a = tree.get_by_name("A").unwrap().id();
+    /// let b = tree.get_by_name("B").unwrap().id();
     ///
     /// // Merge A and B into node D
     /// tree.merge_children(a, b, None, None, None, Some("D".into()));
@@ -2016,39 +2046,62 @@ impl Tree {
         child2: NodeId,
         edge1: Option<EdgeLength>,
         edge2: Option<EdgeLength>,
-        parent_edge: Option<EdgeLength>,
-        parent_name: Option<String>,
+        new_parent_edge: Option<EdgeLength>,
+        new_parent_name: Option<String>,
     ) -> Result<NodeId, TreeError> {
+        // Check that we arent merging a node with itself
+        if child1 == child2 {
+            return Err(TreeError::MergingNonSiblingNodes(child1, child2));
+        }
+
         // Check that nodes are siblings
-        let parent = self.get(child1)?.parent;
-        if parent != self.get(child2)?.parent {
+        let grandparent = self.get(child1)?.parent;
+        if grandparent != self.get(child2)?.parent {
             return Err(TreeError::MergingNonSiblingNodes(child1, child2));
         }
 
         // Add new parent node as child of current parent
-        let parent = match parent {
+        let (new_parent, new_parent_depth) = match grandparent {
             Some(parent_id) => {
                 // Remove merged nodes as children of current parent
-                let parent_node = self.get_mut(parent_id)?;
-                parent_node.remove_child(child1)?;
-                parent_node.remove_child(child2)?;
+                let grandparent_node = self.get_mut(parent_id)?;
+                grandparent_node.remove_child(child1)?;
+                grandparent_node.remove_child(child2)?;
+                // Get current depth
+                let grandparent_depth = grandparent_node.depth;
                 // Add new parent
-                self.add_child(Node::new(), parent_id, parent_edge)?
+                (
+                    self.add_child(Node::new(), parent_id, new_parent_edge)?,
+                    grandparent_depth + 1,
+                )
             }
-            None => self.add(Node::new()),
+            None => (self.add(Node::new()), 0),
         };
 
         // Set parent/child relationships between merged nodes and new parent node
-        let p = self.get_mut(parent)?;
-        p.add_child(child1, edge1)?;
-        p.add_child(child2, edge2)?;
-        p.name = parent_name;
+        let new_parent_node = self.get_mut(new_parent)?;
+        new_parent_node.add_child(child1, edge1)?;
+        new_parent_node.add_child(child2, edge2)?;
+        new_parent_node.name = new_parent_name;
 
         // Set new parent in child nodes
-        self.get_mut(child1)?.set_parent(parent, edge1);
-        self.get_mut(child2)?.set_parent(parent, edge2);
+        self.get_mut(child1)?.set_parent(new_parent, edge1);
+        self.get_mut(child2)?.set_parent(new_parent, edge2);
 
-        Ok(parent)
+        // Update depths for changed subtree
+        self.reset_depth_impl(new_parent, new_parent_depth)?;
+        self.invalidate_caches();
+
+        Ok(new_parent)
+    }
+
+    /// This should be called after topology-modifying operations.
+    fn invalidate_caches(&mut self) {
+        self.reset_bipartition_cache();
+        self.taxon_index = None;
+        for node in &mut self.nodes {
+            node.subtree_distances.get_mut().take();
+        }
     }
 }
 
@@ -2155,7 +2208,7 @@ impl Tree {
     /// let tree = Tree::from_newick_with_options("(A,B)95;", options).unwrap();
     /// let root = tree.root().unwrap();
     ///
-    /// assert_eq!(tree.get(root).unwrap().support, Some(95.0));
+    /// assert_eq!(tree.get(root).unwrap().support(), Some(95.0));
     /// ```
     pub fn from_newick_with_options(
         newick: &str,
@@ -4260,5 +4313,309 @@ mod mutable_traversal_cache_tests {
             .iter()
             .all(|node| node.subtree_distances.borrow().is_none()));
         assert!(tree.cached_taxon_index().is_none());
+    }
+}
+
+#[cfg(test)]
+mod invariant_tests {
+    use super::*;
+
+    /// Checks the documented tree invariants and returns all violations found.
+    fn check_invariants(tree: &Tree) -> Vec<String> {
+        let mut errors = Vec::new();
+        let live: Vec<&Node> = tree.nodes.iter().filter(|n| !n.deleted).collect();
+
+        // Exactly one live root in a non-empty tree.
+        let roots: Vec<&&Node> = live.iter().filter(|n| n.parent.is_none()).collect();
+        if !live.is_empty() && roots.len() != 1 {
+            errors.push(format!(
+                "expected exactly 1 live root, found {}",
+                roots.len()
+            ));
+        }
+
+        for node in &live {
+            // Live parent, reciprocity and depth of every live non-root node.
+            if let Some(p) = node.parent {
+                match tree.get(p) {
+                    Ok(parent) => {
+                        if !parent.children.contains(&node.id) {
+                            errors.push(format!(
+                                "node {} lists parent {} but is not in its children",
+                                node.id, p
+                            ));
+                        }
+                        if node.depth != parent.depth + 1 {
+                            errors.push(format!(
+                                "node {} depth {} != parent {} depth {} + 1",
+                                node.id, node.depth, p, parent.depth
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        errors.push(format!("node {} has missing/deleted parent {}", node.id, p))
+                    }
+                }
+            }
+
+            // No child appears twice under one parent.
+            let mut unique = node.children.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            if unique.len() != node.children.len() {
+                errors.push(format!("node {} contains a child twice", node.id));
+            }
+
+            // Child IDs are live, reciprocal, and branch lengths agree on both ends.
+            for &c in &node.children {
+                match tree.get(c) {
+                    Ok(child) => {
+                        if child.parent != Some(node.id) {
+                            errors.push(format!(
+                                "node {} lists child {} whose parent is {:?}",
+                                node.id, c, child.parent
+                            ));
+                        }
+                        if node.get_child_edge(c) != child.parent_edge {
+                            errors.push(format!(
+                                "branch length mismatch on edge {} -> {}",
+                                node.id, c
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        errors.push(format!("node {} has missing/deleted child {}", node.id, c))
+                    }
+                }
+            }
+        }
+
+        // Root depth, reachability of every live node, and acyclicity.
+        if let Some(root) = roots.first() {
+            if root.depth != 0 {
+                errors.push(format!("root {} has depth {} != 0", root.id, root.depth));
+            }
+            let mut visited = HashSet::new();
+            let mut stack = vec![root.id];
+            while let Some(id) = stack.pop() {
+                if !visited.insert(id) {
+                    errors.push(format!(
+                        "node {} reached twice (cycle or shared descendant)",
+                        id
+                    ));
+                    continue;
+                }
+                if let Ok(node) = tree.get(id) {
+                    stack.extend(node.children.iter().copied());
+                }
+            }
+            if visited.len() != live.len() {
+                errors.push(format!(
+                    "only {}/{} live nodes are reachable from the root",
+                    visited.len(),
+                    live.len()
+                ));
+            }
+        }
+
+        // A cached taxon index must match the live leaf names.
+        if let Some(index) = &tree.taxon_index {
+            let mut cached: Vec<_> = index.taxa().to_vec();
+            cached.sort();
+            let mut leaves: Vec<_> = tree.leaf_names().into_iter().flatten().collect();
+            leaves.sort();
+            if cached != leaves {
+                errors.push("cached taxon index does not match live leaf names".to_string());
+            }
+        }
+
+        errors
+    }
+
+    fn assert_valid(tree: &Tree) {
+        let errors = check_invariants(tree);
+        assert!(
+            errors.is_empty(),
+            "invariant violations:\n{}",
+            errors.join("\n")
+        );
+    }
+
+    /// Asserts the tree still satisfies all invariants and is byte-identical to `before`.
+    fn assert_unchanged(before: &str, tree: &Tree) {
+        assert_valid(tree);
+        assert_eq!(&tree.to_newick().unwrap(), before);
+    }
+
+    /// Serializes and reparses the tree, checking the topology is preserved.
+    fn assert_roundtrip(tree: &Tree) {
+        let newick = tree.to_newick().unwrap();
+        let parsed = Tree::from_newick(&newick).unwrap();
+        assert_eq!(
+            tree.unrooted_robinson_foulds(&parsed).unwrap(),
+            0,
+            "Newick round trip changed topology: {newick}"
+        );
+    }
+
+    #[test]
+    fn prune_leaf_preserves_invariants_counts_and_caches() {
+        let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
+        tree.rebuild_taxon_index().unwrap();
+        tree.distance_matrix().unwrap(); // populate subtree distance caches
+        let a = tree.get_by_name("A").unwrap().id;
+        tree.prune(a).unwrap();
+
+        assert_valid(&tree);
+        assert_eq!(tree.n_leaves(), 3);
+        assert_eq!(tree.size(), 6);
+        let mut names: Vec<_> = tree.leaf_names().into_iter().flatten().collect();
+        names.sort();
+        assert_eq!(names, vec!["B", "C", "D"]);
+        // prune invalidated the caches
+        assert!(tree.cached_taxon_index().is_none());
+        assert!(tree
+            .nodes
+            .iter()
+            .all(|n| n.subtree_distances.borrow().is_none()));
+        // the taxon index can be rebuilt from live leaves only
+        assert_eq!(tree.rebuild_taxon_index().unwrap().len(), 3);
+        assert_roundtrip(&tree);
+    }
+
+    #[test]
+    fn prune_internal_subtree_preserves_invariants() {
+        let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
+        let x = tree.get_by_name("X").unwrap().id;
+        tree.prune(x).unwrap();
+
+        assert_valid(&tree);
+        assert_eq!(tree.n_leaves(), 2);
+        assert_eq!(tree.size(), 4);
+        assert_eq!(tree.to_newick().unwrap(), "((C:1,D:1)Y:1)R;");
+        assert_roundtrip(&tree);
+    }
+
+    #[test]
+    fn prune_root_is_rejected_and_leaves_tree_unchanged() {
+        let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
+        let before = tree.to_newick().unwrap();
+        let root = tree.root().unwrap();
+        assert!(tree.prune(root).is_err());
+        assert_unchanged(&before, &tree);
+    }
+
+    #[test]
+    fn compress_updates_depths_and_bipartition_metadata() {
+        // W is a unary node; compressing fuses W:0 + X:1 into X:1.
+        let mut tree = Tree::from_newick("(((A:1,B:1)X:1)W:0,(C:1,D:1)Y:1)R;").unwrap();
+        let reference = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
+        tree.rebuild_taxon_index().unwrap();
+        tree.compress().unwrap();
+
+        assert_valid(&tree);
+        // Child order can change when a node is reattached; compare topology, not text.
+        assert_eq!(tree.unrooted_robinson_foulds(&reference).unwrap(), 0);
+        assert_eq!(tree.sackin().unwrap(), reference.sackin().unwrap());
+        assert_eq!(
+            tree.get_partitions_with_lengths().unwrap(),
+            reference.get_partitions_with_lengths().unwrap()
+        );
+        assert!(tree.cached_taxon_index().is_none());
+        assert_eq!(tree.rebuild_taxon_index().unwrap().len(), 4);
+        assert_roundtrip(&tree);
+    }
+
+    #[test]
+    fn failed_compress_on_partially_weighted_tree_leaves_tree_unchanged() {
+        // B is unary with a missing parent edge but a present child edge.
+        let mut tree = Tree::from_newick("((A:1)B,C)R;").unwrap();
+        let before = tree.to_newick().unwrap();
+        let err = tree.compress().unwrap_err();
+        assert!(matches!(err, TreeError::MissingBranchLengths));
+        assert_unchanged(&before, &tree);
+    }
+
+    #[test]
+    fn resolve_polytomy_preserves_invariants_and_depths() {
+        let mut tree = Tree::from_newick("((A:1,B:1,C:1)X:1,D:1)R;").unwrap();
+        tree.resolve().unwrap();
+
+        assert_valid(&tree);
+        assert!(tree.is_binary().unwrap());
+        assert_eq!(tree.n_leaves(), 4);
+        assert_roundtrip(&tree);
+    }
+
+    #[test]
+    fn merge_children_preserves_invariants_and_updates_subtree_depths() {
+        let mut tree = Tree::from_newick("(A:1,B:1,C:1)R;").unwrap();
+        let a = tree.get_by_name("A").unwrap().id;
+        let b = tree.get_by_name("B").unwrap().id;
+        let new_parent = tree
+            .merge_children(a, b, Some(1.0), Some(1.0), Some(0.5), Some("D".into()))
+            .unwrap();
+
+        assert_valid(&tree);
+        assert_eq!(tree.get(new_parent).unwrap().depth(), 1);
+        assert_eq!(tree.get(a).unwrap().depth(), 2);
+        assert_eq!(tree.get(b).unwrap().depth(), 2);
+        // Leaves A and B are at depth 2, C at depth 1.
+        assert_eq!(tree.sackin().unwrap(), 5);
+        assert_roundtrip(&tree);
+    }
+
+    #[test]
+    fn merge_with_itself_is_rejected_and_leaves_tree_unchanged() {
+        let mut tree = Tree::from_newick("(A,B,C)R;").unwrap();
+        let before = tree.to_newick().unwrap();
+        let a = tree.get_by_name("A").unwrap().id;
+        assert!(tree.merge_children(a, a, None, None, None, None).is_err());
+        assert_unchanged(&before, &tree);
+    }
+
+    #[test]
+    fn merge_non_siblings_is_rejected_and_leaves_tree_unchanged() {
+        let mut tree = Tree::from_newick("(A,(B,C)X)R;").unwrap();
+        let before = tree.to_newick().unwrap();
+        let a = tree.get_by_name("A").unwrap().id;
+        let b = tree.get_by_name("B").unwrap().id;
+        assert!(matches!(
+            tree.merge_children(a, b, None, None, None, None),
+            Err(TreeError::MergingNonSiblingNodes(..))
+        ));
+        assert_unchanged(&before, &tree);
+    }
+
+    #[test]
+    fn merge_missing_or_deleted_nodes_is_rejected_and_leaves_tree_unchanged() {
+        let mut tree = Tree::from_newick("(A,B,C)R;").unwrap();
+        let before = tree.to_newick().unwrap();
+        let a = tree.get_by_name("A").unwrap().id;
+        let b = tree.get_by_name("B").unwrap().id;
+
+        // Out-of-range node ID.
+        assert!(tree
+            .merge_children(a, NodeId::from(999), None, None, None, None)
+            .is_err());
+        assert_unchanged(&before, &tree);
+
+        // Deleted node.
+        tree.prune(a).unwrap();
+        let after_prune = tree.to_newick().unwrap();
+        assert!(tree.merge_children(a, b, None, None, None, None).is_err());
+        assert_unchanged(&after_prune, &tree);
+    }
+
+    #[test]
+    fn nexus_and_serialization_counts_use_live_nodes_after_deletion() {
+        let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
+        let a = tree.get_by_name("A").unwrap().id;
+        tree.prune(a).unwrap();
+
+        assert_eq!(tree.to_newick().unwrap(), "((B:1)X:1,(C:1,D:1)Y:1)R;");
+        let nexus = tree.to_nexus().unwrap();
+        assert!(nexus.contains("NTAX=3"), "{nexus}");
+        assert!(nexus.contains("TAXLABELS B C D"), "{nexus}");
     }
 }

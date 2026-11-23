@@ -53,7 +53,7 @@ impl SupportCommentMode {
     ///     ..Default::default()
     /// };
     /// let tree = Tree::from_newick_with_options("(A,B)[posterior=0.95];", options).unwrap();
-    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().support, Some(0.95));
+    /// assert_eq!(tree.get(tree.root().unwrap()).unwrap().support(), Some(0.95));
     /// ```
     pub fn custom(key: impl Into<String>) -> Self {
         Self::Custom(key.into())
@@ -253,7 +253,7 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
 
         if let Some(parent_id) = parent {
             node.set_parent(parent_id, None);
-            node.set_depth(self.nodes[parent_id.index()].get_depth() + 1);
+            node.set_depth(self.nodes[parent_id.index()].depth() + 1);
             self.nodes[parent_id.index()].add_child(id, None).unwrap();
         }
 
@@ -552,10 +552,10 @@ mod tests {
             if let Some(parent_id) = node.parent {
                 let parent = node_by_id(nodes, parent_id);
                 assert!(parent.children.contains(&node.id));
-                assert_eq!(node.get_depth(), parent.get_depth() + 1);
+                assert_eq!(node.depth(), parent.depth() + 1);
                 assert_eq!(parent.get_child_edge(node.id), node.parent_edge);
             } else {
-                assert_eq!(node.get_depth(), 0);
+                assert_eq!(node.depth(), 0);
             }
 
             for child_id in &node.children {
@@ -609,7 +609,7 @@ mod tests {
             assert_eq!(child.name, None);
             assert_eq!(child.parent, Some(root.id));
             assert!(child.children.is_empty());
-            assert_eq!(child.get_depth(), 1);
+            assert_eq!(child.depth(), 1);
         }
     }
 
@@ -624,10 +624,10 @@ mod tests {
         assert_eq!(root.children, vec![inner.id, 4.into()]);
         assert_eq!(inner.parent, Some(root.id));
         assert_eq!(inner.children, vec![2.into(), 3.into()]);
-        assert_eq!(inner.get_depth(), 1);
-        assert_eq!(node_by_id(&nodes, 2.into()).get_depth(), 2);
-        assert_eq!(node_by_id(&nodes, 3.into()).get_depth(), 2);
-        assert_eq!(node_by_id(&nodes, 4.into()).get_depth(), 1);
+        assert_eq!(inner.depth(), 1);
+        assert_eq!(node_by_id(&nodes, 2.into()).depth(), 2);
+        assert_eq!(node_by_id(&nodes, 3.into()).depth(), 2);
+        assert_eq!(node_by_id(&nodes, 4.into()).depth(), 1);
     }
 
     #[test]

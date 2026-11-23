@@ -34,28 +34,36 @@ pub enum NodeError {
     /// We are trying to add the same child twice
     #[error("Node already has child {0}.")]
     DuplicateChild(NodeId),
+    /// Trying to add a non-finite support value
+    #[error("Trying to set non-finite support value {support} to node {node}.")]
+    NonFiniteSupport {
+        /// Id of the current node
+        node: NodeId,
+        /// Problematic support value
+        support: f64,
+    },
 }
 
 #[derive(Clone)]
 /// A node of the Tree
 pub struct Node {
     /// Index of the node
-    pub id: NodeId,
+    pub(crate) id: NodeId,
     /// Name of the node
-    pub name: Option<String>,
+    pub(crate) name: Option<String>,
     /// Index of the parent node
-    pub parent: Option<NodeId>,
+    pub(crate) parent: Option<NodeId>,
     /// Indices of child nodes
-    pub children: Vec<NodeId>,
+    pub(crate) children: Vec<NodeId>,
     /// Length of the branch between this node and its parent.
-    pub parent_edge: Option<EdgeLength>,
+    pub(crate) parent_edge: Option<EdgeLength>,
     /// Support value associated with the branch leading to this node.
     ///
     /// The value is stored without normalization because both fractions and
     /// percentages are common in phylogenetic formats.
-    pub support: Option<f64>,
+    pub(crate) support: Option<f64>,
     /// Optional comment attached to node
-    pub comment: Option<String>,
+    pub(crate) comment: Option<String>,
     /// lenght of branches between node and children
     pub(crate) child_edges: Option<HashMap<NodeId, EdgeLength>>,
     /// Distance to descendants of this node
@@ -97,7 +105,7 @@ impl Node {
     /// use phylotree::tree::{Node, NodeId};
     /// let mut node = Node::new();
     /// let node = Node::new_named("A");
-    /// assert_eq!(node.name.as_deref(), Some("A"));
+    /// assert_eq!(node.name(), Some("A"));
     /// ```
     pub fn new_named(name: &str) -> Self {
         Self {
@@ -115,20 +123,92 @@ impl Node {
         }
     }
 
-    /// Sets the internal Node name
-    ///
-    /// ```
-    /// use phylotree::tree::{Node, NodeId};
-    /// let mut node = Node::new();
-    /// node.set_name("A".into());
-    /// assert_eq!(node.name.as_deref(), Some("A"));
-    /// ```
-    pub fn set_name(&mut self, name: String) {
-        self.name = Some(name);
+    /// Get Id of the node
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
+    /// Get name of node if it exists
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Get the id of the nodes parent if it exists
+    pub fn parent(&self) -> Option<NodeId> {
+        self.parent
+    }
+
+    /// Get length of parent edge if it exists
+    pub fn parent_edge(&self) -> Option<EdgeLength> {
+        self.parent_edge
+    }
+
+    /// Get the ids of the node's children
+    pub fn children(&self) -> &[NodeId] {
+        &self.children[..]
+    }
+
+    /// Get the Node's comment
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_deref()
+    }
+
+    /// Get the Node's parent branch support value
+    pub fn support(&self) -> Option<f64> {
+        self.support
+    }
+
+    /// Gets the depth of the node
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Sets the Node's name
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = Some(name.into());
+    }
+
+    /// Clears the Node's name
+    pub fn clear_name(&mut self) {
+        self.name = None;
+    }
+
+    /// Set a comment value on the current Node
+    pub fn set_comment(&mut self, comment: impl Into<String>) {
+        self.comment = Some(comment.into());
+    }
+
+    /// Clears the Node's comment
+    pub fn clear_comment(&mut self) {
+        self.comment = None;
+    }
+
+    /// Sets the support value for the parent branch of this node
+    /// Fails if the Node has no parent branch.
+    pub fn set_support(&mut self, support: f64) -> Result<(), NodeError> {
+        if !support.is_finite() {
+            return Err(NodeError::NonFiniteSupport {
+                node: self.id,
+                support,
+            });
+        }
+        match self.parent {
+            Some(_) => {
+                self.support = Some(support);
+                Ok(())
+            }
+            None => Err(NodeError::HasNoParent(self.id)),
+        }
+    }
+
+    /// Clears the support value for this Node's parent branch
+    /// This function will not fail if there is no parent branch.
+    pub fn clear_support(&mut self) {
+        self.support = None;
     }
 
     /// Sets the internal Node id
-    pub fn set_id(&mut self, id: NodeId) {
+    pub(crate) fn set_id(&mut self, id: NodeId) {
         self.id = id;
     }
 
@@ -136,13 +216,6 @@ impl Node {
     ///
     /// Update the parent's children separately; prefer [`super::Tree::add_child`]
     /// when editing a tree.
-    ///
-    /// ```
-    /// use phylotree::tree::{Node, NodeId};
-    /// let mut node = Node::new();
-    /// node.set_parent(NodeId::from(0), Some(0.5));
-    /// assert_eq!(node.parent_edge, Some(0.5));
-    /// ```
     pub(crate) fn set_parent(&mut self, parent: NodeId, parent_edge: Option<EdgeLength>) {
         self.parent = Some(parent);
         self.parent_edge = parent_edge;
@@ -151,11 +224,6 @@ impl Node {
     /// Sets the depth of the node
     pub(crate) fn set_depth(&mut self, depth: usize) {
         self.depth = depth;
-    }
-
-    /// Gets the depth of the node
-    pub fn get_depth(&self) -> usize {
-        self.depth
     }
 
     /// Empties the node and sets it as deleted
@@ -168,20 +236,13 @@ impl Node {
 
     /// Adds a child to the node
     /// ```
-    /// use phylotree::tree::{Node, NodeId};
-    ///
-    /// let mut parent = Node::new();
-    /// parent.id = NodeId::from(0);
-    /// let mut child = Node::new();
-    /// child.id = NodeId::from(1);
-    ///
-    /// let l = 0.1;
-    ///
-    /// child.set_parent(parent.id, Some(l));
-    /// parent.add_child(child.id, Some(l)).unwrap();
-    ///
-    /// assert_eq!(child.parent_edge, Some(l));
-    /// assert_eq!(parent.get_child_edge(child.id), Some(l));
+    /// use phylotree::tree::{Node, Tree};
+    /// let mut tree = Tree::new();
+    /// let root = tree.add_root(Node::new()).unwrap();
+    /// let child = tree.add_child(Node::new(), root, Some(0.1)).unwrap();
+    /// assert_eq!(tree.get(root).unwrap().children(), &[child]);
+    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), Some(0.1));
+    /// assert_eq!(tree.get(child).unwrap().parent_edge(), Some(0.1));
     /// ```
     pub(crate) fn add_child(
         &mut self,
@@ -209,14 +270,19 @@ impl Node {
     /// Sets the Edge between a node and its child
     ///
     /// ```
-    /// use phylotree::tree::{Node, NodeId};
-    /// let mut node = Node::new();
-    /// let child = NodeId::from(1);
-    /// node.add_child(child, Some(0.5));
-    /// node.set_child_edge(child, Some(1.0));
-    /// assert_eq!(node.get_child_edge(child), Some(1.0));
+    /// use phylotree::tree::{Node, Tree};
+    /// let mut tree = Tree::new();
+    /// let root = tree.add_root(Node::new()).unwrap();
+    /// let child = tree.add_child(Node::new(), root, Some(0.5)).unwrap();
+    /// tree.set_edge(root, child, Some(1.0)).unwrap();
+    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), Some(1.0));
+    /// assert_eq!(tree.get(child).unwrap().parent_edge(), Some(1.0));
+    /// // Clearing the edge removes it from both representations.
+    /// tree.set_edge(root, child, None).unwrap();
+    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), None);
+    /// assert_eq!(tree.get(child).unwrap().parent_edge(), None);
     /// ```
-    pub fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {
+    pub(crate) fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {
         match edge {
             Some(e) => {
                 self.child_edges
@@ -232,12 +298,14 @@ impl Node {
     /// Removes the child from the node
     ///
     /// ```
-    /// use phylotree::tree::{Node, NodeId};
-    /// let mut node = Node::new();
-    /// let child = NodeId::from(1);
-    /// node.add_child(child, Some(0.5));
-    /// node.remove_child(child).unwrap();
-    /// assert!(node.is_tip());
+    /// use phylotree::tree::{Node, Tree};
+    /// let mut tree = Tree::new();
+    /// let root = tree.add_root(Node::new()).unwrap();
+    /// let child = tree.add_child(Node::new(), root, Some(0.5)).unwrap();
+    /// tree.remove_child(root, child).unwrap();
+    /// assert!(tree.get(root).unwrap().is_tip());
+    /// // The removed child's storage slot is deleted.
+    /// assert!(tree.get(child).is_err());
     /// ```
     pub(crate) fn remove_child(&mut self, child: NodeId) -> Result<(), NodeError> {
         let vec_index = match self.children.iter().position(|node_id| *node_id == child) {
@@ -297,7 +365,7 @@ impl Node {
     /// use phylotree::tree::{Node, NodeId};
     /// let mut node = Node::new();
     /// use phylotree::tree::NewickFormat;
-    /// node.set_name("A".into());
+    /// node.set_name("A");
     /// assert_eq!(node.to_newick(NewickFormat::AllFields).unwrap(), "A");
     /// ```
     pub fn to_newick(&self, format: NewickFormat) -> Result<String, super::TreeError> {
@@ -368,5 +436,78 @@ impl Debug for Node {
             self.comment,
             self.children,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node_with_parent() -> Node {
+        let mut node = Node::new();
+        node.set_id(NodeId::from(7));
+        node.set_parent(NodeId::from(0), Some(0.5));
+        node
+    }
+
+    #[test]
+    fn set_and_clear_name() {
+        let mut node = Node::new();
+        assert_eq!(node.name(), None);
+        node.set_name("A");
+        assert_eq!(node.name(), Some("A"));
+        node.set_name(String::from("B"));
+        assert_eq!(node.name(), Some("B"));
+        node.clear_name();
+        assert_eq!(node.name(), None);
+    }
+
+    #[test]
+    fn set_and_clear_comment() {
+        let mut node = Node::new();
+        assert_eq!(node.comment(), None);
+        node.set_comment("note");
+        assert_eq!(node.comment(), Some("note"));
+        node.set_comment(String::from("other"));
+        assert_eq!(node.comment(), Some("other"));
+        node.clear_comment();
+        assert_eq!(node.comment(), None);
+    }
+
+    #[test]
+    fn set_and_clear_support() {
+        let mut node = node_with_parent();
+        assert_eq!(node.support(), None);
+        node.set_support(95.0).unwrap();
+        assert_eq!(node.support(), Some(95.0));
+        node.clear_support();
+        assert_eq!(node.support(), None);
+        node.set_support(0.5).unwrap();
+        node.clear_support();
+        assert_eq!(node.support(), None);
+    }
+
+    #[test]
+    fn set_support_rejects_non_finite_values_and_leaves_node_unchanged() {
+        let mut node = node_with_parent();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                node.set_support(bad),
+                Err(NodeError::NonFiniteSupport { .. })
+            ));
+            assert_eq!(node.support(), None);
+        }
+    }
+
+    #[test]
+    fn set_support_rejects_parentless_node_but_clear_support_is_infallible() {
+        let mut node = Node::new();
+        assert!(matches!(
+            node.set_support(1.0),
+            Err(NodeError::HasNoParent(_))
+        ));
+        assert_eq!(node.support(), None);
+        node.clear_support();
+        assert_eq!(node.support(), None);
     }
 }

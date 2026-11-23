@@ -21,11 +21,11 @@
 //! use phylotree::tree::{Node, Tree};
 //!
 //! let mut tree = Tree::new();
-//! let root = tree.add(Node::new_named("root"));
+//! let root = tree.add_root(Node::new_named("root")).unwrap();
 //! let a = tree.add_child(Node::new_named("A"), root, Some(0.5)).unwrap();
 //! tree.add_child(Node::new_named("B"), root, Some(0.2)).unwrap();
 //!
-//! assert_eq!(tree.get(a).unwrap().get_depth(), 1);
+//! assert_eq!(tree.get(a).unwrap().depth(), 1);
 //! assert_eq!(tree.n_leaves(), 2);
 //! ```
 //!
@@ -49,7 +49,7 @@
 //! let tree = Tree::from_newick(newick).unwrap();
 //! let root = tree.root().unwrap();
 //! let names: Vec<_> = tree.preorder(root).unwrap().into_iter()
-//!     .map(|id| tree.get(id).unwrap().name.as_deref().unwrap())
+//!     .map(|id| tree.get(id).unwrap().name().unwrap())
 //!     .collect();
 //!
 //! assert_eq!(names, vec!["G", "C", "A", "B", "F", "D", "E"]);
@@ -65,7 +65,7 @@
 //! for id in tree.iter_postorder()? {
 //!     let node = tree.get(id?)?;
 //!     // Work with each node as it is visited.
-//!     assert!(node.name.is_some());
+//!     assert!(node.name().is_some());
 //! }
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -128,8 +128,8 @@
 //! //            T2    |
 //! //                  T0
 //! let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
-//! let t0 = tree.get_by_name("T0").unwrap().id;
-//! let t3 = tree.get_by_name("T3").unwrap().id;
+//! let t0 = tree.get_by_name("T0").unwrap().id();
+//! let t3 = tree.get_by_name("T3").unwrap().id();
 //! let (length, edges) = tree.get_distance(t0, t3).unwrap();
 //!
 //! assert_eq!(edges, 4);

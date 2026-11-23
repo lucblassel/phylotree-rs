@@ -85,7 +85,7 @@ impl BipartitionProfile {
                 clades.insert(
                     descendants.clone(),
                     PartitionData {
-                        depth: node.get_depth(),
+                        depth: node.depth(),
                         length: node.parent_edge,
                     },
                 );

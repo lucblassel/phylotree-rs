@@ -565,7 +565,7 @@ impl TreeList {
     ///
     /// let supports: Vec<_> = trees.iter().map(|tree| {
     ///     let root = tree.root().unwrap();
-    ///     tree.get(root).unwrap().support
+    ///     tree.get(root).unwrap().support()
     /// }).collect();
     /// assert_eq!(supports, vec![Some(90.0), Some(95.0)]);
     /// ```
@@ -612,7 +612,7 @@ impl TreeList {
     ///
     /// assert_eq!(trees.len(), 2);
     /// let root = trees[0].root().unwrap();
-    /// assert_eq!(trees[0].get(root).unwrap().support, Some(90.0));
+    /// assert_eq!(trees[0].get(root).unwrap().support(), Some(90.0));
     /// ```
     pub fn from_reader_with_options<R: Read>(
         reader: R,

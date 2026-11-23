@@ -231,7 +231,7 @@ fn build(
     while let Some(p) = stack.pop() {
         for &c in &children[p] {
             nodes[c].set_parent(p.into(), Some(lengths[c]));
-            let depth = nodes[p].get_depth() + 1;
+            let depth = nodes[p].depth() + 1;
             nodes[c].set_depth(depth);
             nodes[p].add_child(c.into(), Some(lengths[c])).unwrap();
             stack.push(c);

@@ -228,7 +228,7 @@ fn main() {
             for &node_idx in tree.preorder(tree.root().unwrap()).unwrap().iter() {
                 let (parent_edge, parent_idx, is_tip) = {
                     let node = tree.get(node_idx).unwrap();
-                    (node.parent_edge, node.parent, node.is_tip())
+                    (node.parent_edge(), node.parent(), node.is_tip())
                 };
                 if exclude_tips && is_tip {
                     continue;
@@ -259,7 +259,7 @@ fn main() {
                 if !node.is_tip() {
                     panic!("{} is not a tip node!", tip_name)
                 }
-                let id = node.id;
+                let id = node.id();
                 tree.prune(id).unwrap();
             }
 
@@ -284,8 +284,8 @@ fn main() {
 
             for pair in tips.iter().combinations(2) {
                 let (n1, n2) = (pair[0], pair[1]);
-                let i1 = tree.get_by_name(n1).unwrap().id;
-                let i2 = tree.get_by_name(n2).unwrap().id;
+                let i1 = tree.get_by_name(n1).unwrap().id();
+                let i2 = tree.get_by_name(n2).unwrap().id();
                 if let (Some(d), _) = tree.get_distance(i1, i2).unwrap() {
                     writer
                         .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
@@ -351,8 +351,8 @@ fn main() {
                     continue;
                 }
                 for (i, taxa) in duplicated.iter().enumerate() {
-                    let idx = tree.get_by_name(taxa).unwrap().id;
-                    let parent_idx = tree.get_by_name(taxa).unwrap().parent.unwrap();
+                    let idx = tree.get_by_name(taxa).unwrap().id();
+                    let parent_idx = tree.get_by_name(taxa).unwrap().parent().unwrap();
 
                     if collapse {
                         removed.push(taxa.clone());
@@ -380,7 +380,7 @@ fn main() {
                 pruned = true;
                 for leaf_idx in tree.leaves() {
                     let leaf = tree.get(leaf_idx).unwrap();
-                    let unnamed = leaf.name.is_none();
+                    let unnamed = leaf.name().is_none();
                     if unnamed {
                         pruned = false;
                         tree.prune(leaf_idx).unwrap();

@@ -140,7 +140,9 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let ids = tree.iter_preorder()?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids, tree.preorder(tree.root()?)?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -153,8 +155,10 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("named subtree").id;
+    /// let root = tree.get_by_name("C").expect("named subtree").id();
+    ///
     /// let ids = tree.iter_preorder_from(root)?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -174,7 +178,9 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let ids = tree.iter_postorder()?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids, tree.postorder(tree.root()?)?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -187,8 +193,10 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("named subtree").id;
+    /// let root = tree.get_by_name("C").expect("named subtree").id();
+    ///
     /// let ids = tree.iter_postorder_from(root)?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -211,7 +219,9 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let ids = tree.iter_inorder()?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids, tree.inorder(tree.root()?)?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -224,8 +234,10 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("named subtree").id;
+    /// let root = tree.get_by_name("C").expect("named subtree").id();
+    ///
     /// let ids = tree.iter_inorder_from(root)?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -245,7 +257,9 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let ids = tree.iter_levelorder()?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids, tree.levelorder(tree.root()?)?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -258,8 +272,10 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("named subtree").id;
+    /// let root = tree.get_by_name("C").expect("named subtree").id();
+    ///
     /// let ids = tree.iter_levelorder_from(root)?.collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(ids.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -428,11 +444,14 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let names = tree.iter_preorder_nodes()?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 5);
+    ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn iter_preorder_nodes(
@@ -449,11 +468,14 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// let names = tree.iter_preorder_nodes_from(root)?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
+    ///
     /// assert_eq!(names.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -475,9 +497,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// tree.iter_preorder_nodes_mut()?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -493,10 +517,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// tree.iter_preorder_nodes_mut_from(root)?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -513,10 +539,13 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let names = tree.iter_postorder_nodes()?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
+    ///
     /// assert_eq!(names.len(), 5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -534,10 +563,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// let names = tree.iter_postorder_nodes_from(root)?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -560,9 +591,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// tree.iter_postorder_nodes_mut()?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -578,10 +611,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// tree.iter_postorder_nodes_mut_from(root)?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -598,9 +633,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let names = tree.iter_inorder_nodes()?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -619,10 +656,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// let names = tree.iter_inorder_nodes_from(root)?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -645,9 +684,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// tree.iter_inorder_nodes_mut()?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -663,10 +704,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// tree.iter_inorder_nodes_mut_from(root)?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -683,9 +726,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// let names = tree.iter_levelorder_nodes()?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -704,10 +749,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::Tree;
+    ///
     /// let tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// let names = tree.iter_levelorder_nodes_from(root)?
-    ///     .map(|node| node.map(|n| n.name.clone()))
+    ///     .map(|node| node.map(|n| n.name().clone()))
     ///     .collect::<Result<Vec<_>, _>>()?;
     /// assert_eq!(names.len(), 3);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -730,9 +777,11 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
+    ///
     /// tree.iter_levelorder_nodes_mut()?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -748,10 +797,12 @@ impl Tree {
     ///
     /// ```
     /// use phylotree::tree::{Tree, TreeError};
+    ///
     /// let mut tree = Tree::from_newick("((A,B)C,D)R;")?;
-    /// let root = tree.get_by_name("C").expect("subtree").id;
+    /// let root = tree.get_by_name("C").expect("subtree").id();
+    ///
     /// tree.iter_levelorder_nodes_mut_from(root)?.try_for_each(|node| {
-    ///     node?.comment = Some("visited".into());
+    ///     node?.set_comment("visited");
     ///     Ok::<(), TreeError>(())
     /// })?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -927,6 +978,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deep-tree check (~30s in debug); run with `cargo test -- --ignored` or `--include-ignored`"]
     fn deep_chain_does_not_use_the_call_stack() {
         let mut tree = Tree::new();
         let root = tree.add_root(Node::new()).unwrap();
@@ -1234,6 +1286,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deep-tree check (~20s in debug); run with `cargo test -- --ignored` or `--include-ignored`"]
     fn deep_mutable_walks_remain_non_recursive() {
         let mut tree = Tree::new();
         let mut last = tree.add_root(Node::new()).unwrap();

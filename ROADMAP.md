@@ -12,8 +12,8 @@ A beta is ready when:
 
 - [ ] All release-blocking correctness issues below are fixed.
 - [ ] Public safe APIs do not panic on malformed input or invalid operations.
-- [ ] Every successful tree mutation preserves documented invariants.
-- [ ] Every failed tree mutation leaves the tree unchanged.
+- [x] Every successful tree mutation preserves documented invariants.
+- [x] Every failed tree mutation leaves the tree unchanged.
 - [ ] Public constructors cannot create invalid `DistanceMatrix` values.
 - [ ] Unit tests, doctests, Clippy, formatting, and documentation checks pass in CI.
 - [ ] The README examples compile and match the released API.
@@ -120,20 +120,20 @@ Implementing neighbor joining is not required for this beta roadmap; removing or
 Document the internal guarantees that all constructors and mutation methods must preserve.
 
 1. [x] Exactly one live root exists for every non-empty connected tree.
-2. [ ] Every live non-root node has one live parent.
+2. [x] Every live non-root node has one live parent.
     - [x] Made the structural set_parent, add_child, remove_child node methods crate-private.
     - [x] Added a Tree::remove_child method that uses the Node methods. Right now it deletes the node. 
-    - [ ] We need to decide if the remove_child method can work on internal nodes and therefore prune the subtree or if we restrict it to leaves.
-3. [ ] Every child ID refers to a live node in the same tree.
+    - [x] ~We need to decide if the remove_child method can work on internal nodes and therefore prune the subtree or if we restrict it to leaves.~ `remove_child` only works on leaves, and the error messages tells users to use `prune` for subtrees.
+3. [x] Every child ID refers to a live node in the same tree.
 4. [x] Parent and child relationships are reciprocal.
-5. [ ] A parent contains each child at most once.
+5. [x] A parent contains each child at most once.
 6. [x] Branch lengths agree between the child and parent representations.
 7. [x] Every live node is reachable from the root.
 8. [x] The topology is acyclic.
-9. [ ] Every stored node depth equals its actual distance in edges from the root.
+9. [x] Every stored node depth equals its actual distance in edges from the root.
 10. [x] Deleted storage slots are ignored by semantic tree operations.
-11. [ ] Cached or derived indexes are either valid or explicitly invalidated.
-12. [ ] Add an internal invariant-checking helper for tests.
+11. [x] Cached or derived indexes are either valid or explicitly invalidated.
+12. [x] Add an internal invariant-checking helper for tests.
 13. [ ] Consider exposing a public `Tree::validate()` method if users can construct or deserialize trees through low-level APIs.
 
 ### 2.2 Make tombstone handling consistent
@@ -142,25 +142,25 @@ Deleted nodes are reset to empty nodes and retained in the backing vector. Some 
 
 Relevant code: `src/tree/node.rs` and `src/tree/tree_impl.rs`.
 
-- [ ] Preserve the storage-slot ID when marking a node deleted, or otherwise ensure deleted nodes cannot masquerade as node zero internally.
-- [ ] Make `n_leaves` count only live leaves.
-- [ ] Make root lookup ignore deleted nodes.
-- [ ] Make node searches ignore deleted nodes.
-- [ ] Make tree length and whole-tree metrics ignore deleted nodes.
-- [ ] Audit every direct iteration over `self.nodes` and decide whether deleted nodes must be filtered.
-- [ ] Ensure taxon-index construction and unique-name validation use only live leaves.
-- [ ] Ensure serialization and NEXUS counts use live node and leaf counts.
-- [ ] Define whether `Tree::size` means live nodes or allocated storage slots.
+- [x] Preserve the storage-slot ID when marking a node deleted, or otherwise ensure deleted nodes cannot masquerade as node zero internally.
+- [x] Make `n_leaves` count only live leaves.
+- [x] Make root lookup ignore deleted nodes.
+- [x] Make node searches ignore deleted nodes.
+- [x] Make tree length and whole-tree metrics ignore deleted nodes.
+- [x] Audit every direct iteration over `self.nodes` and decide whether deleted nodes must be filtered.
+- [x] Ensure taxon-index construction and unique-name validation use only live leaves.
+- [x] Ensure serialization and NEXUS counts use live node and leaf counts.
+- [x] Define whether `Tree::size` means live nodes or allocated storage slots.
 - [ ] Prefer a user-facing `len` or `node_count` for live nodes; keep storage length private unless it has a clear use.
 
 **Regression tests**
 
-- [ ] Counts and names after pruning a leaf.
-- [ ] Counts and names after pruning an internal subtree.
-- [ ] Counts and names after compression.
-- [ ] Root lookup after attempting to prune the root.
-- [ ] Taxon-index rebuilding after prune and compression.
-- [ ] Serialization and NEXUS taxon counts after deletion.
+- [x] Counts and names after pruning a leaf.
+- [x] Counts and names after pruning an internal subtree.
+- [x] Counts and names after compression.
+- [x] Root lookup after attempting to prune the root.
+- [x] Taxon-index rebuilding after prune and compression.
+- [x] Serialization and NEXUS taxon counts after deletion.
 
 **Acceptance criteria**
 
@@ -173,20 +173,20 @@ Relevant code: `src/tree/node.rs` and `src/tree/tree_impl.rs`.
 
 Relevant code: `src/tree/tree_impl.rs`.
 
-- [ ] Update depths after `compress`.
-- [ ] Update depths after `resolve`.
-- [ ] Update depths after `merge_children`.
-- [ ] Audit `prune` and future topology-changing helpers for the same requirement.
-- [ ] Decide whether to update only affected subtrees or call `reset_depths` once after a successful compound mutation.
-- [ ] Keep depth repair inside mutation methods rather than requiring callers to remember it.
+- [x] Update depths after `compress`.
+- [x] Update depths after `resolve`.
+- [x] Update depths after `merge_children`.
+- [x] Audit `prune` and future topology-changing helpers for the same requirement.
+- [x] Decide whether to update only affected subtrees or call `reset_depths` once after a successful compound mutation.
+- [x] Keep depth repair inside mutation methods rather than requiring callers to remember it.
 
 **Regression tests**
 
-- [ ] For every live parent-child pair, assert `child.depth == parent.depth + 1` after each mutation.
-- [ ] Confirm Sackin values after compressing unary nodes.
-- [ ] Confirm depths after resolving a polytomy.
-- [ ] Confirm depths after merging siblings.
-- [ ] Confirm bipartition depth metadata after topology changes.
+- [x] For every live parent-child pair, assert `child.depth == parent.depth + 1` after each mutation.
+- [x] Confirm Sackin values after compressing unary nodes.
+- [x] Confirm depths after resolving a polytomy.
+- [x] Confirm depths after merging siblings.
+- [x] Confirm bipartition depth metadata after topology changes.
 
 ### 2.4 Make mutations atomic on error
 
@@ -194,21 +194,21 @@ Relevant code: `src/tree/tree_impl.rs`.
 
 Relevant code: `src/tree/tree_impl.rs`.
 
-- [ ] Reject attempts to merge a node with itself before mutation.
-- [ ] Validate both node IDs before mutation.
-- [ ] Validate both parent relationships before mutation.
-- [ ] Validate that the parent contains both children exactly once.
-- [ ] Validate all other fallible preconditions before making structural changes.
-- [ ] Perform the commit only after validation succeeds.
-- [ ] Audit other compound mutation methods for partial updates before possible errors.
+- [x] Reject attempts to merge a node with itself before mutation.
+- [x] Validate both node IDs before mutation.
+- [x] Validate both parent relationships before mutation.
+- [x] Validate that the parent contains both children exactly once.
+- [x] Validate all other fallible preconditions before making structural changes.
+- [x] Perform the commit only after validation succeeds.
+- [x] Audit other compound mutation methods for partial updates before possible errors.
 
 **Regression tests**
 
-- [ ] Merging a node with itself returns an error and leaves the tree unchanged.
-- [ ] Merging non-siblings returns an error and leaves the tree unchanged.
-- [ ] Merging missing or deleted nodes returns an error and leaves the tree unchanged.
-- [ ] Failed compression leaves the tree unchanged.
-- [ ] Compare serialized form and invariant state before and after each failed operation.
+- [x] Merging a node with itself returns an error and leaves the tree unchanged.
+- [x] Merging non-siblings returns an error and leaves the tree unchanged.
+- [x] Merging missing or deleted nodes returns an error and leaves the tree unchanged.
+- [x] Failed compression leaves the tree unchanged.
+- [x] Compare serialized form and invariant state before and after each failed operation.
 
 **Acceptance criteria**
 
@@ -291,14 +291,14 @@ These changes are intentionally grouped before `0.2.0` because they are easier t
 
 Relevant code: `src/tree/node.rs` and `src/tree/tree_impl.rs`.
 
-- [ ] Make `Node::id`, `parent`, `children`, and structural edge bookkeeping private.
-- [ ] Provide read-only accessors for structural data.
-- [ ] Route topology changes through invariant-preserving `Tree` methods.
-- [ ] Decide whether metadata fields such as name, support, and comment remain public or receive setters.
-- [ ] Prevent `Tree::add` from importing stale IDs, parents, children, deletion flags, or caches from a detached `Node`.
-- [ ] Clearly distinguish low-level disconnected construction from normal rooted-tree construction.
-- [ ] Ensure setting a branch length updates both ends of the edge.
-- [ ] Ensure clearing a branch length is supported and updates both ends; `set_child_edge(None)` must not silently leave an old value in place.
+- [x] Make `Node::id`, `parent`, `children`, and structural edge bookkeeping private.
+- [x] Provide read-only accessors for structural data.
+- [x] Route topology changes through invariant-preserving `Tree` methods.
+- [x] Decide whether metadata fields such as name, support, and comment remain public or receive setters.
+- [x] Prevent `Tree::add` from importing stale IDs, parents, children, deletion flags, or caches from a detached `Node`.
+- [x] Clearly distinguish low-level disconnected construction from normal rooted-tree construction.
+- [x] Ensure setting a branch length updates both ends of the edge.
+- [x] Ensure clearing a branch length is supported and updates both ends; `set_child_edge(None)` must not silently leave an old value in place.
 
 **Acceptance criteria**
 
@@ -400,22 +400,22 @@ Relevant code: `Cargo.toml`, `src/lib.rs`, and `src/distr.rs`.
 
 For `prune`, `compress`, `resolve`, and `merge_children`, test after success that:
 
-- [ ] There is exactly one expected live root.
-- [ ] Every live node is reachable.
-- [ ] Every parent-child relationship is reciprocal.
-- [ ] No child occurs twice under one parent.
-- [ ] Edge lengths agree in both representations.
-- [ ] Stored depths are correct.
-- [ ] Live node and leaf counts are correct.
-- [ ] Taxon-index rebuilding succeeds when leaf names are valid.
-- [ ] Newick serialization can be parsed back into an equivalent valid tree.
+- [x] There is exactly one expected live root.
+- [x] Every live node is reachable.
+- [x] Every parent-child relationship is reciprocal.
+- [x] No child occurs twice under one parent.
+- [x] Edge lengths agree in both representations.
+- [x] Stored depths are correct.
+- [x] Live node and leaf counts are correct.
+- [x] Taxon-index rebuilding succeeds when leaf names are valid.
+- [x] Newick serialization can be parsed back into an equivalent valid tree.
 
 For every documented error path:
 
-- [ ] Snapshot or clone the tree before the operation.
-- [ ] Assert that an error is returned.
-- [ ] Assert that the tree is unchanged.
-- [ ] Re-run the invariant checker.
+- [x] Snapshot or clone the tree before the operation.
+- [x] Assert that an error is returned.
+- [x] Assert that the tree is unchanged.
+- [x] Re-run the invariant checker.
 
 ### 4.2 Add panic-resistance tests
 
