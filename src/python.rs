@@ -96,7 +96,7 @@ impl Tree {
     }
 
     fn height(&self) -> Option<f64> {
-        self.tree.height().ok()
+        self.tree.height_by_length().ok()
     }
 
     fn n_tips(&self) -> usize {
@@ -108,7 +108,7 @@ impl Tree {
     }
 
     fn diameter(&self) -> Option<f64> {
-        self.tree.diameter().ok()
+        self.tree.diameter_by_length().ok()
     }
 
     fn n_cherries(&self) -> Result<usize, TreeError> {
@@ -170,12 +170,12 @@ impl Tree {
         Self { tree }
     }
 
-    fn get_distance(
+    fn get_distances(
         &self,
         source: usize,
         target: usize,
     ) -> Result<(Option<f64>, usize), TreeError> {
-        let dist = self.tree.get_distance(source.into(), target.into())?;
+        let dist = self.tree.get_distances(source.into(), target.into())?;
         Ok(dist)
     }
 

@@ -103,7 +103,7 @@
 //!
 //! # Distances and distance matrices
 //!
-//! [`tree::Tree::get_distance`] returns both the branch-length sum (when all
+//! [`tree::Tree::get_distances`] returns both the branch-length sum (when all
 //! lengths on the path are present) and the number of edges. A distance matrix
 //! stores all pairwise tip distances and supports PHYLIP input and output.
 //!
@@ -130,7 +130,7 @@
 //! let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
 //! let t0 = tree.get_by_name("T0").unwrap().id();
 //! let t3 = tree.get_by_name("T3").unwrap().id();
-//! let (length, edges) = tree.get_distance(t0, t3).unwrap();
+//! let (length, edges) = tree.get_distances(t0, t3).unwrap();
 //!
 //! assert_eq!(edges, 4);
 //! assert!((length.unwrap() - 1.6).abs() < 1e-12);
@@ -141,7 +141,7 @@
 //! assert!(phylip.starts_with("4\n"));
 //! ```
 //!
-//! To obtain just the longest tip-to-tip distance, use [`tree::Tree::diameter`];
+//! To obtain just the longest tip-to-tip distance, use [`tree::Tree::diameters`];
 //! it runs in linear time without constructing a distance matrix.
 //!
 //! # Simulating trees
@@ -157,7 +157,7 @@
 //! let mut tree = simulate(20, Topology::UniformUnrooted,
 //!     BranchLengths::Gamma { shape: 2.0, scale: 0.05 }, &mut rng).unwrap();
 //! tree.rescale_diameter(1.0).unwrap();
-//! assert!((tree.diameter().unwrap() - 1.0).abs() < 1e-12);
+//! assert!((tree.diameter_by_length().unwrap() - 1.0).abs() < 1e-12);
 //! ```
 //!
 //! See [`simulation`] for the uniform, ETE3, Yule, and birth-death priors.

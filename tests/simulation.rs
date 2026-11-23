@@ -99,9 +99,9 @@ fn branch_moments_reproducibility_and_diameter() {
                 }
             }
             if values.len() < 200 {
-                assert!((pairwise_diameter(&t) - t.diameter().unwrap()).abs() < 1e-12);
+                assert!((pairwise_diameter(&t) - t.diameter_by_length().unwrap()).abs() < 1e-12);
                 t.rescale_diameter(3.0).unwrap();
-                assert!((t.diameter().unwrap() - 3.0).abs() < 1e-12);
+                assert!((t.diameter_by_length().unwrap() - 3.0).abs() < 1e-12);
             }
         }
         let m = values.iter().sum::<f64>() / values.len() as f64;
@@ -161,7 +161,7 @@ fn birth_death_first_hitting_time_and_pruning() {
             );
             let h: Vec<_> = leaves
                 .iter()
-                .map(|&id| t.get_distance(root, id).unwrap().0.unwrap())
+                .map(|&id| t.get_distances(root, id).unwrap().0.unwrap())
                 .collect();
             assert!(h.iter().all(|x| (x - h[0]).abs() < 1e-12));
             assert_eq!(
@@ -217,7 +217,7 @@ fn pairwise_diameter(tree: &Tree) -> f64 {
     let mut distances = Vec::new();
     for (i, &a) in leaves.iter().enumerate() {
         for &b in &leaves[i + 1..] {
-            let (weighted, hops) = tree.get_distance(a, b).unwrap();
+            let (weighted, hops) = tree.get_distances(a, b).unwrap();
             distances.push(weighted.unwrap_or(hops as f64));
         }
     }
@@ -247,20 +247,49 @@ fn linear_diameter_preserves_pairwise_semantics() {
                         tree.set_edge(parent, id, edge).unwrap()
                     }
                 }
-                assert!((tree.diameter().unwrap() - pairwise_diameter(&tree)).abs() < 1e-12);
+                let (len_d, edge_d) = tree.diameters().unwrap();
+                assert_eq!(edge_d, tree.diameter_by_edges().unwrap());
+                // Edge-count diameter always matches the pairwise hop oracle.
+                let leaves = tree.leaves();
+                let mut max_hops = 0;
+                for (i, &a) in leaves.iter().enumerate() {
+                    for &b in &leaves[i + 1..] {
+                        max_hops = max_hops.max(tree.get_distances(a, b).unwrap().1);
+                    }
+                }
+                assert_eq!(edge_d, max_hops);
+                // Length diameter is exact when every edge has a length, and
+                // unavailable (None / Err) as soon as any edge is missing.
+                if tree.length().is_ok() {
+                    let expected = pairwise_diameter(&tree);
+                    assert!((tree.diameter_by_length().unwrap() - expected).abs() < 1e-12);
+                    assert!((len_d.unwrap() - expected).abs() < 1e-12);
+                } else {
+                    assert!(matches!(
+                        tree.diameter_by_length(),
+                        Err(phylotree::tree::TreeError::MissingBranchLengths)
+                    ));
+                    assert_eq!(len_d, None);
+                }
             }
         }
     }
-    for newick in [
-        "(A:100,B,C);",
-        "((A:2):1,B:4,C:5):100;",
-        "(A:-3,B:-2,C:-1);",
-    ] {
+    for newick in ["((A:2):1,B:4,C:5):100;", "(A:-3,B:-2,C:-1);"] {
         let tree = Tree::from_newick(newick).unwrap();
-        assert_eq!(tree.diameter().unwrap(), pairwise_diameter(&tree));
+        assert_eq!(tree.diameter_by_length().unwrap(), pairwise_diameter(&tree));
     }
-    assert!(Tree::new().diameter().is_err());
-    assert!(Tree::from_newick("(A:1);").unwrap().diameter().is_err());
+    // Partially weighted: length diameter unavailable, edge count still exact.
+    let tree = Tree::from_newick("(A:100,B,C);").unwrap();
+    assert!(matches!(
+        tree.diameter_by_length(),
+        Err(phylotree::tree::TreeError::MissingBranchLengths)
+    ));
+    assert_eq!(tree.diameters().unwrap(), (None, 2));
+    assert!(Tree::new().diameter_by_length().is_err());
+    assert!(Tree::from_newick("(A:1);")
+        .unwrap()
+        .diameter_by_length()
+        .is_err());
 }
 
 #[test]
@@ -281,7 +310,7 @@ fn diameter_rescaling_rejects_invalid_inputs_without_mutation() {
     }
     let mut tree = Tree::from_newick("((A:1):2,B:3,C:4):99;").unwrap();
     tree.rescale_diameter(14.0).unwrap();
-    assert_eq!(tree.diameter().unwrap(), 14.0);
+    assert_eq!(tree.diameter_by_length().unwrap(), 14.0);
     assert_eq!(
         tree.get(tree.root().unwrap()).unwrap().parent_edge(),
         Some(198.0)
@@ -298,7 +327,7 @@ fn diameter_handles_deep_trees_without_recursive_traversal() {
     for _ in 0..10_000 {
         spine = tree.add_child(Node::new(), spine, Some(1.0)).unwrap();
     }
-    assert_eq!(tree.diameter().unwrap(), 10_001.0);
+    assert_eq!(tree.diameter_by_length().unwrap(), 10_001.0);
     tree.rescale_diameter(20_002.0).unwrap();
-    assert_eq!(tree.diameter().unwrap(), 20_002.0);
+    assert_eq!(tree.diameter_by_length().unwrap(), 20_002.0);
 }

@@ -1126,7 +1126,10 @@ mod tests {
                 .unwrap();
             assert!(tree.cached_taxon_index().is_none());
             assert_eq!(tree.to_newick().unwrap(), expected.to_newick().unwrap());
-            assert_eq!(tree.diameter().unwrap(), expected.diameter().unwrap());
+            assert_eq!(
+                tree.diameter_by_length().unwrap(),
+                expected.diameter_by_length().unwrap()
+            );
             assert_eq!(
                 tree.distance_matrix().unwrap().as_slice(),
                 expected.distance_matrix().unwrap().as_slice()

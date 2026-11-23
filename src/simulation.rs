@@ -6,7 +6,7 @@
 //!
 //! Independent [`BranchLengths`] replace non-root edges after topology sampling;
 //! [`BranchLengths::ProcessTime`] retains birth-death times. Root stems are omitted.
-//! Use [`Tree::diameter`] and [`Tree::rescale_diameter`] for diameter operations.
+//! Use [`Tree::diameters`] and [`Tree::rescale_diameter`] for diameter operations.
 //! Dataset-specific rate changes and empirical rescaling belong in applications.
 use crate::tree::{Node, NodeId, Tree, TreeError};
 use rand::{seq::SliceRandom, Rng};

@@ -81,6 +81,7 @@ impl std::fmt::Display for NodeId {
 }
 /// A type that represents branch lengths between [`Node`] objects
 /// within phylogenetic [`Tree`] object.
+/// Branch lengths can be negative
 pub type EdgeLength = f64;
 
 /// A type that represents the depth (i.e. distance from the root) o

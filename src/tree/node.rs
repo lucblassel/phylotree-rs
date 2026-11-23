@@ -184,7 +184,6 @@ impl Node {
     }
 
     /// Sets the support value for the parent branch of this node
-    /// Fails if the Node has no parent branch.
     pub fn set_support(&mut self, support: f64) -> Result<(), NodeError> {
         if !support.is_finite() {
             return Err(NodeError::NonFiniteSupport {
@@ -192,13 +191,9 @@ impl Node {
                 support,
             });
         }
-        match self.parent {
-            Some(_) => {
-                self.support = Some(support);
-                Ok(())
-            }
-            None => Err(NodeError::HasNoParent(self.id)),
-        }
+
+        self.support = Some(support);
+        Ok(())
     }
 
     /// Clears the support value for this Node's parent branch
@@ -500,13 +495,11 @@ mod tests {
     }
 
     #[test]
-    fn set_support_rejects_parentless_node_but_clear_support_is_infallible() {
+    fn set_support_allows_root_and_clear_support_is_infallible() {
+        // Support is node metadata (e.g. root placement), not tied to a parent branch.
         let mut node = Node::new();
-        assert!(matches!(
-            node.set_support(1.0),
-            Err(NodeError::HasNoParent(_))
-        ));
-        assert_eq!(node.support(), None);
+        node.set_support(1.0).unwrap();
+        assert_eq!(node.support(), Some(1.0));
         node.clear_support();
         assert_eq!(node.support(), None);
     }

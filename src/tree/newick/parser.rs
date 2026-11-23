@@ -318,16 +318,36 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                 });
             }
         } else {
-            self.nodes[node.index()].support = Some(support);
+            self.nodes[node.index()].set_support(support).map_err(|_| {
+                NewickParseError::InvalidSupportValue {
+                    input: format!("{support:?}"),
+                    span,
+                }
+            })?;
         }
         Ok(())
     }
 
-    fn set_branch_length(&mut self, node: NodeId, length: f64) {
+    fn set_branch_length(
+        &mut self,
+        node: NodeId,
+        length: f64,
+        input: String,
+        span: Span,
+    ) -> Result<(), NewickParseError> {
+        if !length.is_finite() {
+            return Err(NewickParseError::InvalidBranchLength {
+                input: input.to_string(),
+                span,
+            });
+        }
+
         self.nodes[node.index()].parent_edge = Some(length);
         if let Some(parent) = self.nodes[node.index()].parent {
             self.nodes[parent.index()].set_child_edge(node, Some(length));
         }
+
+        Ok(())
     }
 
     fn add_comment(
@@ -486,10 +506,10 @@ impl<'a, T: Tokenizer> NewickParser<'a, T> {
                     input
                         .parse::<f64>()
                         .map_err(|_| NewickParseError::InvalidBranchLength {
-                            input,
+                            input: input.clone(),
                             span: token.span,
                         })?;
-                self.set_branch_length(node, length);
+                self.set_branch_length(node, length, input, token.span)?;
                 self.state = ParserState::Attribute;
                 Ok(false)
             }

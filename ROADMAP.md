@@ -244,12 +244,12 @@ Relevant code: `src/tree/tree_impl.rs`.
 
 Relevant code: `src/tree/tree_impl.rs`.
 
-- [ ] Split topological and branch-length variants, or require an explicit metric argument.
-- [ ] Make branch-length variants return `MissingBranchLengths` when required path lengths are incomplete.
-- [ ] Keep edge-count variants independent of branch-length presence.
-- [ ] Define whether negative branch lengths are valid.
-- [ ] Reject non-finite branch lengths and support values during parsing unless there is a documented reason to preserve them.
-- [ ] Apply the same semantics to distance, height, diameter, and comparison APIs.
+- [x] Split topological and branch-length variants, or require an explicit metric argument.
+- [x] Make branch-length variants return `MissingBranchLengths` when required path lengths are incomplete.
+- [x] Keep edge-count variants independent of branch-length presence.
+- [x] Define whether negative branch lengths are valid.
+- [x] Reject non-finite branch lengths and support values during parsing unless there is a documented reason to preserve them.
+- [x] Apply the same semantics to distance (✅), height (✅), diameter (✅), and comparison APIs.
 
 A possible API shape is:
 
@@ -511,7 +511,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 5. [x] Repair depths after topology mutations.
 6. [x] Make compound mutations atomic on error.
 7. [x] Correct binary-tree validation.
-8. [ ] Make branch-length versus edge-count semantics explicit.
+8. [x] Make branch-length versus edge-count semantics explicit.
 9. [x] Validate random-tree generator sizes.
 10. [ ] Fix Newick comment round trips and non-finite numeric handling.
 11. [x] Remove incomplete or panic-only public APIs.

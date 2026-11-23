@@ -100,6 +100,12 @@ pub enum TreeError {
     /// General error
     #[error("Encountered an error: {0}")]
     GeneralError(&'static str),
+    /// Non-finite support value found
+    #[error("Encoutered a non-finite support value")]
+    NonFiniteSupport,
+    /// Non-finite branch-length found
+    #[error("Encoutered a non-finite branch-length")]
+    NonFiniteBranchLength,
 }
 
 /// Struct to hold tree comparison metrics
@@ -287,6 +293,12 @@ impl Tree {
         // Check the edge exists
         if !self.get(parent)?.children.contains(&child) {
             return Err(NodeError::HasNoChild { parent, child }.into());
+        }
+
+        if let Some(edge) = edge {
+            if !edge.is_finite() {
+                return Err(TreeError::NonFiniteBranchLength);
+            }
         }
 
         self.get_mut(parent)?.set_child_edge(child, edge);
@@ -724,18 +736,60 @@ impl Tree {
             .count()
     }
 
-    /// Returns the height of the tree
-    /// (i.e. the number of edges or branch length sum from the root to the deepest tip)
+    /// Returns the branch length sum from the root to the deepest tip of the tree
+    /// ```
+    /// use phylotree::tree::{Tree, TreeError};
+    ///
+    /// let tree = Tree::from_newick("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// let (edge_sum, num_edges) = tree.heights().unwrap();
+    /// assert_eq!(edge_sum, Some(0.9));
+    /// assert_eq!(num_edges, 2);
+    ///
+    /// let tree_no_brlen = Tree::from_newick("((A,B)G,(C,D)E)F;").unwrap();
+    /// let (edge_sum, num_edges) = tree_no_brlen.heights().unwrap();
+    /// assert_eq!(num_edges, 2);
+    /// assert!(edge_sum.is_none());
+    /// ```
+    pub fn heights(&self) -> Result<(Option<EdgeLength>, usize), TreeError> {
+        if !self.is_rooted()? {
+            return Err(TreeError::IsNotRooted);
+        }
+
+        let root = self.root()?;
+
+        let (max_len, max_edges) = self
+            .leaves()
+            .iter()
+            .map(|&leaf| self.get_distances(root, leaf))
+            .try_fold((Some(f64::NEG_INFINITY), 0), |(max_len, max_edges), r| {
+                let (len, edges) = r?;
+                Ok::<(Option<EdgeLength>, usize), TreeError>((
+                    match (max_len, len) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        _ => None,
+                    },
+                    max_edges.max(edges),
+                ))
+            })?;
+
+        if max_len == Some(f64::NEG_INFINITY) {
+            return Err(TreeError::IsEmpty);
+        }
+
+        Ok((max_len, max_edges))
+    }
+
+    /// Returns the number of edges between the root and the deepest tip of the tree.
     /// ```
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// assert_eq!(tree.height().unwrap(), 0.9);
+    /// assert_eq!(tree.height_by_edges().unwrap(), 2);
     ///
     /// let tree_no_brlen = Tree::from_newick("((A,B)G,(C,D)E)F;").unwrap();
-    /// assert_eq!(tree_no_brlen.height().unwrap(), 2.);
+    /// assert_eq!(tree_no_brlen.height_by_edges().unwrap(), 2);
     /// ```
-    pub fn height(&self) -> Result<EdgeLength, TreeError> {
+    pub fn height_by_edges(&self) -> Result<usize, TreeError> {
         if !self.is_rooted()? {
             return Err(TreeError::IsNotRooted);
         }
@@ -744,94 +798,133 @@ impl Tree {
 
         self.leaves()
             .iter()
-            .map(|&leaf| {
-                let (edge_sum, num_edges) = self.get_distance(root, leaf).unwrap();
-                match edge_sum {
-                    Some(height) => height,
-                    None => num_edges as f64,
-                }
-            })
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .ok_or(TreeError::IsEmpty)
+            .map(|&leaf| self.distance_by_edges(root, leaf))
+            .try_fold(0, |max, x| x.map(|x| max.max(x)))
     }
 
-    /// Returns the diameter of the tree
-    /// (i.e. longest tip to tip distance), in O(nodes) time and space.
-    /// Paths with any missing branch length use their edge count instead.
+    /// Returns the number of edges between the root and the deepest tip of the tree.
+    /// This fails if some branch lengths are missing.
+    /// ```
+    /// use phylotree::tree::{Tree, TreeError};
+    ///
+    /// let tree = Tree::from_newick("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// assert_eq!(tree.height_by_length().unwrap(), 0.9);
+    ///
+    /// let tree_no_brlen = Tree::from_newick("((A,B)G,(C,D)E)F;").unwrap();
+    /// assert!(matches!(tree_no_brlen.height_by_length(),Err(TreeError::MissingBranchLengths)));
+    /// ```
+    pub fn height_by_length(&self) -> Result<EdgeLength, TreeError> {
+        if !self.is_rooted()? {
+            return Err(TreeError::IsNotRooted);
+        }
+
+        let root = self.root()?;
+
+        let sum = self
+            .leaves()
+            .iter()
+            .map(|&leaf| self.distance_by_length(root, leaf))
+            .try_fold(f64::NEG_INFINITY, |max, x| x.map(|x| max.max(x)))?;
+
+        if sum == f64::NEG_INFINITY {
+            Err(TreeError::IsEmpty)
+        } else {
+            Ok(sum)
+        }
+    }
+
+    /// Returns the diameter of the tree (longest tip-to-tip path) both as a
+    /// branch-length sum and as an edge count, in one O(nodes) postorder pass.
+    /// The length is `None` when any branch length is missing.
     /// The root stem is ignored. Fewer than two tips returns `IsEmpty`.
     /// ```
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// assert_eq!(tree.diameter().unwrap(), 1.1);
+    /// assert_eq!(tree.diameters().unwrap(), (Some(1.1), 3));
     ///
     /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
-    /// assert_eq!(tree_no_brlen.diameter().unwrap(), 3.);
+    /// assert_eq!(tree_no_brlen.diameters().unwrap(), (None, 3));
     /// ```
-    pub fn diameter(&self) -> Result<EdgeLength, TreeError> {
+    pub fn diameters(&self) -> Result<(Option<EdgeLength>, usize), TreeError> {
         if self.leaves().len() < 2 {
             return Err(TreeError::IsEmpty);
         }
-        // Iterative postorder avoids recursive traversal on deep trees.
-        let mut pending = vec![self.root()?];
-        let mut order = Vec::new();
-        while let Some(id) = pending.pop() {
-            order.push(id);
-            pending.extend(self.get(id)?.children.iter().rev().copied());
-        }
-        let mut weighted = vec![None::<f64>; self.nodes.len()];
+        // Longest downward path from each node to a leaf, per unit.
+        let mut best_len = vec![0.0_f64; self.nodes.len()];
         let mut hops = vec![0_usize; self.nodes.len()];
-        let mut missing = vec![None::<usize>; self.nodes.len()];
-        let mut diameter = None::<f64>;
-        for id in order.into_iter().rev() {
+        let mut complete = true;
+        let mut len_diameter = f64::NEG_INFINITY;
+        let mut edge_diameter = 0_usize;
+        for id in self.iter_postorder()? {
+            let id = id?;
             let node = self.get(id)?;
             if node.is_tip() {
-                weighted[id.index()] = Some(0.0);
-                continue;
+                continue; // tips seed both arrays at 0
             }
-            let mut best_weighted = None::<f64>;
-            let mut best_hops = None::<usize>;
-            let mut best_missing = None::<usize>;
-            for &child in &node.children {
-                let edge = self.get(child)?.parent_edge;
-                if edge.is_some_and(|length| !length.is_finite()) {
-                    return Err(TreeError::GeneralError("Nonfinite branch length"));
+            // Two largest child-branch paths give the best path through this node.
+            let (mut b1_len, mut b2_len) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+            let (mut b1_h, mut b2_h) = (0_usize, 0_usize);
+            for &child in node.children() {
+                let d_h = hops[child.index()] + 1;
+                if d_h > b1_h {
+                    b2_h = b1_h;
+                    b1_h = d_h;
+                } else if d_h > b2_h {
+                    b2_h = d_h;
                 }
-                let distance = edge.zip(weighted[child.index()]).map(|(a, b)| a + b);
-                let depth = hops[child.index()] + 1;
-                // Preserve the pairwise API: any missing edge makes the entire
-                // tip-to-tip path topological, rather than mixing units.
-                let missing_depth = if edge.is_none() {
-                    Some(depth)
-                } else {
-                    missing[child.index()].map(|d| d + 1)
-                };
-                let candidates = [
-                    best_weighted.zip(distance).map(|(a, b)| a + b),
-                    best_missing.map(|d| (d + depth) as f64),
-                    best_hops.zip(missing_depth).map(|(a, b)| (a + b) as f64),
-                ];
-                for candidate in candidates.into_iter().flatten() {
-                    if !candidate.is_finite() {
-                        return Err(TreeError::GeneralError("Nonfinite diameter"));
+                match self.get(child)?.parent_edge() {
+                    Some(e) => {
+                        let d = e + best_len[child.index()];
+                        if d > b1_len {
+                            b2_len = b1_len;
+                            b1_len = d;
+                        } else if d > b2_len {
+                            b2_len = d;
+                        }
                     }
-                    diameter = Some(diameter.map_or(candidate, |d| d.max(candidate)));
-                }
-                // Only actual leaf endpoints count, including negative-length
-                // paths; an internal node must not introduce a zero endpoint.
-                if let Some(d) = distance {
-                    best_weighted = Some(best_weighted.map_or(d, |old| old.max(d)));
-                }
-                best_hops = Some(best_hops.map_or(depth, |old| old.max(depth)));
-                if let Some(d) = missing_depth {
-                    best_missing = Some(best_missing.map_or(d, |old| old.max(d)));
+                    None => complete = false,
                 }
             }
-            weighted[id.index()] = best_weighted;
-            hops[id.index()] = best_hops.unwrap_or(0);
-            missing[id.index()] = best_missing;
+            if b2_h > 0 {
+                edge_diameter = edge_diameter.max(b1_h + b2_h);
+            }
+            if complete {
+                len_diameter = len_diameter.max(b1_len + b2_len);
+            }
+            best_len[id.index()] = b1_len;
+            hops[id.index()] = b1_h;
         }
-        diameter.ok_or(TreeError::IsEmpty)
+        Ok((complete.then_some(len_diameter), edge_diameter))
+    }
+
+    /// Returns the longest tip-to-tip path of the tree, in number of edges.
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// assert_eq!(tree.diameter_by_edges().unwrap(), 3);
+    ///
+    /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
+    /// assert_eq!(tree_no_brlen.diameter_by_edges().unwrap(), 3);
+    /// ```    
+    pub fn diameter_by_edges(&self) -> Result<usize, TreeError> {
+        Ok(self.diameters()?.1)
+    }
+
+    /// Get's the sum of branch lengths along the longest tip-to-tip path in the Tree.
+    /// This function will fail if some branch lengths are missing.
+    /// ```
+    /// use phylotree::tree::{Tree, TreeError};
+    ///
+    /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
+    /// assert_eq!(tree.diameter_by_length().unwrap(), 1.1);
+    ///
+    /// let tree_no_brlen = Tree::from_newick("(A,B,(C,D)E)F;").unwrap();
+    /// assert!(matches!(tree_no_brlen.diameter_by_length(), Err(TreeError::MissingBranchLengths)));
+    /// ```
+    pub fn diameter_by_length(&self) -> Result<EdgeLength, TreeError> {
+        self.diameters()?.0.ok_or(TreeError::MissingBranchLengths)
     }
 
     /// Returns the lenght of the trees
@@ -1487,33 +1580,11 @@ impl Tree {
         Ok(root_to_source[cursor - 1])
     }
 
-    /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
-    /// branches in the path have lengths) and the number of edges in the path.
-    /// ```
-    /// use phylotree::tree::Tree;
-    ///
-    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let (sum_edge_lengths, num_edges) = tree.get_distance(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("I").unwrap().id(),
-    /// ).unwrap();
-    ///
-    /// assert_eq!(num_edges, 4);
-    /// assert!(sum_edge_lengths.is_none());
-    /// ```
-    pub fn get_distance(
+    fn paths_to_root(
         &self,
         source: NodeId,
         target: NodeId,
-    ) -> Result<(Option<f64>, usize), TreeError> {
-        let mut dist = 0.0;
-        let mut branches = 0;
-        let mut all_dists = true;
-
-        if source == target {
-            return Ok((Some(0.0), 0));
-        }
-
+    ) -> Result<(Vec<NodeId>, Vec<NodeId>, usize), TreeError> {
         let root_to_source = self.get_path_from_root(source)?;
         let root_to_target = self.get_path_from_root(target)?;
 
@@ -1526,6 +1597,37 @@ impl Tree {
                 // One node is a child of the other
                 root_to_source.len().min(root_to_target.len())
             });
+
+        Ok((root_to_source, root_to_target, cursor))
+    }
+    /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
+    /// branches in the path have lengths) and the number of edges in the path.
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let (sum_edge_lengths, num_edges) = tree.get_distances(
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("I").unwrap().id(),
+    /// ).unwrap();
+    ///
+    /// assert_eq!(num_edges, 4);
+    /// assert!(sum_edge_lengths.is_none());
+    /// ```
+    pub fn get_distances(
+        &self,
+        source: NodeId,
+        target: NodeId,
+    ) -> Result<(Option<EdgeLength>, usize), TreeError> {
+        let mut dist = 0.0;
+        let mut branches = 0;
+        let mut all_dists = true;
+
+        if source == target {
+            return Ok((Some(0.0), 0));
+        }
+
+        let (root_to_source, root_to_target, cursor) = self.paths_to_root(source, target)?;
 
         for list in [root_to_source, root_to_target] {
             for &node in list.iter().skip(cursor) {
@@ -1543,6 +1645,77 @@ impl Tree {
         } else {
             Ok((None, branches))
         }
+    }
+
+    /// Get the number of edges along the path between two nodes in the tree
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let num_edges = tree.distance_by_edges(
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("I").unwrap().id(),
+    /// ).unwrap();
+    ///
+    /// assert_eq!(num_edges, 4);
+    pub fn distance_by_edges(&self, source: NodeId, target: NodeId) -> Result<usize, TreeError> {
+        if source == target {
+            return Ok(0);
+        }
+
+        let (root_to_source, root_to_target, cursor) = self.paths_to_root(source, target)?;
+
+        Ok(root_to_source
+            .iter()
+            .skip(cursor)
+            .chain(root_to_target.iter().skip(cursor))
+            .count())
+    }
+
+    /// Get the sum of edge lengths along the path between two nodes in the tree
+    /// This function fails if some branch lengths are missing along the path.
+    /// ```
+    /// use phylotree::tree::{Tree,TreeError};
+    ///
+    /// let tree = Tree::from_newick("((A:0.1,(C:0.2,E:0.3)D:0.4)B:0.5,((H:0.6)I:0.7)G:0.8)F:0.9;").unwrap();
+    /// let sum_edge_lengths = tree.distance_by_length(
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("D").unwrap().id(),
+    /// ).unwrap();
+    ///
+    /// assert!(sum_edge_lengths - 0.5 <= f64::EPSILON);
+    ///
+    /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
+    /// let err = tree.distance_by_length(
+    ///     tree.get_by_name("A").unwrap().id(),
+    ///     tree.get_by_name("D").unwrap().id(),
+    /// );
+    ///
+    /// assert!(matches!(err, Err(TreeError::MissingBranchLengths)));
+    /// ```
+    pub fn distance_by_length(
+        &self,
+        source: NodeId,
+        target: NodeId,
+    ) -> Result<EdgeLength, TreeError> {
+        if source == target {
+            return Ok(0.0);
+        }
+
+        let (root_to_source, root_to_target, cursor) = self.paths_to_root(source, target)?;
+
+        root_to_source
+            .iter()
+            .skip(cursor)
+            .chain(root_to_target.iter().skip(cursor))
+            .map(|&id| match self.get(id) {
+                Ok(node) => match node.parent_edge() {
+                    None => Err(TreeError::MissingBranchLengths),
+                    Some(d) => Ok(d),
+                },
+                Err(e) => Err(e),
+            })
+            .try_fold(0., |acc, d| d.map(|inner| acc + inner))
     }
 
     // Implementation of recursive distance matrix computation
@@ -1884,7 +2057,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     /// let mut tree = Tree::from_newick("(A:1,B:2);").unwrap();
     /// tree.rescale_diameter(6.0).unwrap();
-    /// assert_eq!(tree.diameter().unwrap(), 6.0);
+    /// assert_eq!(tree.diameter_by_length().unwrap(), 6.0);
     /// ```
     pub fn rescale_diameter(&mut self, target: EdgeLength) -> Result<(), TreeError> {
         if !target.is_finite() || target <= 0.0 {
@@ -1902,7 +2075,7 @@ impl Tree {
                 ));
             }
         }
-        let current = self.diameter()?;
+        let current = self.diameter_by_length()?;
         if current <= 0.0 {
             return Err(TreeError::GeneralError("Positive diameter required"));
         }
@@ -2569,8 +2742,8 @@ mod tests {
         let tree2 = build_tree_without_lengths().unwrap();
 
         for ((idx_s, idx_t), (dist, branches)) in test_cases {
-            let (d_pred, b_pred) = tree.get_distance(idx_s, idx_t).unwrap();
-            let (d_pred2, b_pred2) = tree2.get_distance(idx_s, idx_t).unwrap();
+            let (d_pred, b_pred) = tree.get_distances(idx_s, idx_t).unwrap();
+            let (d_pred2, b_pred2) = tree2.get_distances(idx_s, idx_t).unwrap();
             assert_eq!(branches, b_pred);
             assert_eq!(branches, b_pred2);
 
@@ -2738,33 +2911,67 @@ mod tests {
         let test_cases = vec![
             ("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;", 0.9),
             ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1,G:0.1)F;", 1.0),
-            ("((A,B)G,(C,D)E)F;", 2.0),
-            (
-                "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1);",
-                8.0,
-            ),
         ];
 
         for (newick, height) in test_cases {
-            assert_eq!(Tree::from_newick(newick).unwrap().height().unwrap(), height)
+            let tree = Tree::from_newick(newick).unwrap();
+            assert_eq!(tree.height_by_length().unwrap(), height, "length: {newick}");
+            assert_eq!(
+                tree.heights().unwrap(),
+                (Some(height), tree.height_by_edges().unwrap()),
+                "combined: {newick}"
+            );
+        }
+
+        // Without branch lengths, the length height is unavailable but the
+        // edge-count height still works.
+        let test_cases = vec![
+            ("((A,B)G,(C,D)E)F;", 2),
+            (
+                "((((((((Tip9,Tip8),Tip7),Tip6),Tip5),Tip4),Tip3),Tip2),Tip1);",
+                8,
+            ),
+        ];
+        for (newick, edges) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            assert!(
+                matches!(
+                    tree.height_by_length(),
+                    Err(TreeError::MissingBranchLengths)
+                ),
+                "length: {newick}"
+            );
+            assert_eq!(tree.height_by_edges().unwrap(), edges, "edges: {newick}");
+            assert_eq!(tree.heights().unwrap(), (None, edges), "combined: {newick}");
         }
     }
 
     #[test]
     fn test_diam() {
+        // (newick, expected (length, edges) diameter)
         let test_cases = vec![
-            ("((D,E)B,(F,G)C)A;", 4.0),
-            ("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", 1.1),
-            ("(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);", 1.1),
-            ("(A,B,(C,D));", 3.0),
-            ("(A,B,(C,D)E)F;", 3.0),
+            ("((D,E)B,(F,G)C)A;", (None, 4)),
+            ("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;", (Some(1.1), 3)),
+            ("(A:0.1,B:0.2,(C:0.3,D:0.4):0.5);", (Some(1.1), 3)),
+            ("(A,B,(C,D));", (None, 3)),
+            ("(A,B,(C,D)E)F;", (None, 3)),
         ];
 
-        for (newick, diameter) in test_cases {
+        for (newick, expected) in test_cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            assert_eq!(tree.diameters().unwrap(), expected, "combined: {newick}");
             assert_eq!(
-                Tree::from_newick(newick).unwrap().diameter().unwrap(),
-                diameter
-            )
+                tree.diameter_by_edges().unwrap(),
+                expected.1,
+                "edges: {newick}"
+            );
+            match expected.0 {
+                Some(d) => assert_eq!(tree.diameter_by_length().unwrap(), d, "length: {newick}"),
+                None => assert!(matches!(
+                    tree.diameter_by_length(),
+                    Err(TreeError::MissingBranchLengths)
+                )),
+            }
         }
     }
 
@@ -2894,7 +3101,7 @@ mod tests {
             let mut tree = Tree::from_newick(orig).unwrap();
             let rescaled = Tree::from_newick(rescaled).unwrap();
 
-            let diam = tree.diameter().unwrap();
+            let diam = tree.diameter_by_length().unwrap();
 
             tree.rescale(scale / diam);
 
@@ -3604,13 +3811,13 @@ mod tests_ete3_operations {
         assert_eq!(tree.get_common_ancestor(a.id, i.id).unwrap(), i.id);
         assert_eq!(tree.get_common_ancestor(a.id, d.id).unwrap(), root.id);
 
-        assert_eq!(tree.get_distance(a.id, i.id).unwrap().0.unwrap(), 0.101);
-        assert_eq!(tree.get_distance(a.id, b.id).unwrap().0.unwrap(), 0.11);
-        assert_eq!(tree.get_distance(a.id, a.id).unwrap().0.unwrap(), 0.0);
-        assert_eq!(tree.get_distance(i.id, i.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(tree.get_distances(a.id, i.id).unwrap().0.unwrap(), 0.101);
+        assert_eq!(tree.get_distances(a.id, b.id).unwrap().0.unwrap(), 0.11);
+        assert_eq!(tree.get_distances(a.id, a.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(tree.get_distances(i.id, i.id).unwrap().0.unwrap(), 0.0);
         assert_eq!(
-            tree.get_distance(a.id, root.id).unwrap(),
-            tree.get_distance(root.id, a.id).unwrap()
+            tree.get_distances(a.id, root.id).unwrap(),
+            tree.get_distances(root.id, a.id).unwrap()
         );
     }
 
@@ -3624,10 +3831,10 @@ mod tests_ete3_operations {
         let d = tree.get_by_name("D").unwrap();
         let root = tree.get_by_name("root").unwrap();
 
-        assert_eq!(tree.get_distance(root.id, a.id).unwrap().1, 3);
-        assert_eq!(tree.get_distance(root.id, c.id).unwrap().1, 2);
-        assert_eq!(tree.get_distance(root.id, root.id).unwrap().1, 0);
-        assert_eq!(tree.get_distance(d.id, d.id).unwrap().1, 0);
+        assert_eq!(tree.get_distances(root.id, a.id).unwrap().1, 3);
+        assert_eq!(tree.get_distances(root.id, c.id).unwrap().1, 2);
+        assert_eq!(tree.get_distances(root.id, root.id).unwrap().1, 0);
+        assert_eq!(tree.get_distances(d.id, d.id).unwrap().1, 0);
     }
 
     #[test]
@@ -4312,7 +4519,7 @@ mod rescale_cache_tests {
                 .nodes
                 .iter()
                 .all(|n| n.subtree_distances.borrow().is_none()));
-            assert_eq!(tree.diameter().unwrap(), 18.0);
+            assert_eq!(tree.diameter_by_length().unwrap(), 18.0);
         }
     }
 }

@@ -82,8 +82,8 @@ fn print_stats(path: &Path, tree: &Tree, name: bool) {
 
     println!(
         "{name}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        to_repr(tree.height()),
-        to_repr(tree.diameter()),
+        to_repr(tree.height_by_length()),
+        to_repr(tree.diameter_by_length()),
         tree.size(),
         tree.n_leaves(),
         to_repr(tree.is_rooted()),
@@ -286,7 +286,7 @@ fn main() {
                 let (n1, n2) = (pair[0], pair[1]);
                 let i1 = tree.get_by_name(n1).unwrap().id();
                 let i2 = tree.get_by_name(n2).unwrap().id();
-                if let (Some(d), _) = tree.get_distance(i1, i2).unwrap() {
+                if let (Some(d), _) = tree.get_distances(i1, i2).unwrap() {
                     writer
                         .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
                         .unwrap();
