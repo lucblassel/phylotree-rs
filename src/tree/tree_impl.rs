@@ -642,7 +642,11 @@ impl Tree {
     // # GETTING CHARACTERISTICS OF THE TREE #
     // #######################################
 
-    /// Check if the tree is Binary
+    /// Check if the tree is Binary.
+    /// A rooted tree is binary when all interal nodes have 2 children and all
+    /// terminal nodes (i.e. leaves) have no children.
+    /// An unrooted tree satisfies the same condition except that the virtual
+    /// 'root' node has exactly 3 children.
     ///
     /// ```
     /// use phylotree::tree::Tree;
@@ -650,20 +654,22 @@ impl Tree {
     /// assert!(tree.is_binary().unwrap());
     /// ```
     pub fn is_binary(&self) -> Result<bool, TreeError> {
-        for node in self.nodes.iter().filter(|n| !n.deleted) {
-            // Root of the tree
-            if node.parent.is_none() {
-                if self.is_rooted()? && node.children.len() > 2 {
-                    return Ok(false);
-                // The virtual root of unrooted trees can has up to 3 children
-                } else if !self.is_rooted()? && node.children.len() > 3 {
-                    return Ok(false);
-                }
-            } else if node.parent.is_some() && node.children.len() > 2 {
-                return Ok(false);
-            }
+        // Unary and empty trees are not binary
+        if self.nodes.iter().filter(|n| !n.deleted).count() <= 1 {
+            return Ok(false);
         }
-        Ok(true)
+
+        let expected_root_degree = if self.is_rooted()? { 2 } else { 3 };
+        let mut internal_nodes = self.nodes.iter().filter(|n| !n.deleted && !n.is_tip());
+
+        Ok(internal_nodes.all(|node| {
+            let expected = if node.is_root() {
+                expected_root_degree
+            } else {
+                2
+            };
+            node.children().len() == expected
+        }))
     }
 
     /// Checks if the tree is rooted (i.e. the root node exists and has exactly 2 children)
@@ -906,11 +912,7 @@ impl Tree {
             .filter(|node| !node.deleted && !node.is_tip())
         {
             let left = self.subtree_leaves(node.children[0])?.len();
-            let right = if node.children.len() > 1 {
-                self.subtree_leaves(node.children[1])?.len()
-            } else {
-                0
-            };
+            let right = self.subtree_leaves(node.children[1])?.len();
 
             colless += left.abs_diff(right);
         }
@@ -2489,6 +2491,28 @@ mod tests {
                 is_binary
             )
         }
+    }
+
+    #[test]
+    fn is_binary_definitions() {
+        let cases = [
+            ("((A,B),(C,D));", true), // proper rooted binary tree
+            ("(A,B,(C,D));", true),   // unrooted binary: virtual root with 3 children
+            ("(A,B,C);", true),       // 3-taxon star is binary under the virtual-root convention
+            ("((A,B,C),D);", false),  // rooted polytomy
+            ("(A,B,C,D);", false),    // unrooted multifurcation
+            ("(A)R;", false),         // unary root
+            ("((A)B,C)R;", false),    // unary internal node
+        ];
+        for (newick, expected) in cases {
+            let tree = Tree::from_newick(newick).unwrap();
+            assert_eq!(tree.is_binary().unwrap(), expected, "Failed on: {newick}");
+        }
+        // Empty and single-node trees have no internal nodes: vacuously not-binary.
+        assert!(!Tree::new().is_binary().unwrap());
+        let mut single = Tree::new();
+        single.add_root(Node::new()).unwrap();
+        assert!(!single.is_binary().unwrap());
     }
 
     #[test]

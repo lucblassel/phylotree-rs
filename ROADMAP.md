@@ -220,23 +220,23 @@ Relevant code: `src/tree/tree_impl.rs`.
 
 Relevant code: `src/tree/tree_impl.rs`.
 
-- [ ] Define rooted binary-tree degree requirements.
-- [ ] Define unrooted binary-tree degree requirements, including the virtual root convention.
-- [ ] Decide how zero-node and one-node trees are classified.
-- [ ] Make `is_binary` enforce the documented definition.
-- [ ] Ensure Colless, Sackin, and cherry calculations use the same definition.
-- [ ] Remove metric logic that silently treats a missing second child as an empty subtree unless that is explicitly part of the definition.
+- [x] Define rooted binary-tree degree requirements.
+- [x] Define unrooted binary-tree degree requirements, including the virtual root convention.
+- [x] Decide how zero-node and one-node trees are classified.
+- [x] Make `is_binary` enforce the documented definition.
+- [x] Ensure Colless, Sackin, and cherry calculations use the same definition.
+- [x] Remove metric logic that silently treats a missing second child as an empty subtree unless that is explicitly part of the definition.
 
 **Regression tests**
 
-- [ ] Empty tree.
-- [ ] Single-node tree.
-- [ ] Unary root.
-- [ ] Unary internal node.
-- [ ] Proper rooted binary tree.
-- [ ] Rooted polytomy.
-- [ ] Proper unrooted binary tree under the crate's virtual-root convention.
-- [ ] Unrooted multifurcation.
+- [x] Empty tree.
+- [x] Single-node tree.
+- [x] Unary root.
+- [x] Unary internal node.
+- [x] Proper rooted binary tree.
+- [x] Rooted polytomy.
+- [x] Proper unrooted binary tree under the crate's virtual-root convention.
+- [x] Unrooted multifurcation.
 
 ### 2.6 Make branch-length semantics explicit
 
@@ -506,16 +506,16 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 1. [x] Fix `DistanceMatrix::to_map` and matrix construction invariants.
 2. [x] Make PHYLIP parsing strict and panic-free.
-3. [ ] Define tree invariants and add a reusable test checker.
-4. [ ] Fix tombstone filtering and live node counts.
-5. [ ] Repair depths after topology mutations.
-6. [ ] Make compound mutations atomic on error.
-7. [ ] Correct binary-tree validation.
+3. [x] Define tree invariants and add a reusable test checker.
+4. [x] Fix tombstone filtering and live node counts.
+5. [x] Repair depths after topology mutations.
+6. [x] Make compound mutations atomic on error.
+7. [x] Correct binary-tree validation.
 8. [ ] Make branch-length versus edge-count semantics explicit.
 9. [x] Validate random-tree generator sizes.
 10. [ ] Fix Newick comment round trips and non-finite numeric handling.
 11. [x] Remove incomplete or panic-only public APIs.
-12. [ ] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
+12. [x] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
 13. [x] Introduce the `NodeId` newtype and normalize node-ID signatures.
 14. [ ] Remove unsound equality and private representation leaks.
 15. [ ] Perform the focused naming and error-enum cleanup.
