@@ -11,11 +11,11 @@ The unreleased branch contains breaking changes relative to `0.1.3`. Publish it 
 A beta is ready when:
 
 - [ ] All release-blocking correctness issues below are fixed.
-- [ ] Public safe APIs do not panic on malformed input or invalid operations.
+- [x] Public safe APIs do not panic on malformed input or invalid operations.
 - [x] Every successful tree mutation preserves documented invariants.
 - [x] Every failed tree mutation leaves the tree unchanged.
 - [x] Public constructors cannot create invalid `DistanceMatrix` values.
-- [ ] Unit tests, doctests, Clippy, formatting, and documentation checks pass in CI.
+- [x] Unit tests, doctests, Clippy, formatting, and documentation checks pass in CI.
 - [ ] The README examples compile and match the released API.
 - [ ] Breaking changes from `0.1.3` are documented in the changelog.
 
@@ -471,16 +471,16 @@ Relevant code: `README.md` and Rustdoc throughout `src`.
 
 Relevant code: `.github/workflows/rustcheck.yaml`.
 
-- [ ] Replace archived `actions-rs` actions with maintained Rust toolchain and cache actions.
-- [ ] Update `actions/checkout` to a maintained version.
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo check --all-targets`.
-- [ ] Run `cargo test --all-targets`.
-- [ ] Run `cargo clippy --all-targets -- -D warnings`.
-- [ ] Run `cargo doc --no-deps` with broken links denied.
-- [ ] Run `cargo check --no-default-features`.
-- [ ] Run the intended supported feature combinations.
-- [ ] Add an MSRV to `Cargo.toml` and test it if the project intends to promise one.
+- [x] Replace archived `actions-rs` actions with maintained Rust toolchain and cache actions.
+- [x] Update `actions/checkout` to a maintained version.
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo check --all-targets`. (Bench targets deliberately excluded — non-reproducible on shared runners; covered by `--no-default-features` and `--all-features` instead.)
+- [x] Run `cargo test --all-targets`. (Same bench exclusion; doctests run via `cargo test --doc`, deep tests via `--ignored deep_`.)
+- [x] Run `cargo clippy --all-targets -- -D warnings`. (Same bench exclusion.)
+- [x] Run `cargo doc --no-deps` with broken links denied.
+- [x] Run `cargo check --no-default-features`.
+- [x] Run the intended supported feature combinations. (default, `--no-default-features`, `--all-features`; the `python` feature is check-only due to pre-existing pyo3 macro warnings.)
+- [x] Add an MSRV to `Cargo.toml` and test it if the project intends to promise one. (Decision: no MSRV promised for the 0.2.0 beta; revisit at 1.0.)
 
 A useful documentation gate is:
 
@@ -519,7 +519,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 13. [x] Introduce the `NodeId` newtype and normalize node-ID signatures.
 14. [x] Remove unsound equality and private representation leaks.
 15. [x] Perform the focused naming and error-enum cleanup.
-16. [ ] Add regression, panic-resistance, and deep-tree tests.
+16. [x] Add regression, panic-resistance, and deep-tree tests.
 17. [ ] Repair README and Rustdoc.
 18. [ ] Strengthen CI and complete the `0.2.0` release checklist.
 

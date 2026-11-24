@@ -26,6 +26,9 @@ for step in "${steps[@]}"; do
       cargo check --lib --bins --tests
       echo "== cargo check --no-default-features"
       cargo check --no-default-features
+      # All features together prove the feature set is mutually compatible.
+      echo "== cargo check --all-features"
+      cargo check --all-features
       ;;
     test)
       echo "== cargo test --lib --bins --tests"

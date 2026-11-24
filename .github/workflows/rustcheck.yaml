@@ -11,6 +11,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - uses: swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
 
   check:
@@ -19,10 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
       # Benches are excluded: shared runners give non-reproducible timings.
       # Run them locally with `cargo bench` when needed.
       - run: cargo check --lib --bins --tests
       - run: cargo check --no-default-features
+      # All features together prove the feature set is mutually compatible.
+      # (The `python` feature has pre-existing pyo3 macro warnings, so this
+      # step is check-only, not clippy.)
+      - run: cargo check --all-features
 
   test:
     name: Test Suite
@@ -30,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
       - run: cargo test --lib --bins --tests
       - run: cargo test --doc
       # Long-running deep-tree tests are #[ignore]d by default; run them here.
@@ -44,6 +51,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: swatinem/rust-cache@v2
       - run: cargo clippy --lib --bins --tests -- -D warnings
 
   doc:
@@ -52,4 +60,5 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
