@@ -1125,7 +1125,8 @@ mod tests {
                 })
                 .unwrap();
             assert!(tree.cached_taxon_index().is_none());
-            assert_eq!(tree.to_newick().unwrap(), expected.to_newick().unwrap());
+            // Literal expectation: every branch length doubled by rescale(2.0).
+            assert_eq!(tree.to_newick().unwrap(), "((A:2,B:4)C:6,(D:8,E:10)F:12)R;");
             assert_eq!(
                 tree.diameter_by_length().unwrap(),
                 expected.diameter_by_length().unwrap()

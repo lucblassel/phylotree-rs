@@ -431,11 +431,11 @@ Consider using `proptest` or a similar tool for compact matrix dimensions, Newic
 
 ### 4.3 Improve test effectiveness
 
-- [ ] Replace tests that compare a method with the same method call rather than an independent expected result.
-- [ ] Add small hand-calculated reference trees for every metric.
-- [ ] Verify rooted and unrooted comparison expectations independently.
-- [ ] Test public behavior rather than only internal intermediate values.
-- [ ] Keep regression tests next to the bug they prevent and name them after the failure mode.
+- [x] Replace tests that compare a method with the same method call rather than an independent expected result.
+- [x] Add small hand-calculated reference trees for every metric.
+- [x] Verify rooted and unrooted comparison expectations independently.
+- [x] Test public behavior rather than only internal intermediate values.
+- [x] Keep regression tests next to the bug they prevent and name them after the failure mode.
 
 ### 4.4 Add deep-tree robustness tests
 

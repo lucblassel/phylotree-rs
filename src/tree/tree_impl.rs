@@ -1527,10 +1527,12 @@ impl Tree {
     /// See [`Self::robinson_foulds`] for the rooted/unrooted interpretation.
     ///
     /// ```
-    /// use phylotree::tree::Tree;
-    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// use phylotree::tree::RobinsonFouldsMode;
-    /// assert_eq!(tree.robinson_foulds_norm(&tree, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// use phylotree::tree::{RobinsonFouldsMode, Tree};
+    /// let tree1 = Tree::from_newick("((A,B),(C,D));").unwrap();
+    /// let tree2 = Tree::from_newick("((A,C),(B,D));").unwrap();
+    /// // Each tree has one nontrivial unrooted split ({A,B}|{C,D} vs
+    /// // {A,C}|{B,D}), they share none: rf = 2, total splits = 2, norm = 2/2.
+    /// assert_eq!(tree1.robinson_foulds_norm(&tree2, RobinsonFouldsMode::Unrooted).unwrap(), 1.0);
     /// ```
     pub fn robinson_foulds_norm(
         &self,
@@ -3204,18 +3206,20 @@ mod tests {
 
     #[test]
     fn test_height() {
-        // heights computed with ete3
+        // Length heights computed with ete3; edge heights counted by hand:
+        // F->G->A is 2 edges; F->A->E->C is 3 edges.
         let test_cases = vec![
-            ("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;", 0.9),
-            ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1,G:0.1)F;", 1.0),
+            ("((A:0.1,B:0.2)G:0.1,(C:0.3,D:0.4)E:0.5)F;", 0.9, 2),
+            ("((B:0.2,(C:0.3,D:0.4)E:0.5)A:0.1,G:0.1)F;", 1.0, 3),
         ];
 
-        for (newick, height) in test_cases {
+        for (newick, height, edges) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
             assert_eq!(tree.height_by_length().unwrap(), height, "length: {newick}");
+            assert_eq!(tree.height_by_edges().unwrap(), edges, "edges: {newick}");
             assert_eq!(
                 tree.heights().unwrap(),
-                DistanceMetricPair::new(Some(height), tree.height_by_edges().unwrap()),
+                DistanceMetricPair::new(Some(height), edges),
                 "combined: {newick}"
             );
         }
@@ -5238,5 +5242,159 @@ mod panic_resistance_tests {
         let single = TreeList::from_newick("((A,B),(C,D));").unwrap();
         assert_eq!(single.topology_count().unwrap(), 1);
         assert_eq!(single.partition_counts().unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod reference_value_tests {
+    use super::*;
+    use crate::distance::DistanceMatrix;
+    use crate::tree::{RobinsonFouldsMode, TreeList};
+
+    /// All reference values for `((A:1,B:1):1,(C:1,D:1):1);` (n = 4, rooted
+    /// binary) verified against gotree (`gotree stats`): sackin = 8,
+    /// colless = 0, cherries = 2.
+    #[test]
+    fn hand_calculated_balance_metrics() {
+        let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+
+        // Sackin: every leaf is at depth 2, so 4 * 2 = 8.
+        assert_eq!(tree.sackin().unwrap(), 8);
+        // Colless: both internal nodes split 2|2, so 0.
+        assert_eq!(tree.colless().unwrap(), 0);
+        assert_eq!(tree.cherry_count().unwrap(), 2);
+
+        // PDA normalizations: sackin / n^(3/2) = 8 / 8 = 1; colless / n^(3/2) = 0.
+        assert_eq!(tree.sackin_pda().unwrap(), 1.0);
+        assert_eq!(tree.colless_pda().unwrap(), 0.0);
+
+        // Yule normalizations, derived by hand for n = 4:
+        // sackin_yule = (8 - 2*4*(1/2 + 1/3 + 1/4)) / 4 = (8 - 26/3) / 4 = -1/6.
+        assert!((tree.sackin_yule().unwrap() - (-1.0 / 6.0)).abs() < 1e-12);
+        // colless_yule = (0 - (4*ln4 + (gamma - 1 - ln2)*4)) / 4 ~= -0.2703628454.
+        let expected_colless_yule = -(4.0 * 4.0_f64.ln()
+            + (std::f64::consts::EULER_GAMMA - 1.0 - 2.0_f64.ln()) * 4.0)
+            / 4.0;
+        assert!((tree.colless_yule().unwrap() - expected_colless_yule).abs() < 1e-12);
+    }
+
+    /// RF-norm derivation for two 4-taxon trees, unrooted mode:
+    /// tree1 has the single nontrivial split {A,B}|{C,D}, tree2 has {A,C}|{B,D}.
+    /// intersection = 0, total = 1 + 1 = 2, so rf = 2 - 0 = 2 and
+    /// norm_rf = (total - 2*intersection) / total = 2 / 2 = 1.0.
+    /// Rooted mode counts clades instead: {A,B},{C,D} vs {A,C},{B,D} gives
+    /// rf = 4, total = 4, norm_rf = 1.0.
+    #[test]
+    fn hand_calculated_robinson_foulds_norm() {
+        let tree1 = Tree::from_newick("((A,B),(C,D));").unwrap();
+        let tree2 = Tree::from_newick("((A,C),(B,D));").unwrap();
+
+        assert_eq!(tree1.unrooted_robinson_foulds(&tree2).unwrap(), 2);
+        assert_eq!(
+            tree1
+                .robinson_foulds_norm(&tree2, RobinsonFouldsMode::Unrooted)
+                .unwrap(),
+            1.0
+        );
+        assert_eq!(tree1.rooted_robinson_foulds(&tree2).unwrap(), 4);
+        assert_eq!(
+            tree1
+                .robinson_foulds_norm(&tree2, RobinsonFouldsMode::Rooted)
+                .unwrap(),
+            1.0
+        );
+        // Identical topologies have norm 0.
+        assert_eq!(
+            tree1
+                .robinson_foulds_norm(&tree1, RobinsonFouldsMode::Unrooted)
+                .unwrap(),
+            0.0
+        );
+    }
+
+    #[test]
+    fn upgma_builds_expected_tree() {
+        // d(A,B) = 1 is smallest, so A and B join first: ((A,B),C).
+        let matrix =
+            DistanceMatrix::new(vec!["A".into(), "B".into(), "C".into()], &[1.0, 2.0, 2.0])
+                .unwrap();
+        let tree = matrix.upgma().unwrap();
+
+        assert_eq!(tree.leaf_count(), 3);
+        assert!(tree.validate().is_ok());
+        assert_eq!(tree.cherry_count().unwrap(), 1);
+        // Depths: A,B at 2, C at 1 -> sackin = 5.
+        assert_eq!(tree.sackin().unwrap(), 5);
+    }
+
+    #[test]
+    fn ladderize_sorts_children_by_subtree_size() {
+        let mut tree = Tree::from_newick("((A,B),(C,(D,E)));").unwrap();
+        tree.ladderize().unwrap();
+
+        assert!(tree.validate().is_ok());
+        // After ladderizing, at every internal node the children are ordered
+        // by increasing number of descendant tips. Tip depths are then
+        // A,B,C at 2 and D,E at 3, so sackin = 2+2+2+3+3 = 12.
+        assert_eq!(tree.sackin().unwrap(), 12);
+        let root = tree.root().unwrap();
+        let children = tree.get(root).unwrap().children();
+        let count_desc = |id: NodeId| tree.descendants(id).unwrap().len();
+        assert!(count_desc(children[0]) <= count_desc(children[1]));
+        // Round-trips through Newick.
+        let reparsed = Tree::from_newick(&tree.to_newick().unwrap()).unwrap();
+        assert_eq!(tree.unrooted_robinson_foulds(&reparsed).unwrap(), 0);
+    }
+
+    #[test]
+    fn node_rescale_edges_scales_own_edges() {
+        let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+        let ab = tree
+            .search_nodes(|n| n.children().len() == 2 && n.parent().is_some())
+            .into_iter()
+            .next()
+            .unwrap();
+        let child = tree.get(ab).unwrap().children()[0];
+
+        tree.get_mut(ab).unwrap().rescale_edges(2.0);
+
+        // The node's own parent edge and child edges are scaled.
+        assert_eq!(tree.get(ab).unwrap().parent_edge(), Some(2.0));
+        assert_eq!(tree.get(ab).unwrap().child_edge(child), Some(2.0));
+    }
+
+    #[test]
+    fn stored_node_count_counts_slots_not_live_nodes() {
+        let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+        let slots_before = tree.stored_node_count();
+        let live_before = tree.node_count();
+
+        let a = tree.node_by_name("A").unwrap().id();
+        tree.prune(a).unwrap();
+
+        assert_eq!(tree.stored_node_count(), slots_before);
+        assert_eq!(tree.node_count(), live_before - 1);
+    }
+
+    #[test]
+    fn search_nodes_and_node_by_name_mut() {
+        let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+
+        let leaves = tree.search_nodes(|n| n.is_tip());
+        assert_eq!(leaves.len(), 4);
+
+        let a = tree.node_by_name("A").unwrap().id();
+        tree.node_by_name_mut("A").unwrap().set_name("A2");
+        assert!(tree.node_by_name("A").is_none());
+        assert_eq!(tree.node_by_name("A2").unwrap().id(), a);
+    }
+
+    #[test]
+    fn most_frequent_topology_reports_counts() {
+        let trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D)); ((A,B),(C,D));").unwrap();
+        let top = trees.most_frequent_topology().unwrap().unwrap();
+
+        assert_eq!(top.count, 2);
+        assert!((top.frequency - 2.0 / 3.0).abs() < 1e-12);
     }
 }

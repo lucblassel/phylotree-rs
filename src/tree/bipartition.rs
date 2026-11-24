@@ -336,9 +336,12 @@ impl BipartitionProfile {
     ///
     /// ```
     /// use phylotree::tree::{Tree, RobinsonFouldsMode};
-    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// let profile = tree.bipartition_profile().unwrap();
-    /// assert_eq!(profile.robinson_foulds_norm(&profile, RobinsonFouldsMode::Unrooted).unwrap(), 0.0);
+    /// let tree1 = Tree::from_newick("((A,B),(C,D));").unwrap();
+    /// let tree2 = Tree::from_newick("((A,C),(B,D));").unwrap();
+    /// let profile1 = tree1.bipartition_profile().unwrap();
+    /// let profile2 = tree2.bipartition_profile().unwrap();
+    /// // One nontrivial split each, none shared: rf = 2, total = 2, norm = 1.0.
+    /// assert_eq!(profile1.robinson_foulds_norm(&profile2, RobinsonFouldsMode::Unrooted).unwrap(), 1.0);
     /// ```
     pub fn robinson_foulds_norm(
         &self,

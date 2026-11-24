@@ -77,7 +77,7 @@
 //! use phylotree::tree::{Tree, TreeError};
 //! let mut tree = Tree::from_newick("(A:1,B:2)R;")?;
 //! tree.iter_preorder_nodes_mut()?.try_for_each(|node| {
-//!     node?.rescale_edges(2.0);
+//!     node?.set_support(1.0);
 //!     Ok::<(), TreeError>(())
 //! })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
