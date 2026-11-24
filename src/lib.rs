@@ -169,7 +169,12 @@ use rand::prelude::*;
 
 use tree::{Node, NodeId, Tree, TreeError};
 
+/// The README, included so its Rust example is exercised by `cargo test --doc`.
+#[doc = include_str!("../README.md")]
+mod readme {}
+
 #[cfg(feature = "python")]
+/// Python bindings via PyO3 (feature `python`).
 pub mod python;
 
 pub mod distance;

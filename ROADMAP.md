@@ -16,7 +16,7 @@ A beta is ready when:
 - [x] Every failed tree mutation leaves the tree unchanged.
 - [x] Public constructors cannot create invalid `DistanceMatrix` values.
 - [x] Unit tests, doctests, Clippy, formatting, and documentation checks pass in CI.
-- [ ] The README examples compile and match the released API.
+- [x] The README examples compile and match the released API.
 - [ ] Breaking changes from `0.1.3` are documented in the changelog.
 
 ---
@@ -454,18 +454,18 @@ Even if iterative traversal refactoring is deferred, establish expected behavior
 
 Relevant code: `README.md` and Rustdoc throughout `src`.
 
-- [ ] Import every type used in README examples.
-- [ ] Remove undefined variables from examples.
-- [ ] Update comparison examples to the current rooted/unrooted API.
-- [ ] Update the advertised crate version.
-- [ ] Correct stale method names and signatures.
-- [ ] Document node-ID stability and tree-locality.
-- [ ] Document binary-tree definitions.
-- [ ] Document behavior for empty and single-node trees.
-- [ ] Document branch-length requirements for every metric.
-- [ ] Document deletion/live-node count semantics.
-- [ ] Fix the broken `from_phylip_strict` Rustdoc link in `src/distance.rs`.
-- [ ] Review spelling and terminology in public errors and docs.
+- [x] Import every type used in README examples.
+- [x] Remove undefined variables from examples.
+- [x] Update comparison examples to the current rooted/unrooted API.
+- [x] Update the advertised crate version.
+- [x] Correct stale method names and signatures.
+- [x] Document node-ID stability and tree-locality.
+- [x] Document binary-tree definitions.
+- [x] Document behavior for empty and single-node trees.
+- [x] Document branch-length requirements for every metric.
+- [x] Document deletion/live-node count semantics.
+- [x] Fix the broken `from_phylip_strict` Rustdoc link in `src/distance.rs`.
+- [x] Review spelling and terminology in public errors and docs.
 
 ### 5.2 Modernize Rust CI sufficiently for the beta
 
@@ -520,7 +520,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 14. [x] Remove unsound equality and private representation leaks.
 15. [x] Perform the focused naming and error-enum cleanup.
 16. [x] Add regression, panic-resistance, and deep-tree tests.
-17. [ ] Repair README and Rustdoc.
+17. [x] Repair README and Rustdoc.
 18. [ ] Strengthen CI and complete the `0.2.0` release checklist.
 
 ## Explicitly deferred

@@ -40,8 +40,8 @@ for step in "${steps[@]}"; do
       cargo test --lib --tests --bins -- --ignored deep_
       ;;
     clippy)
-      echo "== cargo clippy --lib --bins --tests -- -D warnings"
-      cargo clippy --lib --bins --tests -- -D warnings
+      echo "== cargo clippy --all-features --lib --bins --tests -- -D warnings"
+      cargo clippy --all-features --lib --bins --tests -- -D warnings
       ;;
     doc)
       echo "== cargo doc --no-deps (RUSTDOCFLAGS=-D warnings)"

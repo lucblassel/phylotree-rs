@@ -1,3 +1,10 @@
+//! Python bindings via PyO3. Out of scope for the 0.2.0 beta release.
+//!
+//! pyo3 0.19's `#[pymethods]` macro expansion trips `non_local_definitions` on
+//! newer rustc versions, and the wrapper structs keep some fields for the FFI
+//! surface only; allow both here so `--all-features` stays warning-clean.
+#![allow(dead_code, non_local_definitions)]
+
 use crate::tree::Node as RustNode;
 use crate::tree::Tree as RustTree;
 use pyo3::{exceptions::PyValueError, prelude::*, types::IntoPyDict, Python};
@@ -83,7 +90,7 @@ impl Tree {
 
     fn to_file(&self, path: &str) -> Result<(), TreeError> {
         let path = Path::new(path);
-        self.tree.to_file(&path)?;
+        self.tree.to_file(path)?;
         Ok(())
     }
 
@@ -213,7 +220,7 @@ impl Tree {
         let name = node.name.clone();
         let parent: Option<usize> = node.parent.map(Into::into);
         let children: Vec<usize> = node.children.iter().copied().map(Into::into).collect();
-        let parent_edge: Option<f64> = node.parent_edge.clone();
+        let parent_edge: Option<f64> = node.parent_edge;
         let comment: Option<String> = node.comment.clone();
 
         let mut key_vals: Vec<(&str, PyObject)> = vec![("id", id.to_object(py))];

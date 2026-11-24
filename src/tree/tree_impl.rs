@@ -130,10 +130,10 @@ pub enum TreeError {
     #[error("Tree violates invariants: {}", .0.join("; "))]
     InvalidTree(Vec<String>),
     /// Non-finite support value found
-    #[error("Encoutered a non-finite support value")]
+    #[error("Encountered a non-finite support value")]
     NonFiniteSupport,
     /// Non-finite branch-length found
-    #[error("Encoutered a non-finite branch-length")]
+    #[error("Encountered a non-finite branch-length")]
     NonFiniteBranchLength,
 }
 
@@ -201,6 +201,13 @@ impl DistanceMetricPair {
 }
 
 /// A Phylogenetic tree
+///
+/// Nodes are stored in a flat vector and addressed by tree-local [`NodeId`]s.
+/// Deleting a node (e.g. via [`Tree::prune`]) marks its slot as deleted without
+/// removing it: [`Tree::node_count`] and [`Tree::leaf_count`] count only live
+/// nodes, while [`Tree::stored_node_count`] counts allocated slots. An empty
+/// tree has no root (`root()` returns an error) and a single-node tree is
+/// valid but not rooted.
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: Vec<Node>,
@@ -724,11 +731,12 @@ impl Tree {
     // # GETTING CHARACTERISTICS OF THE TREE #
     // #######################################
 
-    /// Check if the tree is Binary.
-    /// A rooted tree is binary when all interal nodes have 2 children and all
-    /// terminal nodes (i.e. leaves) have no children.
+    /// Check if the tree is binary.
+    /// A rooted tree is binary when all internal nodes have exactly 2 children
+    /// and all terminal nodes (i.e. leaves) have no children.
     /// An unrooted tree satisfies the same condition except that the virtual
-    /// 'root' node has exactly 3 children.
+    /// root node has exactly 3 children.
+    /// Empty and single-node trees are not binary.
     ///
     /// ```
     /// use phylotree::tree::Tree;
