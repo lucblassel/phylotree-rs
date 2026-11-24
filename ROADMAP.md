@@ -419,13 +419,13 @@ For every documented error path:
 
 ### 4.2 Add panic-resistance tests
 
-- [ ] Exercise every public constructor with boundary sizes.
-- [ ] Exercise matrix parsers with malformed dimensions and rows.
-- [ ] Exercise public methods with missing, deleted, and out-of-range node IDs.
-- [ ] Exercise empty and single-node trees.
-- [ ] Exercise partially weighted trees.
-- [ ] Exercise duplicate and missing leaf names.
-- [ ] Ensure safe public APIs return errors rather than unwinding.
+- [x] Exercise every public constructor with boundary sizes.
+- [x] Exercise matrix parsers with malformed dimensions and rows.
+- [x] Exercise public methods with missing, deleted, and out-of-range node IDs.
+- [x] Exercise empty and single-node trees.
+- [x] Exercise partially weighted trees.
+- [x] Exercise duplicate and missing leaf names.
+- [x] Ensure safe public APIs return errors rather than unwinding.
 
 Consider using `proptest` or a similar tool for compact matrix dimensions, Newick round trips, and mutation sequences, but do not make property testing a release blocker if focused regression tests cover the confirmed failures.
 
@@ -517,8 +517,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 11. [x] Remove incomplete or panic-only public APIs.
 12. [x] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
 13. [x] Introduce the `NodeId` newtype and normalize node-ID signatures.
-14. [ ] Remove unsound equality and private representation leaks.
-15. [ ] Perform the focused naming and error-enum cleanup.
+14. [x] Remove unsound equality and private representation leaks.
+15. [x] Perform the focused naming and error-enum cleanup.
 16. [ ] Add regression, panic-resistance, and deep-tree tests.
 17. [ ] Repair README and Rustdoc.
 18. [ ] Strengthen CI and complete the `0.2.0` release checklist.

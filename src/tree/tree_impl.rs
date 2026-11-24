@@ -5097,3 +5097,146 @@ mod invariant_tests {
         assert!(nexus.contains("TAXLABELS B C D"), "{nexus}");
     }
 }
+
+#[cfg(test)]
+mod panic_resistance_tests {
+    use super::*;
+    use crate::tree::TreeList;
+
+    fn small_tree() -> Tree {
+        Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap()
+    }
+
+    /// Calls every public method that takes a `NodeId` with `bad` and asserts
+    /// an `Err` is returned (a panic would fail the test). `other` is a live
+    /// node used as the second argument of two-node methods.
+    fn assert_bad_id_errors(tree: &mut Tree, bad: NodeId, other: NodeId) {
+        let root = tree.root().unwrap();
+
+        assert!(tree.get(bad).is_err());
+        assert!(tree.get_mut(bad).is_err());
+        assert!(tree.remove_child(root, bad).is_err());
+        assert!(tree.remove_child(bad, other).is_err());
+        assert!(tree.set_edge(root, bad, Some(1.0)).is_err());
+        assert!(tree.set_edge(bad, other, Some(1.0)).is_err());
+        assert!(tree.subtree(bad).is_err());
+        assert!(tree.descendants(bad).is_err());
+        assert!(tree.subtree_leaves(bad).is_err());
+        assert!(tree.preorder(bad).is_err());
+        assert!(tree.postorder(bad).is_err());
+        assert!(tree.inorder(bad).is_err());
+        assert!(tree.levelorder(bad).is_err());
+        assert!(tree.path_from_root(bad).is_err());
+        assert!(tree.common_ancestor(bad, other).is_err());
+        assert!(tree.common_ancestor(other, bad).is_err());
+        assert!(tree.distances(bad, other).is_err());
+        assert!(tree.distances(other, bad).is_err());
+        assert!(tree.distance_by_edges(bad, other).is_err());
+        assert!(tree.distance_by_length(bad, other).is_err());
+        assert!(tree.prune(bad).is_err());
+        assert!(tree
+            .merge_children(bad, other, None, None, None, None)
+            .is_err());
+        assert!(tree
+            .merge_children(other, bad, None, None, None, None)
+            .is_err());
+    }
+
+    #[test]
+    fn out_of_range_node_ids_return_errors_not_panics() {
+        let mut tree = small_tree();
+        let a = tree.node_by_name("A").unwrap().id();
+        assert_bad_id_errors(&mut tree, NodeId::from(999), a);
+        // Failed operations left the tree valid.
+        assert!(tree.validate().is_ok());
+    }
+
+    #[test]
+    fn deleted_node_ids_return_errors_not_panics() {
+        let mut tree = small_tree();
+        let a = tree.node_by_name("A").unwrap().id();
+        let b = tree.node_by_name("B").unwrap().id();
+        tree.prune(a).unwrap();
+        // `a` now refers to a tombstone slot.
+        assert_bad_id_errors(&mut tree, a, b);
+        assert!(tree.validate().is_ok());
+    }
+
+    #[test]
+    fn empty_and_single_node_trees_do_not_panic() {
+        let empty = Tree::new();
+        assert_eq!(empty.node_count(), 0);
+        assert_eq!(empty.leaf_count(), 0);
+        assert!(matches!(empty.root(), Err(TreeError::RootNotFound)));
+        assert!(empty.validate().is_ok());
+        // An empty tree has no root, so serialization and root-based metrics
+        // return typed errors rather than panicking.
+        assert!(empty.to_newick().is_err());
+        assert!(matches!(empty.heights(), Err(TreeError::RootNotFound)));
+        assert!(matches!(empty.diameters(), Err(TreeError::IsEmpty)));
+        assert!(matches!(empty.sackin(), Err(TreeError::RootNotFound)));
+        assert!(matches!(empty.colless(), Err(TreeError::RootNotFound)));
+        assert!(matches!(empty.cherry_count(), Err(TreeError::IsNotBinary)));
+        assert!(matches!(empty.bipartitions(), Err(TreeError::IsEmpty)));
+        assert!(!empty.is_binary().unwrap());
+
+        let single = Tree::from_newick("A;").unwrap();
+        assert_eq!(single.node_count(), 1);
+        assert_eq!(single.leaf_count(), 1);
+        assert!(single.validate().is_ok());
+        assert_eq!(single.to_newick().unwrap(), "A;");
+        assert!(matches!(single.sackin(), Err(TreeError::IsNotRooted)));
+        assert!(matches!(single.cherry_count(), Err(TreeError::IsNotBinary)));
+        assert!(!single.is_binary().unwrap());
+        assert!(single.bipartitions().unwrap().is_empty());
+        assert!(single.heights().is_err());
+        assert!(single.diameters().is_err());
+    }
+
+    #[test]
+    fn partially_weighted_tree_length_methods_report_missing_lengths() {
+        // The internal edges of the {A,B}|{C,D} split have no length.
+        let tree = Tree::from_newick("((A:1,B:1),(C:1,D:1));").unwrap();
+        let a = tree.node_by_name("A").unwrap().id();
+        let c = tree.node_by_name("C").unwrap().id();
+
+        assert!(matches!(
+            tree.distance_by_length(a, c),
+            Err(TreeError::MissingBranchLengths)
+        ));
+        assert!(matches!(
+            tree.height_by_length(),
+            Err(TreeError::MissingBranchLengths)
+        ));
+        assert!(matches!(
+            tree.diameter_by_length(),
+            Err(TreeError::MissingBranchLengths)
+        ));
+        assert!(matches!(
+            tree.bipartitions_with_lengths(),
+            Err(TreeError::MissingBranchLengths)
+        ));
+
+        // Edge-count variants are independent of branch lengths.
+        assert!(tree.distance_by_edges(a, c).is_ok());
+        assert!(tree.height_by_edges().is_ok());
+        assert!(tree.diameter_by_edges().is_ok());
+
+        // The combined variant reports the edge count and no length.
+        let d = tree.distances(a, c).unwrap();
+        assert_eq!(d.by_length, None);
+        assert!(d.by_edges > 0);
+    }
+
+    #[test]
+    fn empty_and_single_tree_lists_do_not_panic() {
+        let empty = TreeList::new();
+        assert!(empty.partition_counts().unwrap().is_empty());
+        assert!(empty.partition_frequencies().unwrap().is_empty());
+        assert_eq!(empty.topology_count().unwrap(), 0);
+
+        let single = TreeList::from_newick("((A,B),(C,D));").unwrap();
+        assert_eq!(single.topology_count().unwrap(), 1);
+        assert_eq!(single.partition_counts().unwrap().len(), 1);
+    }
+}

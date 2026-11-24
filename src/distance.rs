@@ -1425,4 +1425,27 @@ e    23 21 39 43 0
         assert_eq!(wrf, 0.0);
         assert_eq!(rf, 0,);
     }
+
+    #[test]
+    fn constructor_boundary_sizes_do_not_panic() {
+        // Zero and one taxon are valid.
+        assert!(DistanceMatrix::<f64>::new(vec![], &[]).is_ok());
+        assert!(DistanceMatrix::<f64>::new(vec!["A".into()], &[]).is_ok());
+        assert!(DistanceMatrix::<f64>::zeros(vec![]).is_ok());
+        assert!(DistanceMatrix::<f64>::zeros(vec!["A".into()]).is_ok());
+
+        // The compact storage must have exactly n*(n-1)/2 entries.
+        assert!(DistanceMatrix::<f64>::new(vec!["A".into(), "B".into()], &[]).is_err());
+        assert!(DistanceMatrix::<f64>::new(vec!["A".into(), "B".into()], &[1.0, 2.0]).is_err());
+        assert!(DistanceMatrix::<f64>::new(vec!["A".into(), "B".into()], &[1.0]).is_ok());
+
+        // Duplicate taxon labels are rejected.
+        assert!(DistanceMatrix::<f64>::new(vec!["A".into(), "A".into()], &[1.0]).is_err());
+
+        // Unknown taxa are rejected; the diagonal is zero for known taxa.
+        let m = DistanceMatrix::<f64>::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+        assert!(m.get("A", "Z").is_err());
+        assert_eq!(*m.get("A", "A").unwrap(), 0.0);
+        assert_eq!(*m.get("B", "A").unwrap(), 2.0);
+    }
 }
