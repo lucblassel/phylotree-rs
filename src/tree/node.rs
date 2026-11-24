@@ -42,6 +42,9 @@ pub enum NodeError {
         /// Problematic support value
         support: f64,
     },
+    /// Rejects comments that cannot round-trip through the serializer
+    #[error("Nested comments are not supported, comment content cannot contain a ']' character")]
+    InvalidCommentClosingBracket,
 }
 
 #[derive(Clone)]
@@ -174,8 +177,16 @@ impl Node {
     }
 
     /// Set a comment value on the current Node
-    pub fn set_comment(&mut self, comment: impl Into<String>) {
-        self.comment = Some(comment.into());
+    /// Comments are stored verbatim. Because we only support flat comments,
+    /// a comment containing a ']' is rejected with an error.
+    pub fn set_comment(&mut self, comment: impl Into<String>) -> Result<(), NodeError> {
+        let comment_str = comment.into();
+        if comment_str.contains("]") {
+            return Err(NodeError::InvalidCommentClosingBracket);
+        }
+        self.comment = Some(comment_str);
+
+        Ok(())
     }
 
     /// Clears the Node's comment
@@ -461,9 +472,9 @@ mod tests {
     fn set_and_clear_comment() {
         let mut node = Node::new();
         assert_eq!(node.comment(), None);
-        node.set_comment("note");
+        node.set_comment("note").unwrap();
         assert_eq!(node.comment(), Some("note"));
-        node.set_comment(String::from("other"));
+        node.set_comment(String::from("other")).unwrap();
         assert_eq!(node.comment(), Some("other"));
         node.clear_comment();
         assert_eq!(node.comment(), None);

@@ -91,6 +91,9 @@ pub enum TreeError {
     /// A preserved support annotation selected for serialization is not numeric.
     #[error("Node {0} has an invalid Newick support annotation")]
     InvalidNewickSupportComment(NodeId),
+    /// A comment contains invalid characters (a closing bracker)
+    #[error("Node has invalid comment: {0}")]
+    InvalidNewickComment(String),
     /// A custom support key contains characters that cannot be serialized safely.
     #[error("Invalid Newick support comment key '{0}'")]
     InvalidNewickSupportKey(String),
@@ -100,6 +103,9 @@ pub enum TreeError {
     /// General error
     #[error("Encountered an error: {0}")]
     GeneralError(&'static str),
+    /// The tree violates one or more documented invariants
+    #[error("Tree violates invariants: {}", .0.join("; "))]
+    InvalidTree(Vec<String>),
     /// Non-finite support value found
     #[error("Encoutered a non-finite support value")]
     NonFiniteSupport,
@@ -1251,6 +1257,149 @@ impl Tree {
     /// ```
     pub fn reset_bipartition_cache(&mut self) {
         self.taxon_index = None;
+    }
+
+    /// Returns every violated tree invariant as a human-readable message.
+    /// An empty vector means the tree is valid.
+    ///
+    /// Checks: exactly one live root in a non-empty tree; every live non-root
+    /// node has a live parent; all child IDs refer to live nodes; parent/child
+    /// links are reciprocal; no child occurs twice under one parent; branch
+    /// lengths agree on both ends of every edge; stored depths equal the edge
+    /// distance from the root; every live node is reachable from the root and
+    /// the topology is acyclic; a cached taxon index matches the live leaves.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// assert!(tree.validate_invariants().is_empty());
+    /// ```
+    pub fn validate_invariants(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let live: Vec<&Node> = self.nodes.iter().filter(|n| !n.deleted).collect();
+
+        // Exactly one live root in a non-empty tree.
+        let roots: Vec<&&Node> = live.iter().filter(|n| n.parent.is_none()).collect();
+        if !live.is_empty() && roots.len() != 1 {
+            errors.push(format!(
+                "expected exactly 1 live root, found {}",
+                roots.len()
+            ));
+        }
+
+        for node in &live {
+            // Live parent, reciprocity and depth of every live non-root node.
+            if let Some(p) = node.parent {
+                match self.get(p) {
+                    Ok(parent) => {
+                        if !parent.children.contains(&node.id) {
+                            errors.push(format!(
+                                "node {} lists parent {} but is not in its children",
+                                node.id, p
+                            ));
+                        }
+                        if node.depth != parent.depth + 1 {
+                            errors.push(format!(
+                                "node {} depth {} != parent {} depth {} + 1",
+                                node.id, node.depth, p, parent.depth
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        errors.push(format!("node {} has missing/deleted parent {}", node.id, p))
+                    }
+                }
+            }
+
+            // No child appears twice under one parent.
+            let mut unique = node.children.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            if unique.len() != node.children.len() {
+                errors.push(format!("node {} contains a child twice", node.id));
+            }
+
+            // Child IDs are live, reciprocal, and branch lengths agree on both ends.
+            for &c in &node.children {
+                match self.get(c) {
+                    Ok(child) => {
+                        if child.parent != Some(node.id) {
+                            errors.push(format!(
+                                "node {} lists child {} whose parent is {:?}",
+                                node.id, c, child.parent
+                            ));
+                        }
+                        if node.get_child_edge(c) != child.parent_edge {
+                            errors.push(format!(
+                                "branch length mismatch on edge {} -> {}",
+                                node.id, c
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        errors.push(format!("node {} has missing/deleted child {}", node.id, c))
+                    }
+                }
+            }
+        }
+
+        // Root depth, reachability of every live node, and acyclicity.
+        if let Some(root) = roots.first() {
+            if root.depth != 0 {
+                errors.push(format!("root {} has depth {} != 0", root.id, root.depth));
+            }
+            let mut visited = HashSet::new();
+            let mut stack = vec![root.id];
+            while let Some(id) = stack.pop() {
+                if !visited.insert(id) {
+                    errors.push(format!(
+                        "node {} reached twice (cycle or shared descendant)",
+                        id
+                    ));
+                    continue;
+                }
+                if let Ok(node) = self.get(id) {
+                    stack.extend(node.children.iter().copied());
+                }
+            }
+            if visited.len() != live.len() {
+                errors.push(format!(
+                    "only {}/{} live nodes are reachable from the root",
+                    visited.len(),
+                    live.len()
+                ));
+            }
+        }
+
+        // A cached taxon index must match the live leaf names.
+        if let Some(index) = &self.taxon_index {
+            let mut cached: Vec<_> = index.taxa().to_vec();
+            cached.sort();
+            let mut leaves: Vec<_> = self.leaf_names().into_iter().flatten().collect();
+            leaves.sort();
+            if cached != leaves {
+                errors.push("cached taxon index does not match live leaf names".to_string());
+            }
+        }
+
+        errors
+    }
+
+    /// Validates all documented tree invariants, returning every violation found.
+    ///
+    /// Useful after deserializing a tree or building one through low-level APIs:
+    /// ```
+    /// use phylotree::tree::Tree;
+    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
+    /// tree.validate().unwrap();
+    /// ```
+    pub fn validate(&self) -> Result<(), TreeError> {
+        let violations = self.validate_invariants();
+        if violations.is_empty() {
+            Ok(())
+        } else {
+            Err(TreeError::InvalidTree(violations))
+        }
     }
 
     // #################
@@ -4552,115 +4701,9 @@ mod invariant_tests {
     use super::*;
 
     /// Checks the documented tree invariants and returns all violations found.
+    /// Checks the documented tree invariants via the public API.
     fn check_invariants(tree: &Tree) -> Vec<String> {
-        let mut errors = Vec::new();
-        let live: Vec<&Node> = tree.nodes.iter().filter(|n| !n.deleted).collect();
-
-        // Exactly one live root in a non-empty tree.
-        let roots: Vec<&&Node> = live.iter().filter(|n| n.parent.is_none()).collect();
-        if !live.is_empty() && roots.len() != 1 {
-            errors.push(format!(
-                "expected exactly 1 live root, found {}",
-                roots.len()
-            ));
-        }
-
-        for node in &live {
-            // Live parent, reciprocity and depth of every live non-root node.
-            if let Some(p) = node.parent {
-                match tree.get(p) {
-                    Ok(parent) => {
-                        if !parent.children.contains(&node.id) {
-                            errors.push(format!(
-                                "node {} lists parent {} but is not in its children",
-                                node.id, p
-                            ));
-                        }
-                        if node.depth != parent.depth + 1 {
-                            errors.push(format!(
-                                "node {} depth {} != parent {} depth {} + 1",
-                                node.id, node.depth, p, parent.depth
-                            ));
-                        }
-                    }
-                    Err(_) => {
-                        errors.push(format!("node {} has missing/deleted parent {}", node.id, p))
-                    }
-                }
-            }
-
-            // No child appears twice under one parent.
-            let mut unique = node.children.clone();
-            unique.sort_unstable();
-            unique.dedup();
-            if unique.len() != node.children.len() {
-                errors.push(format!("node {} contains a child twice", node.id));
-            }
-
-            // Child IDs are live, reciprocal, and branch lengths agree on both ends.
-            for &c in &node.children {
-                match tree.get(c) {
-                    Ok(child) => {
-                        if child.parent != Some(node.id) {
-                            errors.push(format!(
-                                "node {} lists child {} whose parent is {:?}",
-                                node.id, c, child.parent
-                            ));
-                        }
-                        if node.get_child_edge(c) != child.parent_edge {
-                            errors.push(format!(
-                                "branch length mismatch on edge {} -> {}",
-                                node.id, c
-                            ));
-                        }
-                    }
-                    Err(_) => {
-                        errors.push(format!("node {} has missing/deleted child {}", node.id, c))
-                    }
-                }
-            }
-        }
-
-        // Root depth, reachability of every live node, and acyclicity.
-        if let Some(root) = roots.first() {
-            if root.depth != 0 {
-                errors.push(format!("root {} has depth {} != 0", root.id, root.depth));
-            }
-            let mut visited = HashSet::new();
-            let mut stack = vec![root.id];
-            while let Some(id) = stack.pop() {
-                if !visited.insert(id) {
-                    errors.push(format!(
-                        "node {} reached twice (cycle or shared descendant)",
-                        id
-                    ));
-                    continue;
-                }
-                if let Ok(node) = tree.get(id) {
-                    stack.extend(node.children.iter().copied());
-                }
-            }
-            if visited.len() != live.len() {
-                errors.push(format!(
-                    "only {}/{} live nodes are reachable from the root",
-                    visited.len(),
-                    live.len()
-                ));
-            }
-        }
-
-        // A cached taxon index must match the live leaf names.
-        if let Some(index) = &tree.taxon_index {
-            let mut cached: Vec<_> = index.taxa().to_vec();
-            cached.sort();
-            let mut leaves: Vec<_> = tree.leaf_names().into_iter().flatten().collect();
-            leaves.sort();
-            if cached != leaves {
-                errors.push("cached taxon index does not match live leaf names".to_string());
-            }
-        }
-
-        errors
+        tree.validate_invariants()
     }
 
     fn assert_valid(tree: &Tree) {

@@ -238,19 +238,6 @@ impl<R: Read> NewickTokenizer<R> {
         loop {
             match self.consume_char()? {
                 Some(']') => break,
-                Some('\'') => match self.consume_char()? {
-                    Some('[') => s.push('['),
-                    Some(']') => s.push(']'),
-                    Some(c) => {
-                        s.push('\'');
-                        s.push(c);
-                    }
-                    None => {
-                        return Err(TokenizerError::UnterminatedComment {
-                            span: self.get_current_span(),
-                        })
-                    }
-                },
                 Some(c) => s.push(c),
                 None => {
                     return Err(TokenizerError::UnterminatedComment {
@@ -384,13 +371,13 @@ mod tests {
 
     #[test]
     pub fn test_comments() {
-        let newick = "(A[comment&^GDSA]:['[']],B);";
+        let newick = "(A[comment&^GDSA]:0.5,B);";
         let expected = vec![
             NewickToken::ParenOpen,
             NewickToken::UnquotedString("A".into()),
             NewickToken::Comment("comment&^GDSA".into()),
             NewickToken::Colon,
-            NewickToken::Comment("[]".into()),
+            NewickToken::UnquotedString("0.5".into()),
             NewickToken::Comma,
             NewickToken::UnquotedString("B".into()),
             NewickToken::ParenClose,

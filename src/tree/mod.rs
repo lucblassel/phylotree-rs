@@ -5,6 +5,10 @@
 //!  - The [`Tree`] struct that holds a collection of [`Node`] objects.
 //!  - The [`TreeList`] struct that holds an ordered collection of [`Tree`] objects.
 //!
+//! *A note on newick comments:
+//! Comments are flat `[...]` regions: the first `]` terminates the comment, nesting is
+//! not supported, and there is no escaping inside the comment. A `]` cannot appear
+//! in the comment field of `Node` and trying to add one will result in an error.
 
 mod bipartition;
 /// A module to draw phylogenetic trees
@@ -36,6 +40,10 @@ pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListErro
 /// Node IDs are local to the tree that created them. Use [`NodeId::index`] when
 /// an underlying storage index is required, or the [`From`] conversions to move
 /// between `NodeId` and [`usize`].
+///
+/// a `NodeId` is stable and a given `NodeId` will always point to the same `Node`.
+/// Topological mutation operations on the tree preserve `NodeId` values.
+/// Think of them as pointer values.
 ///
 /// ```
 /// use phylotree::tree::NodeId;

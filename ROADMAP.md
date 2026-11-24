@@ -134,7 +134,7 @@ Document the internal guarantees that all constructors and mutation methods must
 10. [x] Deleted storage slots are ignored by semantic tree operations.
 11. [x] Cached or derived indexes are either valid or explicitly invalidated.
 12. [x] Add an internal invariant-checking helper for tests.
-13. [ ] Consider exposing a public `Tree::validate()` method if users can construct or deserialize trees through low-level APIs.
+13. [x] Consider exposing a public `Tree::validate()` method if users can construct or deserialize trees through low-level APIs.
 
 ### 2.2 Make tombstone handling consistent
 
@@ -151,7 +151,7 @@ Relevant code: `src/tree/node.rs` and `src/tree/tree_impl.rs`.
 - [x] Ensure taxon-index construction and unique-name validation use only live leaves.
 - [x] Ensure serialization and NEXUS counts use live node and leaf counts.
 - [x] Define whether `Tree::size` means live nodes or allocated storage slots.
-- [ ] Prefer a user-facing `len` or `node_count` for live nodes; keep storage length private unless it has a clear use.
+- [x] Prefer a user-facing `len` or `node_count` for live nodes; keep storage length private unless it has a clear use.
 
 **Regression tests**
 
@@ -273,11 +273,11 @@ Comment tokenization and serialization currently use inconsistent apostrophe and
 
 Relevant code: `src/tree/newick/tokenizer.rs` and `src/tree/newick/serializer.rs`.
 
-- [ ] Define one documented escaping convention for comments.
-- [ ] Make tokenization and serialization exact inverses for supported comments.
-- [ ] Verify that trailing apostrophes do not consume the closing bracket.
-- [ ] Add round-trip tests for apostrophes, brackets, repeated comments, Unicode, and empty comments.
-- [ ] Add property-based or table-driven parser/serializer round-trip tests.
+- [x] Define one documented escaping convention for comments.
+- [x] Make tokenization and serialization exact inverses for supported comments.
+- [x] Verify that trailing apostrophes do not consume the closing bracket.
+- [x] Add round-trip tests for apostrophes, brackets, repeated comments, Unicode, and empty comments.
+- [x] Add property-based or table-driven parser/serializer round-trip tests.
 
 ---
 
@@ -315,7 +315,7 @@ Relevant code: `src/tree/mod.rs` and all node-ID call sites.
 - [x] Implement ordering, hashing, formatting, and lossless `usize` conversion traits, plus an explicit storage-index accessor.
 - [x] Accept `NodeId` by value rather than `&NodeId` in public methods.
 - [x] Document that IDs are tree-local.
-- [ ] Document whether IDs remain stable after prune, compression, and other mutations.
+- [x] Document whether IDs remain stable after prune, compression, and other mutations.
 
 ### 3.3 Make `DistanceMatrix` states valid by construction
 
@@ -513,7 +513,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 7. [x] Correct binary-tree validation.
 8. [x] Make branch-length versus edge-count semantics explicit.
 9. [x] Validate random-tree generator sizes.
-10. [ ] Fix Newick comment round trips and non-finite numeric handling.
+10. [x] Fix Newick comment round trips and non-finite numeric handling.
 11. [x] Remove incomplete or panic-only public APIs.
 12. [x] Make `Tree` structure and `DistanceMatrix` fields invariant-preserving.
 13. [x] Introduce the `NodeId` newtype and normalize node-ID signatures.

@@ -51,6 +51,8 @@ impl NewickBranchLengthFormat {
 }
 
 /// Selects which raw node comments are included in Newick output.
+/// Remember comments are flat and unnested
+/// (see note on comments in module doc)
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum NewickCommentFormat {
     /// Omit all raw comments.
@@ -277,7 +279,7 @@ impl<'a> NewickSerializer<'a> {
             output.push(')');
         }
 
-        output.push_str(&serialize_node_fields(node, &self.options));
+        output.push_str(&serialize_node_fields(node, &self.options)?);
         Ok(output)
     }
 }
@@ -328,10 +330,13 @@ pub(crate) fn serialize_node_with_options(
         }
     }
     validate_node(node, &options)?;
-    Ok(serialize_node_fields(node, &options))
+    serialize_node_fields(node, &options)
 }
 
-fn serialize_node_fields(node: &Node, options: &NewickSerializeOptions) -> String {
+fn serialize_node_fields(
+    node: &Node,
+    options: &NewickSerializeOptions,
+) -> Result<String, TreeError> {
     let mut output = String::new();
     let is_tip = node.is_tip();
 
@@ -357,7 +362,7 @@ fn serialize_node_fields(node: &Node, options: &NewickSerializeOptions) -> Strin
     if options.comments.includes(is_tip) {
         if let Some(comment) = &node.comment {
             output.push('[');
-            output.push_str(&serialize_comment(comment));
+            output.push_str(&serialize_comment(comment)?);
             output.push(']');
         }
     }
@@ -375,7 +380,7 @@ fn serialize_node_fields(node: &Node, options: &NewickSerializeOptions) -> Strin
         }
     }
 
-    output
+    Ok(output)
 }
 
 fn is_comment_support_format(format: &NewickSupportFormat) -> bool {
@@ -455,8 +460,12 @@ fn is_safe_unquoted_name_char(c: char) -> bool {
     !(c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | ',' | ':' | ';' | '\''))
 }
 
-fn serialize_comment(comment: &str) -> String {
-    comment.replace(']', "']")
+fn serialize_comment(comment: &str) -> Result<String, TreeError> {
+    if comment.contains("]") {
+        Err(TreeError::InvalidNewickComment(comment.to_owned()))
+    } else {
+        Ok(comment.to_owned())
+    }
 }
 
 #[cfg(test)]
@@ -680,6 +689,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // We do not escape the brackets anymore so this is now an invalid comment
     fn escapes_closing_brackets_in_comments() {
         let node = node(None, None, Some("left]right"), true);
         assert_eq!(
@@ -750,5 +760,83 @@ mod tests_ete3_serialization {
         let tree = Tree::from_newick(newick).expect("Could not parse tree");
 
         assert_eq!(newick, tree.to_newick().expect("Could not write tree"));
+    }
+
+    /// Sets `comment` on leaf A of a two-taxon tree, serializes, reparses, and
+    /// returns the comment read back from the reparsed tree.
+    fn comment_roundtrip(comment: &str) -> String {
+        let mut tree = Tree::from_newick("(A,B)R;").unwrap();
+        tree.get_by_name_mut("A")
+            .unwrap()
+            .set_comment(comment)
+            .unwrap();
+        let newick = tree.to_newick().unwrap();
+        assert!(
+            newick.contains(&format!("[{comment}]")),
+            "serialized newick {newick} does not contain the comment verbatim"
+        );
+        let reparsed = Tree::from_newick(&newick).unwrap();
+        reparsed
+            .get_by_name("A")
+            .unwrap()
+            .comment()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn flat_comments_roundtrip_exactly() {
+        // No escaping inside comments: whatever is between [ and the first ]
+        // is the comment, in and out.
+        let cases = [
+            "simple",
+            "don't",     // apostrophe is a literal character
+            "trailing'", // trailing apostrophe must not consume the closing bracket
+            "''",
+            "a'b'c",
+            "open [ bracket", // '[' is literal, nesting is not supported
+            "",
+            "unicode éè 🦠",
+            "punct ,:;()&",
+            "&&NHX:B=95",
+        ];
+        for comment in cases {
+            assert_eq!(comment_roundtrip(comment), comment, "failed on {comment:?}");
+        }
+    }
+
+    #[test]
+    fn apostrophes_are_literal_in_comments() {
+        let tree = Tree::from_newick("(A[don't],B);").unwrap();
+        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("don't"));
+        let tree = Tree::from_newick("(A[abc'],B);").unwrap();
+        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("abc'"));
+    }
+
+    #[test]
+    fn comment_ends_at_first_closing_bracket() {
+        // Flat comments: [a[b] terminates at the first ], so the trailing "c],B);" is a syntax error.
+        assert!(Tree::from_newick("(A[a[b]c,B);").is_err());
+        // But the comment itself stops at the first ].
+        let tree = Tree::from_newick("(A[x[y],B);").unwrap();
+        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("x[y"));
+    }
+
+    #[test]
+    fn comment_with_closing_bracket_is_rejected() {
+        // ']' is unrepresentable in a flat comment: the setter rejects it, so
+        // a tree built through the safe API can never hold an unserializable comment.
+        let mut tree = Tree::from_newick("(A,B)R;").unwrap();
+        assert!(tree
+            .get_by_name_mut("A")
+            .unwrap()
+            .set_comment("a]b")
+            .is_err());
+        assert_eq!(tree.get_by_name("A").unwrap().comment(), None);
+        // Defense in depth: if an invalid comment reaches storage anyway (crate-internal
+        // construction), serialization must error rather than emit a corrupt stream.
+        let mut node = Node::new_named("A");
+        node.comment = Some("a]b".to_owned());
+        assert!(serialize_node(&node, NewickFormat::AllFields).is_err());
     }
 }
