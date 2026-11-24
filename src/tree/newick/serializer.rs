@@ -263,23 +263,44 @@ impl<'a> NewickSerializer<'a> {
         Ok(())
     }
 
-    fn serialize_subtree(&self, node_id: NodeId) -> Result<String, TreeError> {
-        let node = self.tree.get(node_id)?;
-        validate_node(node, &self.options)?;
+    fn serialize_subtree(&self, root: NodeId) -> Result<String, TreeError> {
+        // Iterative with an explicit stack: each frame is a node whose opening
+        // parenthesis has been emitted, plus the index of the next child to
+        // serialize. This keeps deep caterpillar trees from overflowing the
+        // call stack.
         let mut output = String::new();
+        let mut stack: Vec<(NodeId, usize)> = Vec::new();
 
-        if !node.children.is_empty() {
-            output.push('(');
-            for (index, &child_id) in node.children.iter().enumerate() {
-                if index > 0 {
+        let node = self.tree.get(root)?;
+        validate_node(node, &self.options)?;
+        if node.children.is_empty() {
+            output.push_str(&serialize_node_fields(node, &self.options)?);
+            return Ok(output);
+        }
+        output.push('(');
+        stack.push((root, 0));
+
+        while let Some((node_id, next)) = stack.pop() {
+            let node = self.tree.get(node_id)?;
+            if next < node.children.len() {
+                stack.push((node_id, next + 1));
+                if next > 0 {
                     output.push(',');
                 }
-                output.push_str(&self.serialize_subtree(child_id)?);
+                let child_id = node.children[next];
+                let child = self.tree.get(child_id)?;
+                validate_node(child, &self.options)?;
+                if child.children.is_empty() {
+                    output.push_str(&serialize_node_fields(child, &self.options)?);
+                } else {
+                    output.push('(');
+                    stack.push((child_id, 0));
+                }
+            } else {
+                output.push(')');
+                output.push_str(&serialize_node_fields(node, &self.options)?);
             }
-            output.push(')');
         }
-
-        output.push_str(&serialize_node_fields(node, &self.options)?);
         Ok(output)
     }
 }

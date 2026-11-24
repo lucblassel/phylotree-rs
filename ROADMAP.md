@@ -441,10 +441,10 @@ Consider using `proptest` or a similar tool for compact matrix dimensions, Newic
 
 Even if iterative traversal refactoring is deferred, establish expected behavior for highly unbalanced trees.
 
-- [ ] Add a reasonably deep caterpillar-tree traversal test.
-- [ ] Test parse/serialize round trips on deep trees.
-- [ ] Test pruning and depth rebuilding on deep trees.
-- [ ] Document any practical depth limit if stack-recursive implementations remain in the beta.
+- [x] Add a reasonably deep caterpillar-tree traversal test.
+- [x] Test parse/serialize round trips on deep trees.
+- [x] Test pruning and depth rebuilding on deep trees.
+- [x] Document any practical depth limit if stack-recursive implementations remain in the beta.
 
 ---
 

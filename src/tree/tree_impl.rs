@@ -1992,6 +1992,10 @@ impl Tree {
     }
 
     /// Computes the distance matrix of the tree, implemented in a recursive manner.
+    ///
+    /// This legacy implementation recurses once per tree depth, so very deep
+    /// caterpillar trees can overflow the call stack; prefer the iterative
+    /// [`Tree::distance_matrix`] for large or unbalanced trees.
     /// ```
     /// use phylotree::tree::Tree;
     ///
@@ -2400,15 +2404,15 @@ impl Tree {
         Ok(())
     }
 
-    // recusive implementation of depth recomputation
+    // Iterative implementation of depth recomputation: an explicit stack
+    // keeps deep caterpillar trees from overflowing the call stack.
     fn reset_depth_impl(&mut self, root: NodeId, depth: usize) -> Result<(), TreeError> {
-        let root = self.get_mut(root)?;
-        root.set_depth(depth);
-
-        for &child in root.children.clone().iter() {
-            self.reset_depth_impl(child, depth + 1)?
+        let mut stack = vec![(root, depth)];
+        while let Some((id, d)) = stack.pop() {
+            let node = self.get_mut(id)?;
+            node.set_depth(d);
+            stack.extend(node.children.iter().map(|&child| (child, d + 1)));
         }
-
         Ok(())
     }
 
@@ -5396,5 +5400,67 @@ mod reference_value_tests {
 
         assert_eq!(top.count, 2);
         assert!((top.frequency - 2.0 / 3.0).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod deep_tree_tests {
+    use super::*;
+
+    /// Builds a caterpillar Newick string with `depth` internal nodes and
+    /// `depth + 1` tips: "((((T0:1,T1:1),T2:1),...),);"
+    fn caterpillar_newick(depth: usize) -> String {
+        let mut s = "T0:1".to_string();
+        for i in 1..=depth {
+            s = format!("({s},T{i}:1)");
+        }
+        s.push(';');
+        s
+    }
+
+    #[test]
+    #[ignore = "long-running deep-tree test; run with: cargo test -- --ignored deep_"]
+    fn deep_caterpillar_parse_serialize_roundtrip() {
+        let depth = 50_000;
+        let newick = caterpillar_newick(depth);
+
+        let tree = Tree::from_newick(&newick).unwrap();
+        assert_eq!(tree.node_count(), 2 * depth + 1);
+        assert_eq!(tree.leaf_count(), depth + 1);
+        assert!(tree.validate().is_ok());
+
+        // Serialization is exact and the output reparses to the same topology.
+        let serialized = tree.to_newick().unwrap();
+        assert_eq!(serialized, newick);
+        let reparsed = Tree::from_newick(&serialized).unwrap();
+        assert_eq!(tree.unrooted_robinson_foulds(&reparsed).unwrap(), 0);
+    }
+
+    #[test]
+    #[ignore = "long-running deep-tree test; run with: cargo test -- --ignored deep_"]
+    fn deep_caterpillar_prune_and_depth_rebuild() {
+        let depth = 50_000;
+        let mut tree = Tree::from_newick(&caterpillar_newick(depth)).unwrap();
+
+        // Prune the deepest tip (T{depth}); depth rebuilding must not recurse.
+        let deep_tip = tree.node_by_name(&format!("T{depth}")).unwrap().id();
+        tree.prune(deep_tip).unwrap();
+        tree.reset_depths().unwrap();
+
+        assert!(tree.validate().is_ok());
+        assert_eq!(tree.node_count(), 2 * depth);
+        // The deepest remaining tip is at depth `depth`.
+        let max_depth = tree
+            .leaves()
+            .iter()
+            .map(|&id| tree.get(id).unwrap().depth())
+            .max()
+            .unwrap();
+        assert_eq!(max_depth, depth);
+        assert_eq!(tree.get(tree.root().unwrap()).unwrap().depth(), 0);
+
+        // Compressing the resulting chain of unary nodes is also iterative-safe.
+        tree.compress().unwrap();
+        assert!(tree.validate().is_ok());
     }
 }
