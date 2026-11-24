@@ -6,7 +6,6 @@
 
 use std::fmt::{Debug, Display};
 
-use clap::ValueEnum;
 use num_traits::{Float, Zero};
 use numeric_literals::replace_numeric_literals;
 use rand_distr::{uniform::SampleUniform, Distribution, Exp, Gamma, Uniform};
@@ -19,7 +18,8 @@ trait_set! {
 }
 
 /// Available branch length distributions
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum Distr {
     /// A [uniform](https://en.wikipedia.org/wiki/Continuous_uniform_distribution)
     /// distribution over $[0.002, 1.0)$

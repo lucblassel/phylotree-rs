@@ -2,7 +2,7 @@ use accurate::sum::NaiveSum;
 use accurate::traits::*;
 
 use itertools::Itertools;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
 use ptree::{print_tree, TreeBuilder};
 use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet};
@@ -2765,7 +2765,7 @@ END;
     }
 
     /// Recursive function that adds node representation to a printable tree builder
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     fn print_nodes(
         &self,
         root_idx: NodeId,
@@ -2793,7 +2793,7 @@ END;
     }
 
     /// Print a debug view of the tree to the console
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     pub fn print_debug(&self) -> Result<(), TreeError> {
         let root = self.root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));
@@ -2806,7 +2806,7 @@ END;
     }
 
     /// Print the tree to the console
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(feature = "cli", not(target_arch = "wasm32")))]
     pub fn print(&self) -> Result<(), TreeError> {
         let root = self.root()?;
         let mut builder = TreeBuilder::new(format!("{:?}", root));

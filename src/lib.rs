@@ -164,7 +164,6 @@
 //!
 use std::collections::VecDeque;
 
-use clap::ValueEnum;
 use distr::{Distr, Sampler};
 use rand::prelude::*;
 
@@ -182,7 +181,8 @@ pub mod tree;
 // type Result<T> = std::result::Result<T, Error>;
 
 /// Shape of random trees to generate
-#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum TreeShape {
     /// Yule model tree shape
     Yule,

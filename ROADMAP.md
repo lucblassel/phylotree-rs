@@ -386,11 +386,11 @@ This is API and dependency tightening rather than a new feature.
 
 Relevant code: `Cargo.toml`, `src/lib.rs`, and `src/distr.rs`.
 
-- [ ] Remove unconditional `clap::ValueEnum` coupling from core enums, or gate it behind the `cli` feature.
-- [ ] Make `clap` optional if it is only required by the binary.
-- [ ] Review presentation-only dependencies such as `ptree` for feature gating.
-- [ ] Confirm `cargo check --no-default-features` builds a lean core library.
-- [ ] Confirm the default feature set matches the intended experience for library users.
+- [x] Remove unconditional `clap::ValueEnum` coupling from core enums, or gate it behind the `cli` feature.
+- [x] Make `clap` optional if it is only required by the binary.
+- [x] Review presentation-only dependencies such as `ptree` for feature gating.
+- [x] Confirm `cargo check --no-default-features` builds a lean core library.
+- [x] Confirm the default feature set matches the intended experience for library users.
 
 ---
 
