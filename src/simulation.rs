@@ -74,7 +74,7 @@ impl Default for BranchLengths {
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let tree = simulate(20, Topology::BirthDeath(BirthDeath::default()),
 ///     BranchLengths::ProcessTime, &mut rng).unwrap();
-/// assert_eq!(tree.n_leaves(), 20);
+/// assert_eq!(tree.leaf_count(), 20);
 /// ```
 ///
 /// Reference: [DendroPy birth-death implementation](https://jeetsukumaran.github.io/DendroPy/_modules/dendropy/model/birthdeath.html).
@@ -132,7 +132,7 @@ pub enum Topology {
 /// let mut rng = StdRng::seed_from_u64(42);
 /// let t = simulate(20, Topology::UniformUnrooted,
 ///                  BranchLengths::Gamma { shape: 2.0, scale: 0.05 }, &mut rng).unwrap();
-/// assert_eq!(t.n_leaves(), 20);
+/// assert_eq!(t.leaf_count(), 20);
 /// ```
 pub fn simulate<R: Rng + ?Sized>(
     tips: usize,

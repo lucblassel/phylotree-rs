@@ -97,7 +97,7 @@ impl TreeList {
     /// let tree_list = TreeList::from_trees(trees);
     ///
     /// assert_eq!(tree_list.len(), 2);
-    /// assert_eq!(tree_list[1].n_leaves(), 3);
+    /// assert_eq!(tree_list[1].leaf_count(), 3);
     /// ```
     pub fn from_trees(trees: Vec<Tree>) -> Self {
         Self {
@@ -314,9 +314,9 @@ impl TreeList {
     /// ```
     /// use phylotree::tree::TreeList;
     /// let mut trees = TreeList::from_newick("((A,B),(C,D)); ((A,C),(B,D));").unwrap();
-    /// assert_eq!(trees.n_topologies().unwrap(), 2);
+    /// assert_eq!(trees.topology_count().unwrap(), 2);
     /// ```
-    pub fn n_topologies(&self) -> Result<usize, TreeListError> {
+    pub fn topology_count(&self) -> Result<usize, TreeListError> {
         Ok(self.topology_frequencies()?.len())
     }
 
@@ -415,7 +415,7 @@ impl TreeList {
     ///     Tree::from_newick("(A,B);").unwrap(),
     ///     Tree::from_newick("((A,B),C);").unwrap(),
     /// ]);
-    /// let leaf_counts: Vec<_> = trees.iter().map(Tree::n_leaves).collect();
+    /// let leaf_counts: Vec<_> = trees.iter().map(Tree::leaf_count).collect();
     ///
     /// assert_eq!(leaf_counts, vec![2, 3]);
     /// ```
@@ -484,7 +484,7 @@ impl TreeList {
     ///
     /// assert_eq!(trees.len(), 2);
     /// assert_eq!(trees[0].to_newick().unwrap(), "(A,B);");
-    /// assert_eq!(trees[1].n_leaves(), 3);
+    /// assert_eq!(trees[1].leaf_count(), 3);
     /// ```
     pub fn from_newick(newick: &str) -> Result<Self, NewickParseError> {
         Self::from_reader(newick.as_bytes())
@@ -534,7 +534,7 @@ impl TreeList {
     /// let reader = Cursor::new(b"(A,B); ((A,B),C);");
     /// let trees = TreeList::from_reader(reader).unwrap();
     ///
-    /// assert_eq!(trees.iter().map(|tree| tree.n_leaves()).collect::<Vec<_>>(), vec![2, 3]);
+    /// assert_eq!(trees.iter().map(|tree| tree.leaf_count()).collect::<Vec<_>>(), vec![2, 3]);
     /// ```
     pub fn from_reader<R: Read>(reader: R) -> Result<Self, NewickParseError> {
         Self::from_reader_with_options(reader, NewickParseOptions::default())
@@ -759,8 +759,8 @@ mod tests {
         let trees = TreeList::from_reader(Cursor::new(input)).unwrap();
 
         assert_eq!(trees.len(), 3);
-        assert_eq!(trees[0].n_leaves(), 2);
-        assert_eq!(trees[1].n_leaves(), 3);
+        assert_eq!(trees[0].leaf_count(), 2);
+        assert_eq!(trees[1].leaf_count(), 3);
         assert_eq!(trees[2].leaf_names()[0].as_deref(), Some("A;1"));
     }
 
@@ -797,7 +797,7 @@ mod tests {
         let mut trees: TreeList = input.into_iter().collect();
 
         assert_eq!(
-            trees.iter().map(Tree::n_leaves).collect::<Vec<_>>(),
+            trees.iter().map(Tree::leaf_count).collect::<Vec<_>>(),
             vec![2, 3]
         );
         for tree in &mut trees {
@@ -879,7 +879,7 @@ mod tests {
         let mut trees = TreeList::from_newick("((A,B),C); ((A,B),C);").unwrap();
         trees.partition_counts().unwrap();
 
-        trees[1].get_by_name_mut("C").unwrap().name = Some("D".to_owned());
+        trees[1].node_by_name_mut("C").unwrap().name = Some("D".to_owned());
 
         assert!(matches!(
             trees.validate_same_taxa(),
@@ -1014,7 +1014,7 @@ mod tests {
             trees.most_frequent_topology().unwrap(),
             Some(frequencies[0])
         );
-        assert_eq!(trees.n_topologies().unwrap(), 2);
+        assert_eq!(trees.topology_count().unwrap(), 2);
     }
 
     #[test]
@@ -1037,7 +1037,7 @@ mod tests {
         assert!(trees.partition_frequencies().unwrap().is_empty());
         assert!(trees.topology_frequencies().unwrap().is_empty());
         assert_eq!(trees.most_frequent_topology().unwrap(), None);
-        assert_eq!(trees.n_topologies().unwrap(), 0);
+        assert_eq!(trees.topology_count().unwrap(), 0);
     }
 
     #[test]

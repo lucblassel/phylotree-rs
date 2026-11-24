@@ -26,7 +26,7 @@
 //! tree.add_child(Node::new_named("B"), root, Some(0.2)).unwrap();
 //!
 //! assert_eq!(tree.get(a).unwrap().depth(), 1);
-//! assert_eq!(tree.n_leaves(), 2);
+//! assert_eq!(tree.leaf_count(), 2);
 //! ```
 //!
 //! # Reading, writing, and traversing trees
@@ -103,7 +103,7 @@
 //!
 //! # Distances and distance matrices
 //!
-//! [`tree::Tree::get_distances`] returns both the branch-length sum (when all
+//! [`tree::Tree::distances`] returns both the branch-length sum (when all
 //! lengths on the path are present) and the number of edges. A distance matrix
 //! stores all pairwise tip distances and supports PHYLIP input and output.
 //!
@@ -128,9 +128,9 @@
 //! //            T2    |
 //! //                  T0
 //! let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
-//! let t0 = tree.get_by_name("T0").unwrap().id();
-//! let t3 = tree.get_by_name("T3").unwrap().id();
-//! let (length, edges) = tree.get_distances(t0, t3).unwrap();
+//! let t0 = tree.node_by_name("T0").unwrap().id();
+//! let t3 = tree.node_by_name("T3").unwrap().id();
+//! let (length, edges) = tree.distances(t0, t3).unwrap();
 //!
 //! assert_eq!(edges, 4);
 //! assert!((length.unwrap() - 1.6).abs() < 1e-12);
@@ -200,7 +200,7 @@ pub enum TreeShape {
 /// ```
 /// use phylotree::{generate_tree, distr::Distr};
 /// let tree = generate_tree(10, true, Distr::Exponential).unwrap();
-/// assert_eq!(tree.n_leaves(), 10);
+/// assert_eq!(tree.leaf_count(), 10);
 /// ```
 pub fn generate_tree(
     n_leaves: usize,
@@ -258,7 +258,7 @@ pub fn generate_tree(
 /// ```
 /// use phylotree::{generate_yule, distr::Distr};
 /// let tree = generate_yule(10, true, Distr::Exponential).unwrap();
-/// assert_eq!(tree.n_leaves(), 10);
+/// assert_eq!(tree.leaf_count(), 10);
 /// ```
 pub fn generate_yule(
     n_leaves: usize,
@@ -278,7 +278,7 @@ pub fn generate_yule(
 
     let mut parent_candidates = vec![root];
 
-    while tree.n_leaves() != n_leaves {
+    while tree.leaf_count() != n_leaves {
         // Choose parent
         let parent = *parent_candidates
             .choose(&mut rng)
@@ -312,7 +312,7 @@ pub fn generate_yule(
 /// ```
 /// use phylotree::{generate_caterpillar, distr::Distr};
 /// let tree = generate_caterpillar(10, true, Distr::Exponential).unwrap();
-/// assert_eq!(tree.n_leaves(), 10);
+/// assert_eq!(tree.leaf_count(), 10);
 /// ```
 pub fn generate_caterpillar(
     n_leaves: usize,
@@ -381,13 +381,13 @@ mod tests {
     fn test_requested_size() {
         for size in [10, 100, 3, 3000] {
             let tree = generate_tree(size, false, Distr::Uniform).unwrap();
-            assert_eq!(size, tree.n_leaves());
+            assert_eq!(size, tree.leaf_count());
 
             let tree = generate_yule(size, false, Distr::Uniform).unwrap();
-            assert_eq!(size, tree.n_leaves());
+            assert_eq!(size, tree.leaf_count());
 
             let tree = generate_caterpillar(size, false, Distr::Uniform).unwrap();
-            assert_eq!(size, tree.n_leaves());
+            assert_eq!(size, tree.leaf_count());
         }
     }
 

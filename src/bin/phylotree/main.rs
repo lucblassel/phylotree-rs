@@ -84,11 +84,11 @@ fn print_stats(path: &Path, tree: &Tree, name: bool) {
         "{name}{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         to_repr(tree.height_by_length()),
         to_repr(tree.diameter_by_length()),
-        tree.size(),
-        tree.n_leaves(),
+        tree.stored_node_count(),
+        tree.leaf_count(),
         to_repr(tree.is_rooted()),
         to_repr(tree.is_binary()),
-        to_repr(tree.n_cherries()),
+        to_repr(tree.cherry_count()),
         to_repr(tree.colless()),
         to_repr(tree.sackin()),
     )
@@ -255,7 +255,7 @@ fn main() {
         cli::Commands::Remove { tree, tips, output } => {
             let mut tree = read_tree(&tree);
             for tip_name in tips.iter() {
-                let node = tree.get_by_name(tip_name).unwrap();
+                let node = tree.node_by_name(tip_name).unwrap();
                 if !node.is_tip() {
                     panic!("{} is not a tip node!", tip_name)
                 }
@@ -284,9 +284,9 @@ fn main() {
 
             for pair in tips.iter().combinations(2) {
                 let (n1, n2) = (pair[0], pair[1]);
-                let i1 = tree.get_by_name(n1).unwrap().id();
-                let i2 = tree.get_by_name(n2).unwrap().id();
-                if let (Some(d), _) = tree.get_distances(i1, i2).unwrap() {
+                let i1 = tree.node_by_name(n1).unwrap().id();
+                let i2 = tree.node_by_name(n2).unwrap().id();
+                if let (Some(d), _) = tree.distances(i1, i2).unwrap() {
                     writer
                         .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
                         .unwrap();
@@ -351,8 +351,8 @@ fn main() {
                     continue;
                 }
                 for (i, taxa) in duplicated.iter().enumerate() {
-                    let idx = tree.get_by_name(taxa).unwrap().id();
-                    let parent_idx = tree.get_by_name(taxa).unwrap().parent().unwrap();
+                    let idx = tree.node_by_name(taxa).unwrap().id();
+                    let parent_idx = tree.node_by_name(taxa).unwrap().parent().unwrap();
 
                     if collapse {
                         removed.push(taxa.clone());

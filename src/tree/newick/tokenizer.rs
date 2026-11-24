@@ -309,7 +309,7 @@ impl<R: Read> Tokenizer for NewickTokenizer<R> {
 mod tests {
     use super::*;
 
-    pub fn get_token_vec(newick: &str) -> Vec<NewickToken> {
+    pub fn tokenize(newick: &str) -> Vec<NewickToken> {
         let mut tokenizer = NewickTokenizer::new(newick.as_bytes());
         let mut tokens = vec![];
         while let Some(next) = tokenizer.next_token().unwrap() {
@@ -327,7 +327,7 @@ mod tests {
             NewickToken::ParenClose,
             NewickToken::SemiColon,
         ];
-        let tokens = get_token_vec(newick);
+        let tokens = tokenize(newick);
         assert_eq!(tokens, expected)
     }
 
@@ -346,7 +346,7 @@ mod tests {
             NewickToken::ParenClose,
             NewickToken::SemiColon,
         ];
-        let tokens = get_token_vec(newick);
+        let tokens = tokenize(newick);
         assert_eq!(tokens, expected)
     }
 
@@ -365,7 +365,7 @@ mod tests {
             NewickToken::ParenClose,
             NewickToken::SemiColon,
         ];
-        let tokens = get_token_vec(newick);
+        let tokens = tokenize(newick);
         assert_eq!(tokens, expected)
     }
 
@@ -383,13 +383,13 @@ mod tests {
             NewickToken::ParenClose,
             NewickToken::SemiColon,
         ];
-        let tokens = get_token_vec(newick);
+        let tokens = tokenize(newick);
         assert_eq!(tokens, expected)
     }
 
     #[test]
     fn skips_whitespace_between_tokens() {
-        let tokens = get_token_vec(" \n ( A ,\tB ) ; \r\n");
+        let tokens = tokenize(" \n ( A ,\tB ) ; \r\n");
         assert_eq!(
             tokens,
             vec![
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn decodes_doubled_quotes_in_quoted_strings() {
         assert_eq!(
-            get_token_vec("'Darwin''s finch';"),
+            tokenize("'Darwin''s finch';"),
             vec![
                 NewickToken::QuotedString("Darwin's finch".into()),
                 NewickToken::SemiColon,
@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn emits_number_like_atoms_as_unquoted_strings() {
         assert_eq!(
-            get_token_vec("0.5 -2 3E-4 6e+7 -.5 +2 .5 1e+"),
+            tokenize("0.5 -2 3E-4 6e+7 -.5 +2 .5 1e+"),
             vec![
                 NewickToken::UnquotedString("0.5".into()),
                 NewickToken::UnquotedString("-2".into()),
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn keeps_numeric_prefixes_attached_to_unquoted_strings() {
         assert_eq!(
-            get_token_vec("123abc 1e+invalid"),
+            tokenize("123abc 1e+invalid"),
             vec![
                 NewickToken::UnquotedString("123abc".into()),
                 NewickToken::UnquotedString("1e+invalid".into()),

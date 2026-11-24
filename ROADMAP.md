@@ -363,8 +363,8 @@ Relevant code: `src/tree/bipartition.rs` and `src/tree/tree_impl.rs`.
 
 Perform a focused consistency pass rather than a broad redesign.
 
-- [ ] Choose consistent count names: `len`, `node_count`, `leaf_count`, and `cherry_count`, or clearly document the existing convention.
-- [ ] Consider dropping `get_` from computed/query names such as root, leaves, descendants, distance, and common ancestor.
+- [x] Choose consistent count names: `len`, `node_count`, `leaf_count`, and `cherry_count`, or clearly document the existing convention.
+- [x] Consider dropping `get_` from computed/query names such as root, leaves, descendants, distance, and common ancestor.
 - [ ] Rename or clarify `compare_topologies`, since it also computes branch-length metrics.
 - [ ] Make direct RF methods and `Comparison::rf` use consistent numeric types where possible.
 - [ ] Replace ambiguous tuples with named structs where field meaning is not obvious, especially tree distance results.

@@ -185,7 +185,7 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let matrix = DistanceMatrix::<f64>::zeros(vec!["A".into(), "B".into()]).unwrap();
-    /// assert_eq!(*matrix.get_by_index(0, 1).unwrap(), 0.0);
+    /// assert_eq!(*matrix.by_index(0, 1).unwrap(), 0.0);
     /// ```
     pub fn zeros(taxa: Vec<String>) -> Result<Self, MatrixError> {
         let n_pairs = Self::pair_count(taxa.len())?;
@@ -278,9 +278,9 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
-    /// assert_eq!(matrix.get_taxa_index("B").unwrap(), 1);
+    /// assert_eq!(matrix.index_of_taxon("B").unwrap(), 1);
     /// ```
-    pub fn get_taxa_index(&self, id: &str) -> Result<usize, MatrixError> {
+    pub fn index_of_taxon(&self, id: &str) -> Result<usize, MatrixError> {
         self.taxa
             .iter()
             .position(|v| *v == id)
@@ -331,9 +331,9 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
-    /// assert_eq!(*matrix.get_by_index(0, 1).unwrap(), 2.0);
+    /// assert_eq!(*matrix.by_index(0, 1).unwrap(), 2.0);
     /// ```
-    pub fn get_by_index(&self, i: usize, j: usize) -> Result<&T, MatrixError> {
+    pub fn by_index(&self, i: usize, j: usize) -> Result<&T, MatrixError> {
         self.validate_index(i)?;
         self.validate_index(j)?;
         Ok(self.distance_by_index_unchecked(i, j))
@@ -347,9 +347,9 @@ where
     /// assert_eq!(*matrix.get("A", "B").unwrap(), 2.0);
     /// ```
     pub fn get(&self, id_1: &str, id_2: &str) -> Result<&T, MatrixError> {
-        let i = self.get_taxa_index(id_1)?;
-        let j = self.get_taxa_index(id_2)?;
-        self.get_by_index(i, j)
+        let i = self.index_of_taxon(id_1)?;
+        let j = self.index_of_taxon(id_2)?;
+        self.by_index(i, j)
     }
 
     /// Sets the distance between two taxa by matrix index.
@@ -358,7 +358,7 @@ where
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
     /// matrix.set_by_index(0, 1, 3.0).unwrap();
-    /// assert_eq!(*matrix.get_by_index(1, 0).unwrap(), 3.0);
+    /// assert_eq!(*matrix.by_index(1, 0).unwrap(), 3.0);
     /// ```
     pub fn set_by_index(&mut self, i: usize, j: usize, dist: T) -> Result<(), MatrixError> {
         self.validate_index(i)?;
@@ -385,8 +385,8 @@ where
     /// assert_eq!(*matrix.get("B", "A").unwrap(), 3.0);
     /// ```
     pub fn set(&mut self, id_1: &str, id_2: &str, dist: T) -> Result<(), MatrixError> {
-        let i = self.get_taxa_index(id_1)?;
-        let j = self.get_taxa_index(id_2)?;
+        let i = self.index_of_taxon(id_1)?;
+        let j = self.index_of_taxon(id_2)?;
         self.set_by_index(i, j, dist)
     }
 
@@ -723,7 +723,7 @@ where
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
     /// let tree = matrix.upgma().unwrap();
-    /// assert_eq!(tree.n_leaves(), 2);
+    /// assert_eq!(tree.leaf_count(), 2);
     /// ```
     pub fn upgma(&self) -> Result<Tree, MatrixError> {
         // Setup
@@ -956,11 +956,11 @@ s5    5  10  15
             DistanceMatrix::<f32>::new(vec!["A".into(), "B".into(), "C".into()], &[1.0, 2.0, 3.0])
                 .unwrap();
 
-        assert_eq!(*matrix.get_by_index(0, 0).unwrap(), 0.0);
-        assert_eq!(*matrix.get_by_index(0, 2).unwrap(), 2.0);
-        assert_eq!(*matrix.get_by_index(2, 0).unwrap(), 2.0);
+        assert_eq!(*matrix.by_index(0, 0).unwrap(), 0.0);
+        assert_eq!(*matrix.by_index(0, 2).unwrap(), 2.0);
+        assert_eq!(*matrix.by_index(2, 0).unwrap(), 2.0);
         assert!(matches!(
-            matrix.get_by_index(3, 0),
+            matrix.by_index(3, 0),
             Err(MatrixError::IndexOutOfBounds { index: 3, size: 3 })
         ));
         assert!(matches!(

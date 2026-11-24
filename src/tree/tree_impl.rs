@@ -148,7 +148,7 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     /// let tree = Tree::new();
-    /// assert_eq!(tree.size(), 0);
+    /// assert_eq!(tree.node_count(), 0);
     /// ```
     pub fn new() -> Self {
         Self {
@@ -374,9 +374,9 @@ impl Tree {
     /// let root_idx = tree.add_root(Node::new_named("root")).unwrap();
     /// let child_idx = tree.add_child(Node::new_named("child"), root_idx, None).unwrap();
     ///
-    /// assert_eq!(tree.get_by_name("child").map(|n| n.id()), Some(child_idx));
+    /// assert_eq!(tree.node_by_name("child").map(|n| n.id()), Some(child_idx));
     /// ```
-    pub fn get_by_name(&self, name: &str) -> Option<&Node> {
+    pub fn node_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
             .iter()
             .filter(|n| !n.deleted)
@@ -388,10 +388,10 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     /// let mut tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// tree.get_by_name_mut("A").unwrap().set_name("X");
-    /// assert!(tree.get_by_name("X").is_some());
+    /// tree.node_by_name_mut("A").unwrap().set_name("X");
+    /// assert!(tree.node_by_name("X").is_some());
     /// ```
-    pub fn get_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
+    pub fn node_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
         let index = self
             .nodes
             .iter()
@@ -488,7 +488,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// let sub_root = tree.get_by_name("E").unwrap();
+    /// let sub_root = tree.node_by_name("E").unwrap();
     /// let subtree: Vec<_> = tree.subtree(sub_root.id())
     ///     .unwrap()
     ///     .iter()
@@ -513,7 +513,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// let sub_root = tree.get_by_name("E").unwrap();
+    /// let sub_root = tree.node_by_name("E").unwrap();
     /// let subtree: Vec<_> = tree.descendants(sub_root.id())
     ///     .unwrap()
     ///     .iter()
@@ -538,7 +538,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;").unwrap();
-    /// let sub_root = tree.get_by_name("E").unwrap();
+    /// let sub_root = tree.node_by_name("E").unwrap();
     /// let sub_leaves: Vec<_> = tree.subtree_leaves(sub_root.id())
     ///     .unwrap()
     ///     .iter()
@@ -717,22 +717,22 @@ impl Tree {
             }
         }
 
-        Ok(names.len() == self.n_leaves())
+        Ok(names.len() == self.leaf_count())
     }
 
     /// Returns the number of live nodes in the tree
-    pub fn size(&self) -> usize {
+    pub fn node_count(&self) -> usize {
         self.nodes.iter().filter(|n| !n.deleted).count()
     }
 
     /// Returns the number of nodes in the trees internal vector
     /// This includes nodes marked as deleted.
-    pub fn stored_size(&self) -> usize {
+    pub fn stored_node_count(&self) -> usize {
         self.nodes.len()
     }
 
     /// Returns the number of leaves in the tree
-    pub fn n_leaves(&self) -> usize {
+    pub fn leaf_count(&self) -> usize {
         self.nodes
             .iter()
             .filter(|&node| !node.deleted && node.is_tip())
@@ -763,7 +763,7 @@ impl Tree {
         let (max_len, max_edges) = self
             .leaves()
             .iter()
-            .map(|&leaf| self.get_distances(root, leaf))
+            .map(|&leaf| self.distances(root, leaf))
             .try_fold((Some(f64::NEG_INFINITY), 0), |(max_len, max_edges), r| {
                 let (len, edges) = r?;
                 Ok::<(Option<EdgeLength>, usize), TreeError>((
@@ -967,9 +967,9 @@ impl Tree {
     /// ```
     /// use phylotree::tree::Tree;
     /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// assert_eq!(tree.n_cherries().unwrap(), 2);
+    /// assert_eq!(tree.cherry_count().unwrap(), 2);
     /// ```
-    pub fn n_cherries(&self) -> Result<usize, TreeError> {
+    pub fn cherry_count(&self) -> Result<usize, TreeError> {
         if !self.is_binary()? {
             return Err(TreeError::IsNotBinary);
         }
@@ -1028,7 +1028,7 @@ impl Tree {
     /// ```
     pub fn colless_yule(&self) -> Result<f64, TreeError> {
         self.colless().map(|i_c| {
-            let n = self.n_leaves() as f64;
+            let n = self.leaf_count() as f64;
             let e_i_c = n * n.ln() + (EULER_GAMMA - 1. - f64::ln(2.0)) * n;
 
             (i_c as f64 - e_i_c) / n
@@ -1045,7 +1045,7 @@ impl Tree {
     /// ```
     pub fn colless_pda(&self) -> Result<f64, TreeError> {
         self.colless()
-            .map(|i_c| i_c as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
+            .map(|i_c| i_c as f64 / f64::powf(self.leaf_count() as f64, 3.0 / 2.0))
     }
 
     /// Sum the depths of all tips (the Sackin imbalance index).
@@ -1076,7 +1076,7 @@ impl Tree {
     /// ```
     pub fn sackin_yule(&self) -> Result<f64, TreeError> {
         self.sackin().map(|i_n| {
-            let n = self.n_leaves();
+            let n = self.leaf_count();
             let sum: f64 = (2..=n).map(|i| 1.0 / (i as f64)).sum();
 
             (i_n as f64 - 2.0 * (n as f64) * sum) / n as f64
@@ -1093,7 +1093,7 @@ impl Tree {
     /// ```
     pub fn sackin_pda(&self) -> Result<f64, TreeError> {
         self.sackin()
-            .map(|i_n| i_n as f64 / f64::powf(self.n_leaves() as f64, 3.0 / 2.0))
+            .map(|i_n| i_n as f64 / f64::powf(self.leaf_count() as f64, 3.0 / 2.0))
     }
 }
 
@@ -1680,7 +1680,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let path: Vec<_> = tree.get_path_from_root(5.into())
+    /// let path: Vec<_> = tree.path_from_root(5.into())
     ///     .unwrap()
     ///     .iter()
     ///     .map(|&id| tree.get(id).unwrap().name().clone())
@@ -1689,7 +1689,7 @@ impl Tree {
     ///
     /// assert_eq!(path, vec!["F", "B", "D", "E"])
     /// ```
-    pub fn get_path_from_root(&self, node: NodeId) -> Result<Vec<NodeId>, TreeError> {
+    pub fn path_from_root(&self, node: NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut path = vec![];
         let mut current_node = node;
         loop {
@@ -1708,19 +1708,19 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let ancestor = tree.get_common_ancestor(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("D").unwrap().id(),
+    /// let ancestor = tree.common_ancestor(
+    ///     tree.node_by_name("A").unwrap().id(),
+    ///     tree.node_by_name("D").unwrap().id(),
     /// ).unwrap();
     ///
     /// assert_eq!(tree.get(ancestor).unwrap().name(), Some("B"))
     /// ```
-    pub fn get_common_ancestor(&self, source: NodeId, target: NodeId) -> Result<NodeId, TreeError> {
+    pub fn common_ancestor(&self, source: NodeId, target: NodeId) -> Result<NodeId, TreeError> {
         if source == target {
             return Ok(source);
         }
-        let root_to_source = self.get_path_from_root(source)?;
-        let root_to_target = self.get_path_from_root(target)?;
+        let root_to_source = self.path_from_root(source)?;
+        let root_to_target = self.path_from_root(target)?;
 
         let cursor = zip(root_to_source.iter(), root_to_target.iter())
             .enumerate()
@@ -1740,8 +1740,8 @@ impl Tree {
         source: NodeId,
         target: NodeId,
     ) -> Result<(Vec<NodeId>, Vec<NodeId>, usize), TreeError> {
-        let root_to_source = self.get_path_from_root(source)?;
-        let root_to_target = self.get_path_from_root(target)?;
+        let root_to_source = self.path_from_root(source)?;
+        let root_to_target = self.path_from_root(target)?;
 
         let cursor = zip(root_to_source.iter(), root_to_target.iter())
             .enumerate()
@@ -1755,21 +1755,22 @@ impl Tree {
 
         Ok((root_to_source, root_to_target, cursor))
     }
+
     /// Gets the distance between 2 nodes, returns the sum of branch lengths (if all
     /// branches in the path have lengths) and the number of edges in the path.
     /// ```
     /// use phylotree::tree::Tree;
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let (sum_edge_lengths, num_edges) = tree.get_distances(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("I").unwrap().id(),
+    /// let (sum_edge_lengths, num_edges) = tree.distances(
+    ///     tree.node_by_name("A").unwrap().id(),
+    ///     tree.node_by_name("I").unwrap().id(),
     /// ).unwrap();
     ///
     /// assert_eq!(num_edges, 4);
     /// assert!(sum_edge_lengths.is_none());
     /// ```
-    pub fn get_distances(
+    pub fn distances(
         &self,
         source: NodeId,
         target: NodeId,
@@ -1808,8 +1809,8 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let num_edges = tree.distance_by_edges(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("I").unwrap().id(),
+    ///     tree.node_by_name("A").unwrap().id(),
+    ///     tree.node_by_name("I").unwrap().id(),
     /// ).unwrap();
     ///
     /// assert_eq!(num_edges, 4);
@@ -1834,16 +1835,16 @@ impl Tree {
     ///
     /// let tree = Tree::from_newick("((A:0.1,(C:0.2,E:0.3)D:0.4)B:0.5,((H:0.6)I:0.7)G:0.8)F:0.9;").unwrap();
     /// let sum_edge_lengths = tree.distance_by_length(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("D").unwrap().id(),
+    ///     tree.node_by_name("A").unwrap().id(),
+    ///     tree.node_by_name("D").unwrap().id(),
     /// ).unwrap();
     ///
     /// assert!(sum_edge_lengths - 0.5 <= f64::EPSILON);
     ///
     /// let tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
     /// let err = tree.distance_by_length(
-    ///     tree.get_by_name("A").unwrap().id(),
-    ///     tree.get_by_name("D").unwrap().id(),
+    ///     tree.node_by_name("A").unwrap().id(),
+    ///     tree.node_by_name("D").unwrap().id(),
     /// );
     ///
     /// assert!(matches!(err, Err(TreeError::MissingBranchLengths)));
@@ -1974,7 +1975,7 @@ impl Tree {
         let mut leaf_order = self.leaves();
         leaf_order.sort_by(|&a, &b| self.get(a).unwrap().name.cmp(&self.get(b).unwrap().name));
 
-        let n = self.n_leaves();
+        let n = self.leaf_count();
         let n_pairs = DistanceMatrix::<f64>::pair_count(n)?;
         let mut pairwise_vec = vec![NaiveSum::zero(); n_pairs];
 
@@ -2085,7 +2086,7 @@ impl Tree {
     /// use phylotree::tree::Tree;
     ///
     /// let mut tree = Tree::from_newick("((A,(C,E)D)B,((H)I)G)F;").unwrap();
-    /// let root_idx = tree.get_by_name("G").unwrap().id();
+    /// let root_idx = tree.node_by_name("G").unwrap().id();
     ///
     /// tree.prune(root_idx);
     ///
@@ -2361,8 +2362,8 @@ impl Tree {
     ///
     /// // Initialize star tree
     /// let mut tree = Tree::from_newick("(A,B,C);").unwrap();
-    /// let a = tree.get_by_name("A").unwrap().id();
-    /// let b = tree.get_by_name("B").unwrap().id();
+    /// let a = tree.node_by_name("A").unwrap().id();
+    /// let b = tree.node_by_name("B").unwrap().id();
     ///
     /// // Merge A and B into node D
     /// tree.merge_children(a, b, None, None, None, Some("D".into()));
@@ -2512,8 +2513,8 @@ impl Tree {
     /// let newick = "(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;";
     /// let tree = Tree::from_newick(newick).unwrap();
     ///
-    /// assert_eq!(tree.size(), 6);
-    /// assert_eq!(tree.n_leaves(), 4);
+    /// assert_eq!(tree.node_count(), 6);
+    /// assert_eq!(tree.leaf_count(), 4);
     /// assert_eq!(tree.is_rooted().unwrap(), false);
     /// ```
     pub fn from_newick(newick: &str) -> Result<Self, NewickParseError> {
@@ -2569,7 +2570,7 @@ impl Tree {
     /// ```no_run
     /// use phylotree::tree::Tree;
     /// let tree = Tree::from_file(std::path::Path::new("tree.nwk")).unwrap();
-    /// println!("{} tips", tree.n_leaves());
+    /// println!("{} tips", tree.leaf_count());
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
@@ -2581,7 +2582,7 @@ impl Tree {
     /// ```no_run
     /// use phylotree::tree::Tree;
     /// let tree = Tree::from_file_with_options(std::path::Path::new("tree.nwk"), Default::default()).unwrap();
-    /// println!("{} tips", tree.n_leaves());
+    /// println!("{} tips", tree.leaf_count());
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file_with_options(
@@ -2601,7 +2602,7 @@ impl Tree {
     /// ```
     pub fn to_nexus(&self) -> Result<String, TreeError> {
         let nwk = self.to_newick()?;
-        let n = self.n_leaves();
+        let n = self.leaf_count();
         let labels = self
             .nodes
             .iter()
@@ -2854,7 +2855,7 @@ mod tests {
     #[test]
     fn path_from_root() {
         let tree = build_simple_tree().unwrap();
-        let values: Vec<_> = get_values(&(tree.get_path_from_root(NodeId(7)).unwrap()), &tree)
+        let values: Vec<_> = get_values(&(tree.path_from_root(NodeId(7)).unwrap()), &tree)
             .into_iter()
             .flatten()
             .collect();
@@ -2878,7 +2879,7 @@ mod tests {
                 tree.get(target).unwrap().name,
                 tree.get(ancestor).unwrap().name
             );
-            assert_eq!(ancestor, tree.get_common_ancestor(source, target).unwrap());
+            assert_eq!(ancestor, tree.common_ancestor(source, target).unwrap());
         }
     }
 
@@ -2897,8 +2898,8 @@ mod tests {
         let tree2 = build_tree_without_lengths().unwrap();
 
         for ((idx_s, idx_t), (dist, branches)) in test_cases {
-            let (d_pred, b_pred) = tree.get_distances(idx_s, idx_t).unwrap();
-            let (d_pred2, b_pred2) = tree2.get_distances(idx_s, idx_t).unwrap();
+            let (d_pred, b_pred) = tree.distances(idx_s, idx_t).unwrap();
+            let (d_pred2, b_pred2) = tree2.distances(idx_s, idx_t).unwrap();
             assert_eq!(branches, b_pred);
             assert_eq!(branches, b_pred2);
 
@@ -3142,7 +3143,7 @@ mod tests {
 
         for (newick, true_cherries) in test_cases {
             let tree = Tree::from_newick(newick).unwrap();
-            let cherries = tree.n_cherries();
+            let cherries = tree.cherry_count();
             assert!(cherries.is_ok());
             assert_eq!(cherries.unwrap(), true_cherries);
         }
@@ -3981,7 +3982,7 @@ mod tests_ete3_operations {
             .chars()
             .collect();
         features.shuffle(&mut rand::thread_rng());
-        let _target = tree.get_by_name("B").unwrap();
+        let _target = tree.node_by_name("B").unwrap();
         for feature in features {
             let _val = feature.to_string().as_str();
             // target.add_feature(val, val)
@@ -4007,22 +4008,22 @@ mod tests_ete3_operations {
         // Modified the ete3 test tree since this library does not handle NHX comments
         let tree = Tree::from_newick("(((A:0.1, B:0.01):0.001, C:0.0001)I:1.0[&&NHX:name=I], (D:0.00001)J:0.000001[&&NHX:name=J])root:2.0[&&NHX:name=root];").unwrap();
 
-        let a = tree.get_by_name("A").unwrap();
-        let b = tree.get_by_name("B").unwrap();
-        let d = tree.get_by_name("D").unwrap();
-        let i = tree.get_by_name("I").unwrap();
-        let root = tree.get_by_name("root").unwrap();
+        let a = tree.node_by_name("A").unwrap();
+        let b = tree.node_by_name("B").unwrap();
+        let d = tree.node_by_name("D").unwrap();
+        let i = tree.node_by_name("I").unwrap();
+        let root = tree.node_by_name("root").unwrap();
 
-        assert_eq!(tree.get_common_ancestor(a.id, i.id).unwrap(), i.id);
-        assert_eq!(tree.get_common_ancestor(a.id, d.id).unwrap(), root.id);
+        assert_eq!(tree.common_ancestor(a.id, i.id).unwrap(), i.id);
+        assert_eq!(tree.common_ancestor(a.id, d.id).unwrap(), root.id);
 
-        assert_eq!(tree.get_distances(a.id, i.id).unwrap().0.unwrap(), 0.101);
-        assert_eq!(tree.get_distances(a.id, b.id).unwrap().0.unwrap(), 0.11);
-        assert_eq!(tree.get_distances(a.id, a.id).unwrap().0.unwrap(), 0.0);
-        assert_eq!(tree.get_distances(i.id, i.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(tree.distances(a.id, i.id).unwrap().0.unwrap(), 0.101);
+        assert_eq!(tree.distances(a.id, b.id).unwrap().0.unwrap(), 0.11);
+        assert_eq!(tree.distances(a.id, a.id).unwrap().0.unwrap(), 0.0);
+        assert_eq!(tree.distances(i.id, i.id).unwrap().0.unwrap(), 0.0);
         assert_eq!(
-            tree.get_distances(a.id, root.id).unwrap(),
-            tree.get_distances(root.id, a.id).unwrap()
+            tree.distances(a.id, root.id).unwrap(),
+            tree.distances(root.id, a.id).unwrap()
         );
     }
 
@@ -4031,15 +4032,15 @@ mod tests_ete3_operations {
         let tree =
             Tree::from_newick("(((A:0.5, B:1.0):1.0, C:5.0):1, (D:10.0, F:1.0):2.0)root:20;")
                 .unwrap();
-        let a = tree.get_by_name("A").unwrap();
-        let c = tree.get_by_name("C").unwrap();
-        let d = tree.get_by_name("D").unwrap();
-        let root = tree.get_by_name("root").unwrap();
+        let a = tree.node_by_name("A").unwrap();
+        let c = tree.node_by_name("C").unwrap();
+        let d = tree.node_by_name("D").unwrap();
+        let root = tree.node_by_name("root").unwrap();
 
-        assert_eq!(tree.get_distances(root.id, a.id).unwrap().1, 3);
-        assert_eq!(tree.get_distances(root.id, c.id).unwrap().1, 2);
-        assert_eq!(tree.get_distances(root.id, root.id).unwrap().1, 0);
-        assert_eq!(tree.get_distances(d.id, d.id).unwrap().1, 0);
+        assert_eq!(tree.distances(root.id, a.id).unwrap().1, 3);
+        assert_eq!(tree.distances(root.id, c.id).unwrap().1, 2);
+        assert_eq!(tree.distances(root.id, root.id).unwrap().1, 0);
+        assert_eq!(tree.distances(d.id, d.id).unwrap().1, 0);
     }
 
     #[test]
@@ -4737,7 +4738,7 @@ mod mutable_traversal_cache_tests {
             .nodes
             .iter()
             .any(|node| node.subtree_distances.borrow().is_some()));
-        let subtree = tree.get_by_name("C").unwrap().id;
+        let subtree = tree.node_by_name("C").unwrap().id;
         drop(tree.iter_postorder_nodes_mut_from(subtree).unwrap());
         assert!(tree
             .nodes
@@ -4788,12 +4789,12 @@ mod invariant_tests {
         let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
         tree.rebuild_taxon_index().unwrap();
         tree.distance_matrix().unwrap(); // populate subtree distance caches
-        let a = tree.get_by_name("A").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
         tree.prune(a).unwrap();
 
         assert_valid(&tree);
-        assert_eq!(tree.n_leaves(), 3);
-        assert_eq!(tree.size(), 6);
+        assert_eq!(tree.leaf_count(), 3);
+        assert_eq!(tree.node_count(), 6);
         let mut names: Vec<_> = tree.leaf_names().into_iter().flatten().collect();
         names.sort();
         assert_eq!(names, vec!["B", "C", "D"]);
@@ -4811,12 +4812,12 @@ mod invariant_tests {
     #[test]
     fn prune_internal_subtree_preserves_invariants() {
         let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
-        let x = tree.get_by_name("X").unwrap().id;
+        let x = tree.node_by_name("X").unwrap().id;
         tree.prune(x).unwrap();
 
         assert_valid(&tree);
-        assert_eq!(tree.n_leaves(), 2);
-        assert_eq!(tree.size(), 4);
+        assert_eq!(tree.leaf_count(), 2);
+        assert_eq!(tree.node_count(), 4);
         assert_eq!(tree.to_newick().unwrap(), "((C:1,D:1)Y:1)R;");
         assert_roundtrip(&tree);
     }
@@ -4868,15 +4869,15 @@ mod invariant_tests {
 
         assert_valid(&tree);
         assert!(tree.is_binary().unwrap());
-        assert_eq!(tree.n_leaves(), 4);
+        assert_eq!(tree.leaf_count(), 4);
         assert_roundtrip(&tree);
     }
 
     #[test]
     fn merge_children_preserves_invariants_and_updates_subtree_depths() {
         let mut tree = Tree::from_newick("(A:1,B:1,C:1)R;").unwrap();
-        let a = tree.get_by_name("A").unwrap().id;
-        let b = tree.get_by_name("B").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
+        let b = tree.node_by_name("B").unwrap().id;
         let new_parent = tree
             .merge_children(a, b, Some(1.0), Some(1.0), Some(0.5), Some("D".into()))
             .unwrap();
@@ -4894,7 +4895,7 @@ mod invariant_tests {
     fn merge_with_itself_is_rejected_and_leaves_tree_unchanged() {
         let mut tree = Tree::from_newick("(A,B,C)R;").unwrap();
         let before = tree.to_newick().unwrap();
-        let a = tree.get_by_name("A").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
         assert!(tree.merge_children(a, a, None, None, None, None).is_err());
         assert_unchanged(&before, &tree);
     }
@@ -4903,8 +4904,8 @@ mod invariant_tests {
     fn merge_non_siblings_is_rejected_and_leaves_tree_unchanged() {
         let mut tree = Tree::from_newick("(A,(B,C)X)R;").unwrap();
         let before = tree.to_newick().unwrap();
-        let a = tree.get_by_name("A").unwrap().id;
-        let b = tree.get_by_name("B").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
+        let b = tree.node_by_name("B").unwrap().id;
         assert!(matches!(
             tree.merge_children(a, b, None, None, None, None),
             Err(TreeError::MergingNonSiblingNodes(..))
@@ -4916,8 +4917,8 @@ mod invariant_tests {
     fn merge_missing_or_deleted_nodes_is_rejected_and_leaves_tree_unchanged() {
         let mut tree = Tree::from_newick("(A,B,C)R;").unwrap();
         let before = tree.to_newick().unwrap();
-        let a = tree.get_by_name("A").unwrap().id;
-        let b = tree.get_by_name("B").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
+        let b = tree.node_by_name("B").unwrap().id;
 
         // Out-of-range node ID.
         assert!(tree
@@ -4935,7 +4936,7 @@ mod invariant_tests {
     #[test]
     fn nexus_and_serialization_counts_use_live_nodes_after_deletion() {
         let mut tree = Tree::from_newick("((A:1,B:1)X:1,(C:1,D:1)Y:1)R;").unwrap();
-        let a = tree.get_by_name("A").unwrap().id;
+        let a = tree.node_by_name("A").unwrap().id;
         tree.prune(a).unwrap();
 
         assert_eq!(tree.to_newick().unwrap(), "((B:1)X:1,(C:1,D:1)Y:1)R;");

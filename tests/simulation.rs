@@ -161,7 +161,7 @@ fn birth_death_first_hitting_time_and_pruning() {
             );
             let h: Vec<_> = leaves
                 .iter()
-                .map(|&id| t.get_distances(root, id).unwrap().0.unwrap())
+                .map(|&id| t.distances(root, id).unwrap().0.unwrap())
                 .collect();
             assert!(h.iter().all(|x| (x - h[0]).abs() < 1e-12));
             assert_eq!(
@@ -217,7 +217,7 @@ fn pairwise_diameter(tree: &Tree) -> f64 {
     let mut distances = Vec::new();
     for (i, &a) in leaves.iter().enumerate() {
         for &b in &leaves[i + 1..] {
-            let (weighted, hops) = tree.get_distances(a, b).unwrap();
+            let (weighted, hops) = tree.distances(a, b).unwrap();
             distances.push(weighted.unwrap_or(hops as f64));
         }
     }
@@ -254,7 +254,7 @@ fn linear_diameter_preserves_pairwise_semantics() {
                 let mut max_hops = 0;
                 for (i, &a) in leaves.iter().enumerate() {
                     for &b in &leaves[i + 1..] {
-                        max_hops = max_hops.max(tree.get_distances(a, b).unwrap().1);
+                        max_hops = max_hops.max(tree.distances(a, b).unwrap().1);
                     }
                 }
                 assert_eq!(edge_d, max_hops);

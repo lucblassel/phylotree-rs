@@ -76,10 +76,10 @@ impl Layout {
 /// layout.rescale(2.0);
 /// ```
 pub fn radial_layout(tree: &Tree) -> Result<Layout, TreeError> {
-    let mut l = vec![0.; tree.size()];
-    let mut w = vec![2. * PI; tree.size()];
-    let mut t = vec![0.; tree.size()];
-    let mut x = vec![(0., 0.); tree.size()];
+    let mut l = vec![0.; tree.stored_node_count()];
+    let mut w = vec![2. * PI; tree.stored_node_count()];
+    let mut t = vec![0.; tree.stored_node_count()];
+    let mut x = vec![(0., 0.); tree.stored_node_count()];
 
     let root = tree.root()?;
 

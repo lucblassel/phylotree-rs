@@ -766,7 +766,7 @@ mod tests_ete3_serialization {
     /// returns the comment read back from the reparsed tree.
     fn comment_roundtrip(comment: &str) -> String {
         let mut tree = Tree::from_newick("(A,B)R;").unwrap();
-        tree.get_by_name_mut("A")
+        tree.node_by_name_mut("A")
             .unwrap()
             .set_comment(comment)
             .unwrap();
@@ -777,7 +777,7 @@ mod tests_ete3_serialization {
         );
         let reparsed = Tree::from_newick(&newick).unwrap();
         reparsed
-            .get_by_name("A")
+            .node_by_name("A")
             .unwrap()
             .comment()
             .unwrap()
@@ -808,9 +808,9 @@ mod tests_ete3_serialization {
     #[test]
     fn apostrophes_are_literal_in_comments() {
         let tree = Tree::from_newick("(A[don't],B);").unwrap();
-        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("don't"));
+        assert_eq!(tree.node_by_name("A").unwrap().comment(), Some("don't"));
         let tree = Tree::from_newick("(A[abc'],B);").unwrap();
-        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("abc'"));
+        assert_eq!(tree.node_by_name("A").unwrap().comment(), Some("abc'"));
     }
 
     #[test]
@@ -819,7 +819,7 @@ mod tests_ete3_serialization {
         assert!(Tree::from_newick("(A[a[b]c,B);").is_err());
         // But the comment itself stops at the first ].
         let tree = Tree::from_newick("(A[x[y],B);").unwrap();
-        assert_eq!(tree.get_by_name("A").unwrap().comment(), Some("x[y"));
+        assert_eq!(tree.node_by_name("A").unwrap().comment(), Some("x[y"));
     }
 
     #[test]
@@ -828,11 +828,11 @@ mod tests_ete3_serialization {
         // a tree built through the safe API can never hold an unserializable comment.
         let mut tree = Tree::from_newick("(A,B)R;").unwrap();
         assert!(tree
-            .get_by_name_mut("A")
+            .node_by_name_mut("A")
             .unwrap()
             .set_comment("a]b")
             .is_err());
-        assert_eq!(tree.get_by_name("A").unwrap().comment(), None);
+        assert_eq!(tree.node_by_name("A").unwrap().comment(), None);
         // Defense in depth: if an invalid comment reaches storage anyway (crate-internal
         // construction), serialization must error rather than emit a corrupt stream.
         let mut node = Node::new_named("A");
