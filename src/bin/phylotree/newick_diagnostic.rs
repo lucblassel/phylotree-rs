@@ -39,6 +39,7 @@ fn label_message(error: &NewickParseError) -> String {
             TokenizerError::InvalidCharacter { char, .. } => {
                 format!("'{char}' is not valid at this position")
             }
+            _ => "invalid token".into(),
         },
         NewickParseError::UnexpectedEOF => "expected more input before the end of the tree".into(),
         NewickParseError::UnexpectedToken { expected, .. } => {
@@ -56,6 +57,7 @@ fn label_message(error: &NewickParseError) -> String {
         NewickParseError::ConflictingSupportValues { existing, .. } => {
             format!("this conflicts with the previous support value {existing}")
         }
+        _ => "invalid Newick input".into(),
     }
 }
 

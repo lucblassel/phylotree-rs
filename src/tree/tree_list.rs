@@ -25,6 +25,7 @@ pub struct TopologyFrequency {
 
 /// Errors produced by operations involving multiple trees.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TreeListError {
     /// A tree cannot participate in the requested operation.
     #[error("tree {index} is invalid: {source}")]

@@ -16,6 +16,7 @@ use thiserror::Error;
 
 /// Failure to validate or realize a simulation prior.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SimulationError {
     /// Invalid prior parameter.
     #[error("Invalid simulation parameter: {0}")]

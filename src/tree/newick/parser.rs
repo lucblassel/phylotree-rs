@@ -98,6 +98,7 @@ pub struct NewickParseOptions {
 
 /// An error encountered while parsing a Newick tree.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum NewickParseError {
     /// Tokenization failed before a complete syntax token could be produced.
     #[error("Tokenizer error: {err}")]

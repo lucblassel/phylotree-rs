@@ -53,6 +53,7 @@ pub(crate) struct SpannedToken {
 
 /// An error encountered while reading or tokenizing Newick/NHX input.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TokenizerError {
     /// Reading from the underlying input stream failed.
     #[error("IO Error: {source}")]

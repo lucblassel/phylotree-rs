@@ -25,6 +25,7 @@ trait_set! {
 
 /// Errors that can occur when reading, writing and manipulating [`DistanceMatrix`] structs.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum MatrixError {
     /// We are trying to insert a distance that already exists in the matrix
     #[error("Distance already exists, cannot overwrite it.")]
@@ -92,6 +93,7 @@ pub enum MatrixError {
 
 /// Errors that can occur when parsing phylip distance matrix files.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum PhylipParseError<T>
 where
     T: Debug,

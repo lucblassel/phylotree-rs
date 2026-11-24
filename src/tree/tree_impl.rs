@@ -25,6 +25,7 @@ use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
 
 /// Errors that can occur when reading, writing and manipulating [`Tree`] structs.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum TreeError {
     /// The tree is not binary and we are trying to do something
     /// only possible on binary trees
@@ -98,9 +99,33 @@ pub enum TreeError {
     /// Tried to generate a tree with too little tips
     #[error("Tree must have at least 3 tips, got {0}")]
     InvalidTreeSize(usize),
-    /// General error
-    #[error("Encountered an error: {0}")]
-    GeneralError(&'static str),
+    /// The tree already has a root node
+    #[error("Tree already has a root")]
+    AlreadyHasRoot,
+    /// Adding the node would introduce a cycle
+    #[error("Cycle detected")]
+    CycleDetected,
+    /// `remove_child` only accepts leaf nodes; use `prune` to remove a subtree
+    #[error("`remove_child` only supports removing leaves; use `prune` to remove subtrees")]
+    RemoveChildRequiresLeaf,
+    /// The root node cannot be pruned
+    #[error("Cannot prune the root")]
+    CannotPruneRoot,
+    /// The target diameter must be positive and finite
+    #[error("Positive finite diameter required")]
+    InvalidTargetDiameter,
+    /// Rescaling requires finite, nonnegative branch lengths on every non-root edge
+    #[error("Finite nonnegative branch lengths required")]
+    InvalidBranchLength,
+    /// The current tip-to-tip diameter must be positive
+    #[error("Positive diameter required")]
+    NonPositiveDiameter,
+    /// The computed diameter scale factor is not representable
+    #[error("Diameter scale is not representable")]
+    UnrepresentableScale,
+    /// A rescaled branch length would not be representable
+    #[error("Rescaled branch length is not representable")]
+    UnrepresentableBranchLength,
     /// The tree violates one or more documented invariants
     #[error("Tree violates invariants: {}", .0.join("; "))]
     InvalidTree(Vec<String>),
@@ -237,7 +262,7 @@ impl Tree {
         // Check if tree already has root
         match self.root() {
             Err(TreeError::RootNotFound) => (),
-            Ok(_) => return Err(TreeError::GeneralError("Tree already has a root")),
+            Ok(_) => return Err(TreeError::AlreadyHasRoot),
             Err(err) => return Err(err),
         }
 
@@ -285,7 +310,7 @@ impl Tree {
         let mut ancestor = Some(parent);
         while let Some(id) = ancestor {
             if id == child_id {
-                return Err(TreeError::GeneralError("Cycle detected"));
+                return Err(TreeError::CycleDetected);
             };
             ancestor = self.get(id)?.parent;
         }
@@ -317,9 +342,7 @@ impl Tree {
     /// ```
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), TreeError> {
         if !self.get(child)?.is_tip() {
-            return Err(TreeError::GeneralError(
-                "`remove_child` only supports removing leaves; use `prune` to remove subtrees.",
-            ));
+            return Err(TreeError::RemoveChildRequiresLeaf);
         }
 
         self.get_mut(parent)?.remove_child(child)?;
@@ -2145,7 +2168,7 @@ impl Tree {
     /// ```
     pub fn prune(&mut self, root: NodeId) -> Result<(), TreeError> {
         if root == self.root()? {
-            return Err(TreeError::GeneralError("Cannot prune the root."));
+            return Err(TreeError::CannotPruneRoot);
         }
 
         for child in self.get(root)?.children.clone() {
@@ -2268,7 +2291,7 @@ impl Tree {
     /// ```
     pub fn rescale_diameter(&mut self, target: EdgeLength) -> Result<(), TreeError> {
         if !target.is_finite() || target <= 0.0 {
-            return Err(TreeError::GeneralError("Positive finite diameter required"));
+            return Err(TreeError::InvalidTargetDiameter);
         }
         for node in self
             .nodes
@@ -2277,28 +2300,22 @@ impl Tree {
         {
             let length = node.parent_edge.ok_or(TreeError::MissingBranchLengths)?;
             if !length.is_finite() || length < 0.0 {
-                return Err(TreeError::GeneralError(
-                    "Finite nonnegative branch lengths required",
-                ));
+                return Err(TreeError::InvalidBranchLength);
             }
         }
         let current = self.diameter_by_length()?;
         if current <= 0.0 {
-            return Err(TreeError::GeneralError("Positive diameter required"));
+            return Err(TreeError::NonPositiveDiameter);
         }
         let factor = target / current;
         if !factor.is_finite() || factor <= 0.0 {
-            return Err(TreeError::GeneralError(
-                "Diameter scale is not representable",
-            ));
+            return Err(TreeError::UnrepresentableScale);
         }
         if self.nodes.iter().filter(|n| !n.deleted).any(|n| {
             n.parent_edge
                 .is_some_and(|length| !(length * factor).is_finite())
         }) {
-            return Err(TreeError::GeneralError(
-                "Rescaled branch length is not representable",
-            ));
+            return Err(TreeError::UnrepresentableBranchLength);
         }
         self.rescale(factor);
         Ok(())

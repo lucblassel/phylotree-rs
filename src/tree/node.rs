@@ -11,6 +11,7 @@ use super::{EdgeLength, NewickFormat, NodeId};
 
 /// Errors that can occur when manipulating [`Node`] structs.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum NodeError {
     /// We are trying to access the an unexisting child of the node
     #[error("Node {parent} does not have child {child}.")]

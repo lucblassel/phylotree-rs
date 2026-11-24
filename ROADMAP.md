@@ -375,10 +375,10 @@ Compatibility aliases with deprecation notices may be retained where they make m
 
 ### 3.7 Make public enums evolvable
 
-- [ ] Review public error and configuration enums for `#[non_exhaustive]`.
-- [ ] Add `#[non_exhaustive]` where downstream exhaustive matching should not be part of the stability contract.
-- [ ] Ensure errors preserve useful sources rather than collapsing failures into general string variants.
-- [ ] Replace `GeneralError(&'static str)` with specific variants for known failure conditions.
+- [x] Review public error and configuration enums for `#[non_exhaustive]`.
+- [x] Add `#[non_exhaustive]` where downstream exhaustive matching should not be part of the stability contract.
+- [x] Ensure errors preserve useful sources rather than collapsing failures into general string variants.
+- [x] Replace `GeneralError(&'static str)` with specific variants for known failure conditions.
 
 ### 3.8 Decouple core API types from CLI dependencies
 
