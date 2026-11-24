@@ -365,11 +365,11 @@ Perform a focused consistency pass rather than a broad redesign.
 
 - [x] Choose consistent count names: `len`, `node_count`, `leaf_count`, and `cherry_count`, or clearly document the existing convention.
 - [x] Consider dropping `get_` from computed/query names such as root, leaves, descendants, distance, and common ancestor.
-- [ ] Rename or clarify `compare_topologies`, since it also computes branch-length metrics.
-- [ ] Make direct RF methods and `Comparison::rf` use consistent numeric types where possible.
-- [ ] Replace ambiguous tuples with named structs where field meaning is not obvious, especially tree distance results.
-- [ ] Use `impl AsRef<Path>` for public path-based APIs.
-- [ ] Add symmetric reader/writer APIs where existing string and file APIs are inconsistent.
+- [x] Rename or clarify `compare_topologies`, since it also computes branch-length metrics.
+- [x] Make direct RF methods and `Comparison::rf` use consistent numeric types where possible.
+- [x] Replace ambiguous tuples with named structs where field meaning is not obvious, especially tree distance results.
+- [x] Use `impl AsRef<Path>` for public path-based APIs.
+- [x] Add symmetric reader/writer APIs where existing string and file APIs are inconsistent.
 
 Compatibility aliases with deprecation notices may be retained where they make migration from `0.1.3` straightforward.
 

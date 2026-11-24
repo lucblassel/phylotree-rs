@@ -573,7 +573,7 @@ mod tests {
                 let parent = node_by_id(nodes, parent_id);
                 assert!(parent.children.contains(&node.id));
                 assert_eq!(node.depth(), parent.depth() + 1);
-                assert_eq!(parent.get_child_edge(node.id), node.parent_edge);
+                assert_eq!(parent.child_edge(node.id), node.parent_edge);
             } else {
                 assert_eq!(node.depth(), 0);
             }
@@ -708,7 +708,7 @@ mod tests {
             let node = node_named(&nodes, name);
             assert_eq!(node.parent_edge, Some(length));
             let parent = node_by_id(&nodes, node.parent.unwrap());
-            assert_eq!(parent.get_child_edge(node.id), Some(length));
+            assert_eq!(parent.child_edge(node.id), Some(length));
         }
 
         assert_eq!(root.parent_edge, None);
@@ -732,7 +732,7 @@ mod tests {
             let node = node_by_id(&nodes, id.into());
             assert_eq!(node.parent_edge, Some(length));
             let parent = node_by_id(&nodes, node.parent.unwrap());
-            assert_eq!(parent.get_child_edge(id.into()), Some(length));
+            assert_eq!(parent.child_edge(id.into()), Some(length));
         }
     }
 

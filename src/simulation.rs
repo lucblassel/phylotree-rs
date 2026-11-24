@@ -239,6 +239,7 @@ fn build(
     }
     Tree::from_nodes(nodes)
 }
+
 fn random_labels<R: Rng + ?Sized>(children: &[Vec<usize>], rng: &mut R) -> Vec<Option<String>> {
     let mut names: Vec<_> = (1..=children.iter().filter(|c| c.is_empty()).count())
         .map(|i| format!("T{i}"))
@@ -249,6 +250,7 @@ fn random_labels<R: Rng + ?Sized>(children: &[Vec<usize>], rng: &mut R) -> Vec<O
         .map(|c| if c.is_empty() { names.pop() } else { None })
         .collect()
 }
+
 fn uniform_unrooted<R: Rng + ?Sized>(tips: usize, rng: &mut R) -> Tree {
     let mut edges = vec![(0, tips), (1, tips), (2, tips)];
     for tip in 3..tips {

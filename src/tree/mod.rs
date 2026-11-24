@@ -32,7 +32,9 @@ pub use self::traversal::{
     InOrderTreeTraversal, LevelOrderTreeTraversal, NodeTraversal, NodeTraversalMut,
     PostOrderTreeTraversal, PreOrderTreeTraversal,
 };
-pub use self::tree_impl::{Comparison, Tree, TreeError};
+pub use self::tree_impl::{
+    BranchLengthComparison, Comparison, DistanceMetricPair, Tree, TreeError,
+};
 pub use self::tree_list::{TopologyFrequency, TreeList, TreeListError};
 
 /// An identifier for a [`Node`] within a phylogenetic [`Tree`].

@@ -100,11 +100,11 @@ impl Tree {
     }
 
     fn n_tips(&self) -> usize {
-        self.tree.n_leaves()
+        self.tree.leaf_count()
     }
 
     fn n_nodes(&self) -> usize {
-        self.tree.size()
+        self.tree.node_count()
     }
 
     fn diameter(&self) -> Option<f64> {
@@ -112,7 +112,7 @@ impl Tree {
     }
 
     fn n_cherries(&self) -> Result<usize, TreeError> {
-        let cherries = self.tree.n_cherries()?;
+        let cherries = self.tree.cherry_count()?;
         Ok(cherries)
     }
 
@@ -137,9 +137,9 @@ impl Tree {
     }
 
     fn compare(&self, other: &Self) -> Result<HashMap<&'static str, f64>, TreeError> {
-        let cmp = self.tree.compare_topologies(&other.tree)?;
+        let cmp = self.tree.compare(&other.tree)?;
         Ok(HashMap::from_iter([
-            ("rf", cmp.rf),
+            ("rf", cmp.rf as f64),
             ("norm_rf", cmp.norm_rf),
             ("weighted_rf", cmp.weighted_rf),
             ("branch_score", cmp.branch_score),
@@ -156,7 +156,7 @@ impl Tree {
     }
 
     fn get_name_index(&self, name: &str) -> Option<usize> {
-        let node = self.tree.get_by_name(name);
+        let node = self.tree.node_by_name(name);
         node.map(|n| n.id.into())
     }
 
@@ -175,8 +175,8 @@ impl Tree {
         source: usize,
         target: usize,
     ) -> Result<(Option<f64>, usize), TreeError> {
-        let dist = self.tree.get_distances(source.into(), target.into())?;
-        Ok(dist)
+        let dist = self.tree.distances(source.into(), target.into())?;
+        Ok((dist.by_length, dist.by_edges))
     }
 
     fn get_root_id(&self) -> Result<usize, TreeError> {

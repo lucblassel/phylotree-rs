@@ -286,7 +286,7 @@ fn main() {
                 let (n1, n2) = (pair[0], pair[1]);
                 let i1 = tree.node_by_name(n1).unwrap().id();
                 let i2 = tree.node_by_name(n2).unwrap().id();
-                if let (Some(d), _) = tree.distances(i1, i2).unwrap() {
+                if let Some(d) = tree.distances(i1, i2).unwrap().by_length {
                     writer
                         .write_all(format!("{n1}\t{n2}\t{d}\n").as_bytes())
                         .unwrap();

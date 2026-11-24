@@ -1137,10 +1137,7 @@ mod tests {
             for node in tree.iter_preorder_nodes().unwrap() {
                 let node = node.unwrap();
                 for &child in &node.children {
-                    assert_eq!(
-                        node.get_child_edge(child),
-                        tree.get(child).unwrap().parent_edge
-                    );
+                    assert_eq!(node.child_edge(child), tree.get(child).unwrap().parent_edge);
                 }
             }
         }

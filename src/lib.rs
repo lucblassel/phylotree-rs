@@ -97,7 +97,7 @@
 //! assert_eq!(first.unrooted_robinson_foulds(&rotated).unwrap(), 0);
 //! ```
 //!
-//! [`tree::Tree::compare_topologies`] also computes normalized RF, weighted RF,
+//! [`tree::Tree::compare`] also computes normalized RF, weighted RF,
 //! and the Kuhner–Felsenstein branch score. Retain a [`tree::BipartitionProfile`]
 //! when comparing one tree against many others.
 //!
@@ -130,10 +130,10 @@
 //! let tree = Tree::from_newick("((T3:0.2,T1:0.2):0.3,(T2:0.4,T0:0.5):0.6);").unwrap();
 //! let t0 = tree.node_by_name("T0").unwrap().id();
 //! let t3 = tree.node_by_name("T3").unwrap().id();
-//! let (length, edges) = tree.distances(t0, t3).unwrap();
+//! let dist = tree.distances(t0, t3).unwrap();
 //!
-//! assert_eq!(edges, 4);
-//! assert!((length.unwrap() - 1.6).abs() < 1e-12);
+//! assert_eq!(dist.by_edges, 4);
+//! assert!((dist.by_length.unwrap() - 1.6).abs() < 1e-12);
 //!
 //! let matrix = tree.distance_matrix().unwrap();
 //! assert!((*matrix.get("T0", "T3").unwrap() - 1.6).abs() < 1e-12);

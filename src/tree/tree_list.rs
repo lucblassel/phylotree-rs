@@ -588,7 +588,7 @@ impl TreeList {
     /// # Ok::<(), phylotree::tree::NewickParseError>(())
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn from_file(path: &Path) -> Result<Self, NewickParseError> {
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self, NewickParseError> {
         let file = std::fs::File::open(path)?;
         Self::from_reader(file)
     }
@@ -615,7 +615,7 @@ impl TreeList {
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file_with_options(
-        path: &Path,
+        path: impl AsRef<Path>,
         options: NewickParseOptions,
     ) -> Result<Self, NewickParseError> {
         let file = std::fs::File::open(path)?;
@@ -660,7 +660,7 @@ impl TreeList {
     /// trees.to_file(std::path::Path::new("trees.nwk")).unwrap();
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn to_file(&self, path: &Path) -> Result<(), TreeError> {
+    pub fn to_file(&self, path: impl AsRef<Path>) -> Result<(), TreeError> {
         let file = std::fs::File::create(path)?;
         self.write_newick(std::io::BufWriter::new(file))
     }

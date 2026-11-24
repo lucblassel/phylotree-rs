@@ -437,7 +437,7 @@ impl BipartitionProfile {
     /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
     /// let profile = tree.bipartition_profile().unwrap();
     /// let comparison = profile.compare(&profile, RobinsonFouldsMode::Unrooted).unwrap();
-    /// assert_eq!(comparison.rf, 0.0);
+    /// assert_eq!(comparison.rf, 0);
     /// ```
     pub fn compare(&self, other: &Self, mode: RobinsonFouldsMode) -> Result<Comparison, TreeError> {
         self.require_compatible(other)?;
@@ -446,7 +446,7 @@ impl BipartitionProfile {
         Self::require_branch_lengths(left)?;
         Self::require_branch_lengths(right)?;
         let total = left.len() + right.len();
-        let mut intersection = 0.0;
+        let mut intersection = 0;
         let mut weighted_rf = 0.0;
         let mut branch_score = 0.0;
 
@@ -456,7 +456,7 @@ impl BipartitionProfile {
                 let right_length = right_data.length.unwrap();
                 weighted_rf += (left_length - right_length).abs();
                 branch_score += f64::powi(left_length - right_length, 2);
-                intersection += 1.0;
+                intersection += 1;
             } else {
                 weighted_rf += left_length;
                 branch_score += f64::powi(left_length, 2);
@@ -470,10 +470,14 @@ impl BipartitionProfile {
             }
         }
 
-        let rf = total as f64 - 2.0 * intersection;
+        let rf = total - 2 * intersection;
         Ok(Comparison {
             rf,
-            norm_rf: if total == 0 { 0.0 } else { rf / total as f64 },
+            norm_rf: if total == 0 {
+                0.0
+            } else {
+                rf as f64 / total as f64
+            },
             weighted_rf,
             branch_score: branch_score.sqrt(),
         })

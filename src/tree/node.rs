@@ -247,7 +247,7 @@ impl Node {
     /// let root = tree.add_root(Node::new()).unwrap();
     /// let child = tree.add_child(Node::new(), root, Some(0.1)).unwrap();
     /// assert_eq!(tree.get(root).unwrap().children(), &[child]);
-    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), Some(0.1));
+    /// assert_eq!(tree.get(root).unwrap().child_edge(child), Some(0.1));
     /// assert_eq!(tree.get(child).unwrap().parent_edge(), Some(0.1));
     /// ```
     pub(crate) fn add_child(
@@ -265,7 +265,7 @@ impl Node {
     }
 
     /// Get the Edge between node and a child
-    pub fn get_child_edge(&self, child: NodeId) -> Option<EdgeLength> {
+    pub fn child_edge(&self, child: NodeId) -> Option<EdgeLength> {
         if let Some(edges) = &self.child_edges {
             edges.get(&child).copied()
         } else {
@@ -281,11 +281,11 @@ impl Node {
     /// let root = tree.add_root(Node::new()).unwrap();
     /// let child = tree.add_child(Node::new(), root, Some(0.5)).unwrap();
     /// tree.set_edge(root, child, Some(1.0)).unwrap();
-    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), Some(1.0));
+    /// assert_eq!(tree.get(root).unwrap().child_edge(child), Some(1.0));
     /// assert_eq!(tree.get(child).unwrap().parent_edge(), Some(1.0));
     /// // Clearing the edge removes it from both representations.
     /// tree.set_edge(root, child, None).unwrap();
-    /// assert_eq!(tree.get(root).unwrap().get_child_edge(child), None);
+    /// assert_eq!(tree.get(root).unwrap().child_edge(child), None);
     /// assert_eq!(tree.get(child).unwrap().parent_edge(), None);
     /// ```
     pub(crate) fn set_child_edge(&mut self, child: NodeId, edge: Option<EdgeLength>) {

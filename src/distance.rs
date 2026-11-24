@@ -4,6 +4,7 @@
 use std::{
     collections::HashMap,
     fmt::{Debug, Display},
+    io::{Read, Write},
     str::FromStr,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -160,6 +161,17 @@ pub struct DistanceMatrix<T> {
     matrix: Vec<T>,
     /// Distance value for identical taxa.
     zero: T,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// An entry in a phylogenetic distance matrix
+pub struct MatrixEntry<T> {
+    /// Row index of the entry
+    pub row: usize,
+    /// Column index of the entry
+    pub col: usize,
+    /// Value of the entry
+    pub value: T,
 }
 
 impl<T> DistanceMatrix<T>
@@ -450,6 +462,30 @@ where
         Ok(format!("{}\n{body}\n", self.len()))
     }
 
+    /// Writes the matrix to a stream in PHYLIP format.
+    ///
+    /// This is the writer counterpart of [`DistanceMatrix::from_phylip_strict`]:
+    /// string output is [`DistanceMatrix::to_phylip`], file output is
+    /// [`DistanceMatrix::to_file`].
+    ///
+    /// ```
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// let mut output = Vec::new();
+    /// matrix.write_phylip(&mut output, true).unwrap();
+    ///
+    /// let parsed =
+    ///     DistanceMatrix::<f64>::from_phylip_strict(std::str::from_utf8(&output).unwrap(), true)
+    ///         .unwrap();
+    /// assert_eq!(parsed.len(), 2);
+    /// ```
+    pub fn write_phylip<W: Write>(&self, mut writer: W, square: bool) -> Result<(), MatrixError> {
+        writer
+            .write_all(self.to_phylip(square)?.as_bytes())
+            .map_err(MatrixError::IoError)?;
+        Ok(())
+    }
+
     /// Writes the matrix to a phylip file
     ///
     /// ```no_run
@@ -458,7 +494,7 @@ where
     /// matrix.to_file(std::path::Path::new("distances.phy"), true).unwrap();
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn to_file(&self, path: &Path, square: bool) -> Result<(), MatrixError> {
+    pub fn to_file(&self, path: impl AsRef<Path>, square: bool) -> Result<(), MatrixError> {
         match fs::write(path, self.to_phylip(square)?) {
             Ok(_) => Ok(()),
             Err(e) => Err(MatrixError::IoError(e)),
@@ -624,16 +660,28 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
-    /// assert_eq!(matrix.min().unwrap().1, 2.0);
+    /// assert_eq!(matrix.min().unwrap().value, 2.0);
     /// ```
-    pub fn min(&self) -> Option<((usize, usize), T)> {
-        self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
-            None => Some(((i, j), *v)),
-            Some((_, av)) => {
-                if *v < av {
-                    Some(((i, j), *v))
+    pub fn min(&self) -> Option<MatrixEntry<T>> {
+        self.indexed_iter().fold(None, |acc, entry| match acc {
+            None => Some(MatrixEntry {
+                row: entry.row,
+                col: entry.col,
+                value: *entry.value,
+            }),
+            Some(MatrixEntry {
+                row: _,
+                col: _,
+                value: acc_val,
+            }) => {
+                if *entry.value < acc_val {
+                    Some(MatrixEntry {
+                        row: entry.row,
+                        col: entry.col,
+                        value: *entry.value,
+                    })
                 } else {
-                    a
+                    acc
                 }
             }
         })
@@ -645,19 +693,55 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
-    /// assert_eq!(matrix.max().unwrap().1, 2.0);
+    /// assert_eq!(matrix.max().unwrap().value, 2.0);
     /// ```
-    pub fn max(&self) -> Option<((usize, usize), T)> {
-        self.indexed_iter().fold(None, |a, ((i, j), v)| match a {
-            None => Some(((i, j), *v)),
-            Some((_, av)) => {
-                if *v > av {
-                    Some(((i, j), *v))
+    pub fn max(&self) -> Option<MatrixEntry<T>> {
+        self.indexed_iter().fold(None, |acc, entry| match acc {
+            None => Some(MatrixEntry {
+                row: entry.row,
+                col: entry.col,
+                value: *entry.value,
+            }),
+            Some(MatrixEntry {
+                row: _,
+                col: _,
+                value: acc_val,
+            }) => {
+                if *entry.value > acc_val {
+                    Some(MatrixEntry {
+                        row: entry.row,
+                        col: entry.col,
+                        value: *entry.value,
+                    })
                 } else {
-                    a
+                    acc
                 }
             }
         })
+    }
+
+    /// Reads the matrix from a PHYLIP-formatted reader using strict parsing.
+    ///
+    /// This is the reader counterpart of [`DistanceMatrix::to_phylip`]: string
+    /// input is [`DistanceMatrix::from_phylip_strict`], file input is
+    /// [`DistanceMatrix::from_file`].
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// use phylotree::distance::DistanceMatrix;
+    /// let matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
+    /// let text = matrix.to_phylip(true).unwrap();
+    ///
+    /// let parsed = DistanceMatrix::<f64>::from_phylip_reader(Cursor::new(text), true).unwrap();
+    /// assert_eq!(parsed.len(), 2);
+    /// ```
+    pub fn from_phylip_reader<R: Read>(
+        mut reader: R,
+        square: bool,
+    ) -> Result<Self, PhylipParseError<T>> {
+        let mut text = String::new();
+        reader.read_to_string(&mut text)?;
+        Self::from_phylip_strict(&text, square)
     }
 
     /// Reads the matrix from a phylip file
@@ -668,7 +752,7 @@ where
     /// println!("{} taxa", matrix.len());
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn from_file(path: &Path, square: bool) -> Result<Self, PhylipParseError<T>> {
+    pub fn from_file(path: impl AsRef<Path>, square: bool) -> Result<Self, PhylipParseError<T>> {
         let newick_string = fs::read_to_string(path)?;
         Self::from_phylip_strict(&newick_string, square)
     }
@@ -690,12 +774,16 @@ where
     /// ```
     /// use phylotree::distance::DistanceMatrix;
     /// let mut matrix = DistanceMatrix::new(vec!["A".into(), "B".into()], &[2.0]).unwrap();
-    /// assert_eq!(matrix.indexed_iter().next().unwrap(), ((1, 0), &2.0));
+    /// let entry = matrix.indexed_iter().next().unwrap();
+    /// assert_eq!(entry.row, 1);
+    /// assert_eq!(entry.col, 0);
+    /// assert_eq!(*entry.value, 2.0);
     /// ```
-    pub fn indexed_iter(&self) -> impl Iterator<Item = ((usize, usize), &'_ T)> {
-        self.iter()
-            .enumerate()
-            .map(|(k, v)| (self.vec_to_tril_index(k).unwrap(), v))
+    pub fn indexed_iter(&self) -> impl Iterator<Item = MatrixEntry<&T>> {
+        self.iter().enumerate().map(|(k, value)| {
+            let (row, col) = self.vec_to_tril_index(k).unwrap();
+            MatrixEntry { row, col, value }
+        })
     }
 }
 
@@ -746,7 +834,12 @@ where
         let max_val = T::infinity();
 
         while n_clusters > 2 {
-            let ((a, b), d_ab) = dm.min().ok_or(MatrixError::IndexError)?; // TODO: Add error
+            let MatrixEntry {
+                row: a,
+                col: b,
+                value: d_ab,
+            } = dm.min().ok_or(MatrixError::IndexError)?;
+
             let u = a;
             let node_height = d_ab.to_f64().unwrap() / 2.;
             let d_au = node_height - heights[a];
@@ -1282,7 +1375,9 @@ s5    5  10  15  0
         assert!(dm
             .indexed_iter()
             .zip(indices.into_iter().zip(tril.clone()))
-            .all(|((i1, v1), (i2, v2))| i1 == i2 && *v1 == v2));
+            .all(|(entry, ((row, col), val))| entry.row == row
+                && entry.col == col
+                && *entry.value == val));
 
         assert!(dm.into_iter().zip(tril).all(|(v1, v2)| { v1 == v2 }));
     }
@@ -1290,8 +1385,16 @@ s5    5  10  15  0
     #[test]
     fn min_max() {
         let dm = build_matrix();
-        let min = Some(((1, 0), 2.));
-        let max = Some(((3, 2), 15.));
+        let min = Some(MatrixEntry {
+            row: 1,
+            col: 0,
+            value: 2.,
+        });
+        let max = Some(MatrixEntry {
+            row: 3,
+            col: 2,
+            value: 15.,
+        });
 
         assert_eq!(dm.min(), min);
         assert_eq!(dm.max(), max);

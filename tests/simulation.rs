@@ -1,6 +1,6 @@
 use phylotree::{
     simulation::{simulate, BirthDeath, BranchLengths, Topology},
-    tree::Tree,
+    tree::{DistanceMetricPair, Tree},
 };
 use rand::{rngs::StdRng, SeedableRng};
 use std::collections::{HashMap, HashSet};
@@ -161,7 +161,7 @@ fn birth_death_first_hitting_time_and_pruning() {
             );
             let h: Vec<_> = leaves
                 .iter()
-                .map(|&id| t.distances(root, id).unwrap().0.unwrap())
+                .map(|&id| t.distances(root, id).unwrap().by_length.unwrap())
                 .collect();
             assert!(h.iter().all(|x| (x - h[0]).abs() < 1e-12));
             assert_eq!(
@@ -217,8 +217,8 @@ fn pairwise_diameter(tree: &Tree) -> f64 {
     let mut distances = Vec::new();
     for (i, &a) in leaves.iter().enumerate() {
         for &b in &leaves[i + 1..] {
-            let (weighted, hops) = tree.distances(a, b).unwrap();
-            distances.push(weighted.unwrap_or(hops as f64));
+            let metrics = tree.distances(a, b).unwrap();
+            distances.push(metrics.by_length.unwrap_or(metrics.by_edges as f64));
         }
     }
     distances.into_iter().reduce(f64::max).unwrap()
@@ -247,29 +247,30 @@ fn linear_diameter_preserves_pairwise_semantics() {
                         tree.set_edge(parent, id, edge).unwrap()
                     }
                 }
-                let (len_d, edge_d) = tree.diameters().unwrap();
-                assert_eq!(edge_d, tree.diameter_by_edges().unwrap());
+
+                let diam_metrics = tree.diameters().unwrap();
+                assert_eq!(diam_metrics.by_edges, tree.diameter_by_edges().unwrap());
                 // Edge-count diameter always matches the pairwise hop oracle.
                 let leaves = tree.leaves();
                 let mut max_hops = 0;
                 for (i, &a) in leaves.iter().enumerate() {
                     for &b in &leaves[i + 1..] {
-                        max_hops = max_hops.max(tree.distances(a, b).unwrap().1);
+                        max_hops = max_hops.max(tree.distances(a, b).unwrap().by_edges);
                     }
                 }
-                assert_eq!(edge_d, max_hops);
+                assert_eq!(diam_metrics.by_edges, max_hops);
                 // Length diameter is exact when every edge has a length, and
                 // unavailable (None / Err) as soon as any edge is missing.
                 if tree.length().is_ok() {
                     let expected = pairwise_diameter(&tree);
                     assert!((tree.diameter_by_length().unwrap() - expected).abs() < 1e-12);
-                    assert!((len_d.unwrap() - expected).abs() < 1e-12);
+                    assert!((diam_metrics.by_length.unwrap() - expected).abs() < 1e-12);
                 } else {
                     assert!(matches!(
                         tree.diameter_by_length(),
                         Err(phylotree::tree::TreeError::MissingBranchLengths)
                     ));
-                    assert_eq!(len_d, None);
+                    assert_eq!(diam_metrics.by_length, None);
                 }
             }
         }
@@ -284,7 +285,7 @@ fn linear_diameter_preserves_pairwise_semantics() {
         tree.diameter_by_length(),
         Err(phylotree::tree::TreeError::MissingBranchLengths)
     ));
-    assert_eq!(tree.diameters().unwrap(), (None, 2));
+    assert_eq!(tree.diameters().unwrap(), DistanceMetricPair::new(None, 2));
     assert!(Tree::new().diameter_by_length().is_err());
     assert!(Tree::from_newick("(A:1);")
         .unwrap()
