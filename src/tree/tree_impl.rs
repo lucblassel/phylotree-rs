@@ -14,13 +14,10 @@ use vec_map::VecMap;
 
 use thiserror::Error;
 
-use super::bipartition::{
-    BipartitionProfile, Partition, PartitionMap, PartitionSet, RobinsonFouldsMode,
-};
+use super::bipartition::{Bipartition, BipartitionProfile, PartitionMap, RobinsonFouldsMode};
 use super::newick::{NewickParser, NewickSerializer, NewickTokenizer};
 use super::node::{Node, NodeError};
 use super::taxon_index::TaxonIndex;
-use super::tree_list::Bipartition;
 use super::{EdgeDepth, EdgeLength, NewickFormat, NewickParseError, NewickParseOptions, NodeId};
 
 use crate::distance::{tril_to_rowvec_index, DistanceMatrix, MatrixError};
@@ -377,7 +374,7 @@ impl Tree {
     /// let root_idx = tree.add_root(Node::new_named("root")).unwrap();
     /// let child_idx = tree.add_child(Node::new_named("child"), root_idx, None).unwrap();
     ///
-    /// assert_eq!(tree.get_by_name("child"), Some(tree.get(child_idx).unwrap()));
+    /// assert_eq!(tree.get_by_name("child").map(|n| n.id()), Some(child_idx));
     /// ```
     pub fn get_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes
@@ -1172,22 +1169,6 @@ impl Tree {
         Ok(())
     }
 
-    /// Converts the stored side of a partition to concatenated taxon labels.
-    ///
-    /// ```
-    /// use phylotree::tree::Tree;
-    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// let partition = tree.get_partitions().unwrap().into_iter().next().unwrap();
-    /// assert_eq!(tree.partition_to_leaves(&partition).unwrap().chars().count(), 2);
-    /// ```
-    pub fn partition_to_leaves(&self, partition: &Partition) -> Result<String, TreeError> {
-        let taxon_index = self.taxon_index()?;
-        Ok(partition
-            .ones()
-            .map(|index| taxon_index.taxon(index).unwrap())
-            .collect())
-    }
-
     /// Computes an immutable bipartition profile for repeated comparisons.
     ///
     /// Creating a profile does not populate or otherwise modify this tree's
@@ -1202,18 +1183,6 @@ impl Tree {
     /// ```
     pub fn bipartition_profile(&self) -> Result<BipartitionProfile, TreeError> {
         BipartitionProfile::from_tree(self)
-    }
-
-    /// Get all partitions of a tree.
-    ///
-    /// ```
-    /// use phylotree::tree::Tree;
-    /// let tree = Tree::from_newick("((A:1,B:1):1,(C:1,D:1):1);").unwrap();
-    /// assert_eq!(tree.get_partitions().unwrap().len(), 1);
-    /// ```
-    pub fn get_partitions(&self) -> Result<PartitionSet, TreeError> {
-        self.bipartition_profile()?
-            .partition_set(RobinsonFouldsMode::Unrooted)
     }
 
     /// Returns all nontrivial bipartitions with their taxon index.
@@ -1235,6 +1204,43 @@ impl Tree {
             .partition_set(RobinsonFouldsMode::Unrooted)?
             .into_iter()
             .map(|bits| Bipartition::new(taxon_index.clone(), bits))
+            .collect())
+    }
+
+    /// Returns all nontrivial bipartitions with their associated edge lengths
+    /// and edge depths.
+    ///
+    /// Fails with [`TreeError::MissingBranchLengths`] if any nontrivial
+    /// bipartition has no branch length.
+    ///
+    /// Under the unrooted virtual-root convention, the split across the root
+    /// merges the two root-adjacent edges: its length is the sum of both edge
+    /// lengths and its depth is the shallower of the two.
+    ///
+    /// ```
+    /// use phylotree::tree::Tree;
+    ///
+    /// let tree = Tree::from_newick("((A:1,B:2):3,(C:4,D:5):6);").unwrap();
+    /// let partitions = tree.bipartitions_with_lengths().unwrap();
+    ///
+    /// assert_eq!(partitions.len(), 1);
+    /// let (partition, (length, depth)) = partitions.iter().next().unwrap();
+    /// assert_eq!(partition.taxa().collect::<Vec<_>>(), vec!["A", "B"]);
+    /// // The root split merges the two internal edges: 3 + 6.
+    /// assert_eq!(*length, 9.0);
+    /// assert_eq!(*depth, 1);
+    /// ```
+    pub fn bipartitions_with_lengths(
+        &self,
+    ) -> Result<HashMap<Bipartition, (EdgeLength, EdgeDepth)>, TreeError> {
+        let profile = self.bipartition_profile()?;
+        let taxon_index = profile.taxon_index().clone();
+        Ok(profile
+            .partitions_with_lengths()?
+            .into_iter()
+            .map(|(bits, (depth, length))| {
+                (Bipartition::new(taxon_index.clone(), bits), (length, depth))
+            })
             .collect())
     }
 
@@ -3256,7 +3262,7 @@ mod tests {
 
             println!("Dealing with tree: {} and scale {}", orig, scale);
             for (n1, n2) in zip(tree.nodes, rescaled.nodes) {
-                assert_eq!(n1, n2)
+                assert!(n1.approx_eq(&n2, 1e-12))
             }
         }
     }
@@ -3325,6 +3331,56 @@ mod tests {
     }
 
     #[test]
+    fn bipartitions_with_lengths_returns_lengths_and_depths() {
+        let tree = Tree::from_newick("((A:1,B:2):3,(C:4,D:5):6);").unwrap();
+        let partitions = tree.bipartitions_with_lengths().unwrap();
+
+        assert_eq!(partitions.len(), 1);
+        let (partition, (length, depth)) = partitions.iter().next().unwrap();
+        assert_eq!(partition.taxa().collect::<Vec<_>>(), vec!["A", "B"]);
+        assert_eq!(
+            partition.complement_taxa().collect::<Vec<_>>(),
+            vec!["C", "D"]
+        );
+        // The root split merges the two internal edges: 3 + 6.
+        assert_eq!(*length, 9.0);
+        assert_eq!(*depth, 1);
+    }
+
+    #[test]
+    fn bipartitions_with_lengths_multiple_splits() {
+        let tree = Tree::from_newick("(((A:1,B:1):1,(C:1,D:1):1):1,(E:1,F:1):1);").unwrap();
+        let partitions = tree.bipartitions_with_lengths().unwrap();
+
+        // Nontrivial unrooted splits: {A,B}|rest, {C,D}|rest, and
+        // {E,F}|{A,B,C,D} (the root split, stored on its smaller side,
+        // merging both root-adjacent edges: length 1 + 1, depth min(1, 1)).
+        assert_eq!(partitions.len(), 3);
+        let mut observed: Vec<(usize, EdgeLength, EdgeDepth)> = partitions
+            .iter()
+            .map(|(partition, (length, depth))| (partition.len(), *length, *depth))
+            .collect();
+        observed.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(observed, vec![(2, 1.0, 2), (2, 1.0, 2), (4, 2.0, 1)]);
+    }
+
+    #[test]
+    fn bipartitions_with_lengths_empty_when_no_nontrivial_split() {
+        let tree = Tree::from_newick("(A:1,B:1);").unwrap();
+        assert!(tree.bipartitions_with_lengths().unwrap().is_empty());
+    }
+
+    #[test]
+    fn bipartitions_with_lengths_fails_on_missing_branch_lengths() {
+        // The internal edge of the {A,B}|{C,D} split has no length.
+        let tree = Tree::from_newick("((A:1,B:1),(C:1,D:1));").unwrap();
+        assert!(matches!(
+            tree.bipartitions_with_lengths(),
+            Err(TreeError::MissingBranchLengths)
+        ));
+    }
+
+    #[test]
     fn test_get_partitions() {
         let test_cases = vec![
             (
@@ -3349,8 +3405,8 @@ mod tests {
             let tree = Tree::from_newick(newick).unwrap();
             let rota = Tree::from_newick(rot_newick).unwrap();
 
-            let ps_orig: HashSet<_> = HashSet::from_iter(tree.get_partitions().unwrap());
-            let ps_rota: HashSet<_> = HashSet::from_iter(rota.get_partitions().unwrap());
+            let ps_orig: HashSet<_> = HashSet::from_iter(tree.bipartitions().unwrap());
+            let ps_rota: HashSet<_> = HashSet::from_iter(rota.bipartitions().unwrap());
 
             assert_eq!(ps_orig, ps_rota);
         }
@@ -3845,8 +3901,8 @@ mod tests {
         let rooted = Tree::from_newick("((Tip_3,Tip_4),(Tip_0,(Tip_1,Tip_2)));").unwrap();
         let unrooted = Tree::from_newick("(Tip_3,Tip_4,(Tip_0,(Tip_1,Tip_2)));").unwrap();
 
-        let parts_rooted = rooted.get_partitions().unwrap();
-        let parts_unrooted = unrooted.get_partitions().unwrap();
+        let parts_rooted = rooted.bipartitions().unwrap();
+        let parts_unrooted = unrooted.bipartitions().unwrap();
 
         assert_eq!(parts_rooted, parts_unrooted);
     }
@@ -4624,16 +4680,11 @@ mod tests_ete3_operations {
 
             // Add information to failure output
             if expected != rf {
-                let p1 = t1.get_partitions().unwrap();
-                let p2 = t2.get_partitions().unwrap();
+                let p1 = t1.bipartitions().unwrap();
+                let p2 = t2.bipartitions().unwrap();
 
-                let p1_s: Result<Vec<_>, _> =
-                    p1.iter().map(|part| t1.partition_to_leaves(part)).collect();
-                let p2_s: Result<Vec<_>, _> =
-                    p2.iter().map(|part| t2.partition_to_leaves(part)).collect();
-
-                let mut p1_s = p1_s.unwrap();
-                let mut p2_s = p2_s.unwrap();
+                let mut p1_s: Vec<_> = p1.iter().map(Bipartition::to_string).collect();
+                let mut p2_s: Vec<_> = p2.iter().map(Bipartition::to_string).collect();
 
                 p1_s.sort();
                 p2_s.sort();

@@ -20,7 +20,7 @@ mod traversal;
 mod tree_impl;
 mod tree_list;
 
-pub use self::bipartition::{BipartitionProfile, RobinsonFouldsMode};
+pub use self::bipartition::{Bipartition, BipartitionProfile, RobinsonFouldsMode};
 pub use self::newick::{
     InternalNodeLabelMode, NewickBranchLengthFormat, NewickCommentFormat, NewickFormat,
     NewickNameFormat, NewickParseError, NewickParseOptions, NewickSerializeOptions,
@@ -33,7 +33,7 @@ pub use self::traversal::{
     PostOrderTreeTraversal, PreOrderTreeTraversal,
 };
 pub use self::tree_impl::{Comparison, Tree, TreeError};
-pub use self::tree_list::{Bipartition, TopologyFrequency, TreeList, TreeListError};
+pub use self::tree_list::{TopologyFrequency, TreeList, TreeListError};
 
 /// An identifier for a [`Node`] within a phylogenetic [`Tree`].
 ///

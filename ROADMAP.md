@@ -14,7 +14,7 @@ A beta is ready when:
 - [ ] Public safe APIs do not panic on malformed input or invalid operations.
 - [x] Every successful tree mutation preserves documented invariants.
 - [x] Every failed tree mutation leaves the tree unchanged.
-- [ ] Public constructors cannot create invalid `DistanceMatrix` values.
+- [x] Public constructors cannot create invalid `DistanceMatrix` values.
 - [ ] Unit tests, doctests, Clippy, formatting, and documentation checks pass in CI.
 - [ ] The README examples compile and match the released API.
 - [ ] Breaking changes from `0.1.3` are documented in the changelog.
@@ -343,10 +343,10 @@ Relevant code: `src/distance.rs`.
 
 Relevant code: `src/tree/node.rs`.
 
-- [ ] Remove `Eq`, or change `PartialEq` to exact equivalence semantics.
-- [ ] If approximate comparison is useful, expose an explicitly named method with a documented tolerance.
-- [ ] Define whether node equality is metadata equality, detached-node equality, or structural identity.
-- [ ] Avoid implying whole-tree structural equality from a weak node comparison.
+- [x] Remove `Eq`, or change `PartialEq` to exact equivalence semantics.
+- [x] If approximate comparison is useful, expose an explicitly named method with a documented tolerance.
+- [x] Define whether node equality is metadata equality, detached-node equality, or structural identity.
+- [x] Avoid implying whole-tree structural equality from a weak node comparison.
 
 ### 3.5 Stop leaking private partition representations
 
@@ -354,10 +354,10 @@ Legacy public methods expose private aliases backed by `FixedBitSet` and collect
 
 Relevant code: `src/tree/bipartition.rs` and `src/tree/tree_impl.rs`.
 
-- [ ] Deprecate or remove public methods returning raw `Partition` or `PartitionSet` aliases.
-- [ ] Prefer the opaque public `Bipartition` type.
-- [ ] Ensure every public return and argument type is intentionally public and documented.
-- [ ] Add any small accessors required to make `Bipartition` sufficient without exposing its bitset.
+- [x] Deprecate or remove public methods returning raw `Partition` or `PartitionSet` aliases.
+- [x] Prefer the opaque public `Bipartition` type.
+- [x] Ensure every public return and argument type is intentionally public and documented.
+- [x] Add any small accessors required to make `Bipartition` sufficient without exposing its bitset.
 
 ### 3.6 Normalize naming and result types
 

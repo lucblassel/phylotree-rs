@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use super::taxon_index::TaxonIndex;
 use super::tree_impl::{Comparison, Tree, TreeError};
@@ -10,6 +11,65 @@ use super::{EdgeDepth, EdgeLength, NodeId};
 pub(crate) type Partition = FixedBitSet;
 pub(crate) type PartitionMap = HashMap<Partition, (EdgeDepth, EdgeLength)>;
 pub(crate) type PartitionSet = HashSet<Partition>;
+
+/// A canonical nontrivial split of the taxa in a [`TaxonIndex`].
+///
+/// Equality and hashing use the taxon-to-bit mapping and the underlying bitset.
+/// Taxon labels are only accessed when presenting the partition to a user.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Bipartition {
+    taxon_index: TaxonIndex,
+    bits: Partition,
+}
+
+impl Bipartition {
+    pub(crate) fn new(taxon_index: TaxonIndex, bits: Partition) -> Self {
+        Self { taxon_index, bits }
+    }
+
+    /// Returns the index that defines this partition's bit positions.
+    pub fn taxon_index(&self) -> &TaxonIndex {
+        &self.taxon_index
+    }
+
+    /// Returns whether another bipartition uses the same taxon-to-bit mapping.
+    pub fn is_compatible(&self, other: &Self) -> bool {
+        self.taxon_index.is_compatible(&other.taxon_index)
+    }
+
+    /// Returns the number of taxa on the stored canonical side of the split.
+    pub fn len(&self) -> usize {
+        self.bits.count_ones(..)
+    }
+
+    /// Returns `true` if the stored side of the split contains no taxa.
+    pub fn is_empty(&self) -> bool {
+        self.bits.is_clear()
+    }
+
+    /// Iterates over taxon labels on the stored canonical side of the split.
+    pub fn taxa(&self) -> impl Iterator<Item = &str> {
+        self.bits
+            .ones()
+            .map(|index| self.taxon_index.taxon(index).unwrap())
+    }
+
+    /// Iterates over taxon labels on the other side of the split.
+    pub fn complement_taxa(&self) -> impl Iterator<Item = &str> {
+        self.taxon_index
+            .taxa()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.bits.contains(*index))
+            .map(|(_, taxon)| taxon.as_str())
+    }
+}
+
+impl std::fmt::Display for Bipartition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({})", self.taxa().join(","))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct PartitionData {

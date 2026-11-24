@@ -377,37 +377,71 @@ impl Node {
     pub fn to_newick(&self, format: NewickFormat) -> Result<String, super::TreeError> {
         super::newick::serialize_node(self, format)
     }
-}
 
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
+    /// Checks if two nodes have:
+    ///   - the same parent state [presence, absence] (does not compare node ids)
+    ///   - parent edge equality (up to specified tolerance)
+    ///   - support equality (up to specified tolerance)
+    ///   - name equality
+    ///   - comment equality
+    ///   - the same child edges, matched by child ID (up to specified tolerance)
+    ///
+    /// ```
+    /// use phylotree::tree::Node;
+    ///
+    /// let mut a = Node::new();
+    /// a.set_name("A");
+    /// a.set_support(95.0).unwrap();
+    ///
+    /// let mut b = Node::new();
+    /// b.set_name("A");
+    /// b.set_support(95.0 + 1e-12).unwrap();
+    ///
+    /// // Same data, support differs by 1e-12.
+    /// assert!(a.approx_eq(&b, 1e-9));
+    /// assert!(!a.approx_eq(&b, 1e-15));
+    ///
+    /// // Names must match exactly.
+    /// b.set_name("B");
+    /// assert!(!a.approx_eq(&b, 1e-9));
+    /// ```
+    pub fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         match (self.parent, other.parent) {
             (None, None) | (Some(_), Some(_)) => {}
             _ => return false,
         }
 
-        if (self.parent.is_none() && other.parent.is_some())
-            || (self.parent.is_some() && other.parent.is_none())
-        {
-            return false;
-        }
-
-        let parent_edges_equal = match (self.parent_edge, other.parent_edge) {
+        let parent_edges_eq = |s: &Node, o: &Node| match (s.parent_edge, o.parent_edge) {
             (None, None) => true,
-            (Some(l1), Some(l2)) => (l1 - l2).abs() < f64::EPSILON,
+            (Some(l1), Some(l2)) => (l1 - l2).abs() < tolerance,
             _ => false,
         };
 
-        let supports_equal = match (self.support, other.support) {
+        let supports_eq = |s: &Node, o: &Node| match (s.support, o.support) {
             (None, None) => true,
-            (Some(s1), Some(s2)) => (s1 - s2).abs() < f64::EPSILON,
+            (Some(s1), Some(s2)) => (s1 - s2).abs() < tolerance,
+            _ => false,
+        };
+
+        let child_edges_eq = |s: &Node, o: &Node| match (&s.child_edges, &o.child_edges) {
+            (Some(s_map), Some(o_map)) => {
+                s_map.len() == o_map.len()
+                    && s_map.iter().all(|(id, s_len)| {
+                        o_map
+                            .get(id)
+                            .is_some_and(|o_len| (s_len - o_len).abs() < tolerance)
+                    })
+            }
+            (None, None) => true,
             _ => false,
         };
 
         self.name == other.name
+            && self.comment == other.comment
             && self.children.len() == other.children.len()
-            && parent_edges_equal
-            && supports_equal
+            && parent_edges_eq(self, other)
+            && supports_eq(self, other)
+            && child_edges_eq(self, other)
     }
 }
 
@@ -416,8 +450,6 @@ impl Default for Node {
         Self::new()
     }
 }
-
-impl Eq for Node {}
 
 impl Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

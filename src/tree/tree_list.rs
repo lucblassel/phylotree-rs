@@ -5,66 +5,12 @@ use std::ops::{Index, IndexMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-use fixedbitset::FixedBitSet;
 use thiserror::Error;
 
-use super::bipartition::{BipartitionProfile, RobinsonFouldsMode};
+use super::bipartition::{Bipartition, BipartitionProfile, Partition, RobinsonFouldsMode};
 use super::newick::{NewickParser, NewickTokenizer};
 use super::taxon_index::TaxonIndex;
 use super::{NewickParseError, NewickParseOptions, Tree, TreeError};
-
-/// A canonical nontrivial split of the taxa in a [`TaxonIndex`].
-///
-/// Equality and hashing use the taxon-to-bit mapping and the underlying bitset.
-/// Taxon labels are only accessed when presenting the partition to a user.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Bipartition {
-    taxon_index: TaxonIndex,
-    bits: FixedBitSet,
-}
-
-impl Bipartition {
-    pub(crate) fn new(taxon_index: TaxonIndex, bits: FixedBitSet) -> Self {
-        Self { taxon_index, bits }
-    }
-
-    /// Returns the index that defines this partition's bit positions.
-    pub fn taxon_index(&self) -> &TaxonIndex {
-        &self.taxon_index
-    }
-
-    /// Returns whether another bipartition uses the same taxon-to-bit mapping.
-    pub fn is_compatible(&self, other: &Self) -> bool {
-        self.taxon_index.is_compatible(&other.taxon_index)
-    }
-
-    /// Returns the number of taxa on the stored canonical side of the split.
-    pub fn len(&self) -> usize {
-        self.bits.count_ones(..)
-    }
-
-    /// Returns `true` if the stored side of the split contains no taxa.
-    pub fn is_empty(&self) -> bool {
-        self.bits.is_clear()
-    }
-
-    /// Iterates over taxon labels on the stored canonical side of the split.
-    pub fn taxa(&self) -> impl Iterator<Item = &str> {
-        self.bits
-            .ones()
-            .map(|index| self.taxon_index.taxon(index).unwrap())
-    }
-
-    /// Iterates over taxon labels on the other side of the split.
-    pub fn complement_taxa(&self) -> impl Iterator<Item = &str> {
-        self.taxon_index
-            .taxa()
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !self.bits.contains(*index))
-            .map(|(_, taxon)| taxon.as_str())
-    }
-}
 
 /// The observed frequency of a distinct tree topology.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,7 +46,7 @@ pub enum TreeListError {
 #[derive(Debug, PartialEq, Eq, Hash)]
 struct TopologyKey {
     rooted: bool,
-    partitions: Vec<FixedBitSet>,
+    partitions: Vec<Partition>,
 }
 
 /// An ordered, in-memory collection of phylogenetic trees.
@@ -253,7 +199,7 @@ impl TreeList {
     /// ```
     pub fn partition_counts(&self) -> Result<HashMap<Bipartition, usize>, TreeListError> {
         let taxon_index = self.taxon_index()?;
-        let mut counts: HashMap<FixedBitSet, usize> = HashMap::new();
+        let mut counts: HashMap<Partition, usize> = HashMap::new();
 
         for (index, tree) in self.trees.iter().enumerate() {
             let profile = BipartitionProfile::from_tree(tree)
